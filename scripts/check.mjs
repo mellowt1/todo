@@ -103,6 +103,12 @@ await step('first open: empty Today with first open copy', async () => {
   await shot(page, 'phone-empty-light');
 });
 
+await step('empty state glyph has its circle and sits near y=300 like the boards', async () => {
+  assert.equal(await page.locator('#empty use').evaluate((u) => document.querySelector(u.getAttribute('href')).querySelectorAll('circle').length), 1);
+  const y = (await page.locator('#empty svg').boundingBox()).y;
+  assert.ok(y > 240 && y < 320, 'glyph top at ' + Math.round(y));
+});
+
 const seedToday = ['Buy coffee beans', 'Send the invoice copy to the accountant', 'Renew the museum card', 'Pick up the parcel at the post office', 'Reply to the landlord about the boiler'];
 await step('capture: plus opens the sheet, Return saves and keeps it open', async () => {
   await page.click('#fab');
@@ -206,6 +212,59 @@ await step('edit sheet section control moves the task', async () => {
   await page.waitForSelector('#edit', { state: 'hidden' });
   assert.ok(!(await openTexts(page)).includes('Buy coffee beans'));
   await serverHas((i) => i.text === 'Buy coffee beans' && i.section === 'soon', 'section change on server');
+});
+
+await step('Escape in the capture sheet adds the typed task once', async () => {
+  await page.click('#fab');
+  await page.keyboard.type('Escape test task');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#capture', { state: 'hidden' });
+  await page.waitForTimeout(300);
+  assert.equal((await openTexts(page)).filter((t) => t === 'Escape test task').length, 1);
+  await serverHas((i) => i.text === 'Escape test task', 'escape task on server');
+  await page.waitForTimeout(300);
+  assert.equal((await getList()).filter((i) => i.text === 'Escape test task').length, 1);
+  await row(page, 'Escape test task').locator('.text').click();
+  await page.keyboard.press('Escape'); // edit sheet closes once, no error
+  await page.waitForSelector('#edit', { state: 'hidden' });
+});
+
+await step('a rejected op is dropped alone: no ghost row, banner shows, the rest syncs', async () => {
+  // Plant a bad op (unknown section) next to a good one in the stored queue, as an old app version might.
+  await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('todo.v1.'));
+    const st = JSON.parse(localStorage.getItem(key));
+    const t = Date.now();
+    st.queue.push({ op: 'upsert', item: { id: 'ghost0000000000a', text: 'Ghost task', section: 'later', done: false, doneAt: null, pos: t, updatedAt: t } });
+    st.queue.push({ op: 'upsert', item: { id: 'good00000000000a', text: 'Good task next to a bad one', section: 'today', done: false, doneAt: null, pos: t, updatedAt: t } });
+    localStorage.setItem(key, JSON.stringify(st));
+  });
+  await page.reload();
+  await serverHas((i) => i.text === 'Good task next to a bad one', 'good op on server');
+  await until(async () => page.locator('#banner').isVisible(), 5000, 'banner after rejection');
+  const queued = await page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => k.startsWith('todo.v1.')))).queue.length);
+  assert.equal(queued, 0);
+  assert.ok(!(await getList()).some((i) => i.id === 'ghost0000000000a'));
+  assert.ok(!(await page.locator('#list').textContent()).includes('Ghost task'));
+  await page.click('#retry');
+  await until(async () => page.locator('#banner').isHidden(), 5000, 'banner to clear');
+  // Tidy up so the later screenshots show only the design's test tasks.
+  const extra = (await getList()).filter((i) => i.text === 'Good task next to a bad one' || i.text === 'Escape test task');
+  await postOps(extra.map((i) => ({ op: 'delete', item: { id: i.id, updatedAt: Date.now() } })));
+  await page.reload();
+  await until(async () => !(await openTexts(page)).includes('Escape test task'), 5000, 'tidy up');
+});
+
+await step('two devices posting at the same moment both land (serialised writes)', async () => {
+  const t = Date.now();
+  const mk = (id, text) => ({ op: 'upsert', item: { id, text, section: 'someday', done: false, doneAt: null, pos: t, updatedAt: t } });
+  const before = (await (await fetch(`${API}/api/todo/${CODE}`)).json()).rev;
+  const posts = Array.from({ length: 12 }, (_, i) => postOps([mk('race' + String(i).padStart(8, '0'), 'Race ' + i)]));
+  await Promise.all(posts);
+  const d = await (await fetch(`${API}/api/todo/${CODE}`)).json();
+  assert.equal(d.items.filter((i) => i.text.startsWith('Race ')).length, 12);
+  assert.equal(d.rev, before + 12);
+  await postOps(d.items.filter((i) => i.text.startsWith('Race ')).map((i) => ({ op: 'delete', item: { id: i.id, updatedAt: Date.now() } })));
 });
 
 await step('delete asks once, then removes (tombstone on server)', async () => {
