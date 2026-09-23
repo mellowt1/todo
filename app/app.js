@@ -15,6 +15,7 @@
   const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.' };
   const MAX_TEXT = 500;
   const MAX_BATCH = 200;
+  const MAX_BODY = 150000;
   const DEBOUNCE = 1200;
   const POLL = 10000;
   const TOAST_MS = 4000;
@@ -77,8 +78,11 @@
   }
 
   let lastStamp = 0;
+  // The Worker refuses times before 2020, so a phone with a wrong clock still gets a usable stamp.
+  const MIN_TIME = Date.UTC(2020, 0, 1) + 1;
+  const now = () => Math.max(Date.now(), MIN_TIME);
   function stamp() {
-    lastStamp = Math.max(Date.now(), lastStamp + 1);
+    lastStamp = Math.max(now(), lastStamp + 1);
     return lastStamp;
   }
 
@@ -90,8 +94,10 @@
     return s;
   }
 
-  function cleanText(t) {
-    return String(t || '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT);
+  // Same as cleanText in worker/src/todo.js, so the Worker never refuses what the app sends.
+  function cleanText(v) {
+    const t = String(v || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return t.length > MAX_TEXT ? t.slice(0, MAX_TEXT).trim() : t;
   }
 
   function enqueue(op) {
@@ -122,17 +128,16 @@
   function addTask(text) {
     text = cleanText(text);
     if (!text) return;
-    const now = Date.now();
     const id = newId();
     justAdded.add(id);
-    upsert({ id, text, section: ui.section, done: false, doneAt: null, pos: now });
+    upsert({ id, text, section: ui.section, done: false, doneAt: null, pos: now() });
   }
 
   function markDone(id) {
     const it = items[id];
     if (!it || it.done) return;
     const prev = Object.assign({}, it);
-    upsert(Object.assign({}, it, { done: true, doneAt: Date.now() }));
+    upsert(Object.assign({}, it, { done: true, doneAt: now() }));
     toast('Done.', () => upsert(prev));
   }
 
@@ -140,7 +145,7 @@
     const it = items[id];
     if (!it || it.section === section) return;
     const prev = Object.assign({}, it);
-    upsert(Object.assign({}, it, { section, pos: Date.now() }));
+    upsert(Object.assign({}, it, { section, pos: now() }));
     if (withToast) toast('Moved to ' + LABEL[section] + '.', () => upsert(prev));
   }
 
@@ -148,7 +153,7 @@
     const it = items[id];
     if (!it || !it.done) return;
     const prev = Object.assign({}, it);
-    upsert(Object.assign({}, it, { done: false, doneAt: null, pos: Date.now() }));
+    upsert(Object.assign({}, it, { done: false, doneAt: null, pos: now() }));
     toast('Reopened in ' + LABEL[it.section] + '.', () => upsert(prev));
   }
 
@@ -159,6 +164,7 @@
   let net = 'idle'; // idle | offline | syncing | synced | error
   let trouble = false; // true after offline or an error, so the recovery gets a "Synced"
   let slowTimer = 0;
+  let rejectNote = false; // the Worker refused an op: the banner stays until Retry or a clean batch
 
   function scheduleFlush(ms = DEBOUNCE) {
     clearTimeout(flushTimer);
@@ -175,7 +181,8 @@
     if (inflight || !st.queue.length) return;
     if (!navigator.onLine) { setNet('offline'); return; }
     inflight = true;
-    const sent = st.queue.slice(0, MAX_BATCH);
+    // A keepalive request (sent as the app goes to the background) may carry at most 64 kB.
+    const sent = nextBatch(keepalive ? 60000 : MAX_BODY);
     if (trouble) setNet('syncing');
     else slowTimer = setTimeout(() => setNet('syncing'), 800);
     let again = false;
@@ -188,15 +195,15 @@
       });
       const d = await r.json().catch(() => null);
       if (refused(r.status, d)) return showNoCode();
-      if (r.status === 400 || r.status === 413) {
-        // The server will never take these. Drop them so the rest of the queue can move.
-        dropSent(sent);
-        throw new Error('rejected');
-      }
-      if (!r.ok || !d) throw new Error('status ' + r.status);
+      if (!r.ok || !d) throw new Error('status ' + r.status); // kept in the queue, tried again later
+      // Ops the Worker refused one by one (named by index) will never be taken. They go with
+      // the rest of the batch, and the banner says something did not sync.
+      const rejected = Array.isArray(d.rejected) ? d.rejected.filter((i) => sent[i]) : [];
       dropSent(sent);
       applyServer(d);
-      if (st.queue.length) again = true;
+      rejectNote = rejected.length > 0;
+      if (rejectNote) setNet('error');
+      else if (st.queue.length) again = true;
       else settle();
     } catch (e) {
       setNet(navigator.onLine ? 'error' : 'offline');
@@ -210,6 +217,21 @@
   function dropSent(sent) {
     st.queue = st.queue.filter((o) => !sent.some((s) => s.item.id === o.item.id && s.item.updatedAt === o.item.updatedAt));
     save();
+    computeView();
+    render();
+  }
+
+  // Up to MAX_BATCH ops, and well under the Worker's 200 kB body limit.
+  function nextBatch(limit) {
+    const out = [];
+    let size = 20;
+    for (const o of st.queue) {
+      const n = JSON.stringify(o).length + 1;
+      if (out.length && (out.length >= MAX_BATCH || size + n > limit)) break;
+      out.push(o);
+      size += n;
+    }
+    return out;
   }
 
   function applyServer(d) {
@@ -245,6 +267,7 @@
   }
 
   function settle() {
+    if (rejectNote) return;
     if (trouble || net === 'syncing') setNet('synced');
     else if (net !== 'synced') setNet('idle');
   }
@@ -753,10 +776,14 @@
     openSheet($('capture'));
     capInput.focus(); // inside the tap, so iOS brings the keyboard up
   }
+  let capClosing = false;
   function closeCapture() {
+    if (capClosing || $('capture').hidden) return; // Escape, a tap outside and a swipe can all arrive
+    capClosing = true;
     const v = cleanText(capInput.value);
+    capInput.value = '';
     capInput.blur();
-    closeSheet($('capture'), () => { if (v) addTask(v); capInput.value = ''; });
+    closeSheet($('capture'), () => { capClosing = false; if (v) addTask(v); });
   }
   capInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
@@ -764,6 +791,7 @@
       addTask(capInput.value);
       capInput.value = '';
     } else if (e.key === 'Escape') {
+      e.stopPropagation();
       closeCapture();
     }
   });
@@ -786,6 +814,7 @@
       addTask(inlineInput.value);
       inlineInput.value = '';
     } else if (e.key === 'Escape') {
+      e.stopPropagation();
       hideInline();
     }
   });
@@ -814,6 +843,7 @@
     if (it && t && t !== it.text) upsert(Object.assign({}, it, { text: t }));
   }
   function closeEdit() {
+    if (editId === null) return; // already closing
     saveEditText();
     editText.blur();
     const id = editId;
@@ -829,7 +859,7 @@
   });
   editText.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); closeEdit(); }
-    if (e.key === 'Escape') { e.preventDefault(); closeEdit(); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEdit(); }
   });
   $('editClose').addEventListener('click', closeEdit);
   for (const b of document.querySelectorAll('#editSeg button')) {
@@ -920,7 +950,7 @@
   });
   window.addEventListener('online', () => { flush(); poll(); });
   window.addEventListener('offline', () => setNet('offline'));
-  $('retry').addEventListener('click', () => { flush(); poll(); });
+  $('retry').addEventListener('click', () => { rejectNote = false; flush(); poll(); });
   desk.addEventListener('change', () => { hideInline(); render(); });
 
   computeView();
