@@ -1,22 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
+import { memNamespace } from './mem.js';
 
-// A Map is enough of KV for these tests.
 function makeEnv() {
-  const store = new Map();
-  let puts = 0;
+  const ns = memNamespace();
   return {
     env: {
-      HUB_KV: {
-        get: async (k) => (store.has(k) ? store.get(k) : null),
-        put: async (k, v) => { puts++; store.set(k, v); },
-      },
+      TODO_LIST: ns,
       TODO_CODE: 'abcdefgh23456789',
       TODO_READ_TOKEN: 'read-token-for-tests',
       ADMIN_TOKEN: 'admin-token-for-tests',
     },
-    puts: () => puts,
+    puts: () => [...ns.storages.values()].reduce((n, s) => n + s.writes, 0),
   };
 }
 
@@ -43,10 +39,11 @@ test('round trip: ops, then read, then since=rev is cheap', async () => {
   assert.equal(body.items.length, 2);
   r = await call(env, `/api/todo/${CODE}?since=${rev}`);
   assert.deepEqual(await r.json(), { unchanged: true, rev: 1 });
-  // Same batch again: no KV write, same rev.
+  // Same batch again: no storage write, same rev.
+  const w = puts();
   r = await post(env, [{ op: 'upsert', item: task('aaaaaaaa') }]);
   assert.equal((await r.json()).rev, 1);
-  assert.equal(puts(), 1);
+  assert.equal(puts(), w);
 });
 
 test('code must be exactly 16 lowercase letters or digits, and the known one', async () => {
@@ -59,7 +56,13 @@ test('code must be exactly 16 lowercase letters or digits, and the known one', a
 
 test('bad input is refused', async () => {
   const { env } = makeEnv();
-  assert.equal((await post(env, [{ op: 'upsert', item: task('aaaaaaaa', { section: 'later' }) }])).status, 400);
+  // One bad op is skipped and reported; the good one still lands.
+  const r0 = await post(env, [{ op: 'upsert', item: task('aaaaaaaa', { section: 'later' }) }, { op: 'upsert', item: task('bbbbbbbb') }]);
+  assert.equal(r0.status, 200);
+  const b0 = await r0.json();
+  assert.deepEqual(b0.rejected, [0]);
+  assert.deepEqual(b0.items.map((i) => i.id), ['bbbbbbbb']);
+  assert.equal((await post(env, [])).status, 400);
   const r = await call(env, `/api/todo/${CODE}/ops`, { method: 'POST', body: 'not json' });
   assert.equal(r.status, 400);
   assert.equal((await call(env, `/api/todo/${CODE}/ops`, { method: 'GET' })).status, 405);

@@ -7,21 +7,22 @@
  *   GET  /api/todo/:code             -> { items, rev, updated }
  *   GET  /api/todo/:code?since=<rev> -> { unchanged: true, rev } when nothing moved
  *   POST /api/todo/:code/ops         <- { ops: [{ op: "upsert" | "delete", item }] }
- *                                    -> { rev, updated, items }
+ *                                    -> { rev, updated, items, rejected: [index, ...] }
  *   GET  /api/todo/open              Authorization: Bearer <TODO_READ_TOKEN>
  *                                    -> { items: [{ text, section }], updated }  open tasks only
  *
  * Admin (backup):
  *   GET  /api/admin/todo/export      Authorization: Bearer <ADMIN_TOKEN>
- *                                    -> the whole stored document, tombstones included
+ *                                    -> the whole list, tombstones included
  *
- * Only the one list code the Worker knows as TODO_CODE is served. Any other code
- * gets a 404, so nobody can use this KV as free storage.
+ * The list itself lives in a Durable Object (src/list.js), one per code, so writes
+ * are serialised. Only the one list code the Worker knows as TODO_CODE is served.
+ * Any other code gets a 404, so nobody can use this as free storage.
  */
 
-import {
-  CODE, MAX_ITEMS, emptyDoc, cleanBatch, applyOps, pruneTombs, openView, itemList, safeEqual, bearer,
-} from './todo.js';
+import { CODE, cleanBatch, safeEqual, bearer } from './todo.js';
+
+export { TodoList } from './list.js';
 
 const LOCAL = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
 const PAGES = 'https://mellowt1.github.io';
@@ -42,24 +43,12 @@ export function cors(request) {
 
 const json = (data, request, status = 200) => Response.json(data, { status, headers: cors(request) });
 
-async function readDoc(env, code) {
-  const raw = await env.HUB_KV.get(`todo:${code}`);
-  if (!raw) return emptyDoc();
-  try {
-    const d = JSON.parse(raw);
-    return { items: d.items || {}, tombs: d.tombs || {}, rev: d.rev || 0, updated: d.updated || null };
-  } catch (e) {
-    return emptyDoc();
-  }
-}
-
-async function todoList(request, env, code, url) {
-  const doc = await readDoc(env, code);
-  const since = url.searchParams.get('since');
-  if (since !== null && /^\d{1,12}$/.test(since) && Number(since) === doc.rev) {
-    return json({ unchanged: true, rev: doc.rev }, request);
-  }
-  return json({ items: itemList(doc), rev: doc.rev, updated: doc.updated }, request);
+// Talk to the list's Durable Object. The host name is never resolved; it only has to parse.
+async function list(env, code, path, body) {
+  const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + code));
+  const init = body === undefined ? {} : { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } };
+  const r = await stub.fetch('https://list' + path, init);
+  return { status: r.status, data: await r.json() };
 }
 
 async function todoOps(request, env, code) {
@@ -71,37 +60,24 @@ async function todoOps(request, env, code) {
   } catch (e) {
     return json({ error: 'bad json' }, request, 400);
   }
-  const now = Date.now();
-  const batch = cleanBatch(body, now);
+  const batch = cleanBatch(body, Date.now());
   if (batch.error) return json({ error: batch.error }, request, 400);
-
-  const doc = await readDoc(env, code);
-  const { changed } = applyOps(doc, batch.ops);
-  if (changed) {
-    if (Object.keys(doc.items).length > MAX_ITEMS) return json({ error: 'list full' }, request, 413);
-    pruneTombs(doc, now);
-    doc.rev += 1;
-    doc.updated = new Date(now).toISOString();
-    await env.HUB_KV.put(`todo:${code}`, JSON.stringify(doc));
-  }
-  // Nothing new means no KV write at all, which keeps a resent batch free.
-  return json({ rev: doc.rev, updated: doc.updated, items: itemList(doc) }, request);
-}
-
-async function todoOpen(request, env) {
-  // The read token is checked here and nowhere else, so it opens this route only.
-  if (!env.TODO_READ_TOKEN || !safeEqual(bearer(request), env.TODO_READ_TOKEN)) {
-    return json({ error: 'token required' }, request, 401);
-  }
-  if (!env.TODO_CODE) return json({ error: 'not configured' }, request, 503);
-  const doc = await readDoc(env, env.TODO_CODE);
-  return json({ items: openView(doc), updated: doc.updated }, request);
+  const out = batch.ops.length
+    ? await list(env, code, '/apply', { ops: batch.ops })
+    : await list(env, code, '/read');
+  if (out.data.error) return json(out.data, request, out.status);
+  return json({ rev: out.data.rev, updated: out.data.updated, items: out.data.items, rejected: batch.rejected }, request);
 }
 
 async function handleTodo(request, env, rest, url) {
   if (rest.length === 1 && rest[0] === 'open') {
     if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
-    return todoOpen(request, env);
+    // The read token is checked here and nowhere else, so it opens this route only.
+    if (!env.TODO_READ_TOKEN || !safeEqual(bearer(request), env.TODO_READ_TOKEN)) {
+      return json({ error: 'token required' }, request, 401);
+    }
+    if (!env.TODO_CODE) return json({ error: 'not configured' }, request, 503);
+    return json((await list(env, env.TODO_CODE, '/open')).data, request);
   }
   const code = rest[0] || '';
   if (!CODE.test(code)) return json({ error: 'bad code' }, request, 400);
@@ -109,7 +85,9 @@ async function handleTodo(request, env, rest, url) {
 
   if (rest.length === 1) {
     if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
-    return todoList(request, env, code, url);
+    const since = url.searchParams.get('since');
+    const q = since !== null && /^\d{1,12}$/.test(since) ? '?since=' + since : '';
+    return json((await list(env, code, '/read' + q)).data, request);
   }
   if (rest.length === 2 && rest[1] === 'ops') {
     if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
@@ -124,7 +102,7 @@ async function handleAdmin(request, env, rest) {
   }
   if (request.method === 'GET' && rest.join('/') === 'todo/export') {
     if (!env.TODO_CODE) return json({ error: 'not configured' }, request, 503);
-    return json(await readDoc(env, env.TODO_CODE), request);
+    return json((await list(env, env.TODO_CODE, '/export')).data, request);
   }
   return json({ error: 'not found' }, request, 404);
 }

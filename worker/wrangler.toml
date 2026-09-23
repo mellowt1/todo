@@ -2,8 +2,18 @@ name = "paul-hub"
 main = "src/worker.js"
 compatibility_date = "2026-09-01"
 
+# The to-do list lives in a SQLite-backed Durable Object, one per list code, so
+# writes are serialised (Workers Free plan supports SQLite Durable Objects).
+[[durable_objects.bindings]]
+name = "TODO_LIST"
+class_name = "TodoList"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TodoList"]
+
 # One KV namespace, "paul-hub" in the dashboard, reached from the Worker as HUB_KV.
-# Keys: todo:<code> for the to-do list. Later cache:<block> for the Morning Screen.
+# Not used by the to-do. Reserved for the Morning Screen's cache:<block> entries.
 [[kv_namespaces]]
 binding = "HUB_KV"
 id = "a8b5f676c79f416f9e5ae37b5c589b4a"
