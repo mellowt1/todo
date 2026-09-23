@@ -2,7 +2,7 @@
 // the admin route and the Morning Screen's kitchen block. No network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../src/worker.js';
+import worker, * as entry from '../src/worker.js';
 import {
   isoWeek, weekStart, validWeek, dayDate, cleanRecipe, cleanOp, cleanBatch, applyOps, tonightView, validId, LIMITS,
 } from '../src/kitchen.js';
@@ -50,6 +50,14 @@ const recipe = (over = {}) => ({
 });
 const up = (type, item, updatedAt = NOW) => ({ op: 'upsert', type, item: { ...item, updatedAt } });
 const del = (type, id, updatedAt = NOW) => ({ op: 'delete', type, item: { id, updatedAt } });
+
+test('the Worker entry exports only handlers and classes (workerd refuses anything else)', () => {
+  for (const [name, v] of Object.entries(entry)) {
+    if (name === 'default') assert.equal(typeof v.fetch, 'function');
+    else assert.equal(typeof v, 'function', name);
+  }
+  assert.ok(entry.KitchenStore && entry.TodoList);
+});
 
 /* ---------- Calendar ---------- */
 

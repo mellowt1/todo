@@ -151,7 +151,8 @@ async function handleKitchen(request, env, rest, url) {
   return json({ error: 'not found' }, request, 404);
 }
 
-export const MAX_ADMIN_RECIPES = 25;
+// Not exported: a Worker entry module may only export handlers and classes.
+const MAX_ADMIN_RECIPES = 25;
 const MAX_ADMIN_BODY = 1024 * 1024;
 
 function newId() {
