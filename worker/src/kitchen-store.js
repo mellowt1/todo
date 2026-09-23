@@ -42,8 +42,11 @@ export class KitchenData {
     return { items: await this.items(), rev: m.rev, updated: m.updated };
   }
 
-  /* Apply clean ops, all written in one go with no await in between (committed atomically). */
-  async apply(ops, now = Date.now()) {
+  /* Apply clean ops, all written in one go with no await in between (committed atomically).
+   * win: true (the admin route) restamps each op just past what is stored for that record,
+   * so it always lands, even over an edit from a phone whose clock runs ahead.
+   * The answer lists the ids of ops that did not land (an older or equal stamp) as skipped. */
+  async apply(ops, now = Date.now(), win = false) {
     const m = await this.meta();
     const keys = [...new Set(ops.map((o) => keyOf(o.type, o.item.id)))];
     const doc = { items: {}, tombs: {} };
@@ -54,8 +57,20 @@ export class KitchenData {
       }
     }
     const before = new Map(keys.map((k) => [k, [doc.items[k], doc.tombs[k]]]));
+    if (win) {
+      for (const o of ops) {
+        const k = keyOf(o.type, o.item.id);
+        const cur = doc.items[k];
+        const tomb = doc.tombs[k];
+        o.item.updatedAt = Math.max(o.item.updatedAt, cur ? cur.updatedAt + 1 : 0, tomb !== undefined ? tomb + 1 : 0);
+      }
+    }
     const { changed } = applyOps(doc, ops);
-    if (!changed) return { rev: m.rev, updated: m.updated, items: await this.items() };
+    const skipped = ops.filter((o) => {
+      const k = keyOf(o.type, o.item.id);
+      return o.op === 'upsert' ? doc.items[k] !== o.item : doc.tombs[k] !== o.item.updatedAt;
+    }).map((o) => o.item.id);
+    if (!changed) return { rev: m.rev, updated: m.updated, items: await this.items(), skipped };
 
     const puts = {};
     const dels = [];
@@ -85,7 +100,7 @@ export class KitchenData {
     for (const part of chunks(dels)) writes.push(this.s.delete(part));
     writes.push(this.s.put('meta', meta));
     await Promise.all(writes);
-    return { rev: meta.rev, updated: meta.updated, items: await this.items() };
+    return { rev: meta.rev, updated: meta.updated, items: await this.items(), skipped };
   }
 
   async exportAll() {
@@ -122,7 +137,10 @@ export class KitchenStore {
         break;
       }
       case '/apply':
-        out = await d.apply((await request.json()).ops);
+      {
+        const body = await request.json();
+        out = await d.apply(body.ops, Date.now(), body.win === true);
+      }
         break;
       case '/export':
         out = await d.exportAll();

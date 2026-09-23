@@ -192,9 +192,13 @@ async function adminRecipes(request, env) {
     ops.push({ op: 'upsert', type: 'recipe', item: { type: 'recipe', id, ...c.value, updatedAt: now } });
   });
   if (errors.length) return json({ error: 'invalid recipes', errors }, request, 400);
-  const out = await kitchen(env, env.KITCHEN_CODE, '/apply', { ops });
+  // win: the Durable Object stamps each recipe just past the stored one, so the admin always wins.
+  const out = await kitchen(env, env.KITCHEN_CODE, '/apply', { ops, win: true });
   if (out.data.error) return json(out.data, request, out.status);
-  return json({ ok: true, ids: ops.map((o) => o.item.id), rev: out.data.rev }, request);
+  const skipped = Array.isArray(out.data.skipped) ? out.data.skipped : [];
+  const ids = ops.map((o) => o.item.id);
+  if (skipped.length) return json({ ok: false, error: 'some recipes were not saved', ids: ids.filter((i) => !skipped.includes(i)), skipped, rev: out.data.rev }, request, 409);
+  return json({ ok: true, ids, rev: out.data.rev }, request);
 }
 
 async function handleAdmin(request, env, rest) {

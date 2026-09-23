@@ -322,6 +322,54 @@ test('admin recipes: token, upsert of one or many, ids kept, all or nothing with
   assert.equal((await admin(makeEnv({ KITCHEN_CODE: undefined }), { recipes: [recipe()] })).status, 503);
 });
 
+test('admin recipes always win: same millisecond twice, a phone clock ahead, a newer tombstone', async () => {
+  const env = makeEnv();
+  const realNow = Date.now;
+  const frozen = realNow();
+  Date.now = () => frozen;
+  try {
+    let b = await (await admin(env, recipe({ id: 'samemilli', title: 'First' }))).json();
+    assert.equal(b.ok, true);
+    b = await (await admin(env, recipe({ id: 'samemilli', title: 'Second' }))).json();
+    assert.equal(b.ok, true);
+    let items = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
+    assert.equal(items.find((i) => i.id === 'samemilli').title, 'Second');
+
+    // a phone 4 minutes ahead edits the recipe; the admin replace a moment later still wins
+    await post(env, [up('recipe', { id: 'samemilli', ...recipe({ title: 'From a fast phone' }) }, frozen + 4 * 60000)]);
+    items = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
+    assert.equal(items.find((i) => i.id === 'samemilli').title, 'From a fast phone');
+    b = await (await admin(env, recipe({ id: 'samemilli', title: 'Admin again' }))).json();
+    assert.equal(b.ok, true);
+    items = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
+    const r = items.find((i) => i.id === 'samemilli');
+    assert.equal(r.title, 'Admin again');
+    assert.ok(r.updatedAt > frozen + 4 * 60000);
+
+    // deleted on a fast phone, then re-added by the admin: it comes back
+    await post(env, [del('recipe', 'samemilli', frozen + 4 * 60000 + 5000)]);
+    b = await (await admin(env, recipe({ id: 'samemilli', title: 'Back' }))).json();
+    assert.equal(b.ok, true);
+    items = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
+    assert.equal(items.find((i) => i.id === 'samemilli').title, 'Back');
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('store: skipped lists the ops that did not land; win restamps past what is stored', async () => {
+  const s = new KitchenData(new MemStorage());
+  const op = (text, at) => cleanOp(up('day', { id: '2026-W39:mon', kind: 'text', text }, at), at + 1);
+  let r = await s.apply([op('New', T)], T);
+  assert.deepEqual(r.skipped, []);
+  r = await s.apply([op('Old', T - 5)], T);
+  assert.deepEqual(r.skipped, ['2026-W39:mon']);
+  r = await s.apply([op('Won', T - 5)], T, true);
+  assert.deepEqual(r.skipped, []);
+  assert.equal(r.items[0].text, 'Won');
+  assert.equal(r.items[0].updatedAt, T + 1);
+});
+
 test('admin export: every kitchen record and tombstone, admin token only', async () => {
   const env = makeEnv();
   await post(env, [up('extra', { id: 'eeeeeeee', week: '2026-W39', text: 'Milk', aisle: 'dairy' }), del('day', '2026-W39:mon')]);

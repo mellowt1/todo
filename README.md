@@ -88,7 +88,7 @@ The Kitchen app (repo `mellowt1/kitchen`) keeps the week's dinners, recipes, the
 |---|---|---|
 | `GET /api/kitchen/:code` | the kitchen code | `{ items, rev, updated }`, or `{ unchanged: true }` with `?since=<rev>` |
 | `POST /api/kitchen/:code/ops` | the kitchen code | `{ ops: [{ op: "upsert" \| "delete", type, item }] }`, returns `{ rev, updated, items, rejected }` |
-| `POST /api/admin/kitchen/recipes` | `Bearer ADMIN_TOKEN` | `{ recipes: [recipe, ...] }`, at most 25. No `id`: a new recipe. An existing `id`: replaced. All or nothing: a bad recipe refuses the call and `errors` says which one and why. Returns `{ ok, ids, rev }`. |
+| `POST /api/admin/kitchen/recipes` | `Bearer ADMIN_TOKEN` | `{ recipes: [recipe, ...] }`, at most 25. No `id`: a new recipe. An existing `id`: replaced, always, even over a newer edit from a phone whose clock runs ahead. All or nothing: a bad recipe refuses the call and `errors` says which one and why. Returns `{ ok, ids, rev }`. |
 | `GET /api/admin/kitchen/export` | `Bearer ADMIN_TOKEN` | every kitchen record, tombstones included, for backups |
 
 Records, each merged on its own like the to-do's tasks (newest `updatedAt` wins, a delete leaves a tombstone for 90 days):
