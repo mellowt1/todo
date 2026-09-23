@@ -90,6 +90,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .list {
   list-style: none; margin: 0; padding: 2px 0 calc(var(--bottom) + 44px + 16px + 56px + 32px);
 }
+.list:empty { padding-bottom: 0; }
 .row { position: relative; overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .row + .row::before { content: ""; position: absolute; z-index: 2; left: 16px; right: 16px; top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
 .row.swipe-r::before, .row.swipe-l::before { left: 0; right: 0; }
@@ -150,7 +151,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 
 /* ---------- Empty, install, no code ---------- */
-.empty { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--secondary); padding: 0 32px; margin-top: min(22vh, 180px); }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--secondary); padding: 0 32px; margin-top: max(40px, calc(238px - var(--top))); }
 .ic-glyph { stroke-width: 1.25; }
 .empty p { margin: 0; font-size: 17px; text-align: center; }
 .install { margin: 40px 16px 0; padding: 16px; border-radius: 14px; background: var(--surface); display: flex; gap: 12px; align-items: flex-start; }
@@ -159,6 +160,7 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 .install-text { font-size: 15px; line-height: 1.4; color: var(--secondary); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .install-text .glyph { color: var(--accent-text); display: inline-flex; }
 .install-close { width: 44px; height: 44px; margin: -10px -10px 0 0; }
+.empty:not([hidden]) + .install { margin-top: 144px; }
 .list:not(:empty) ~ .install { margin-top: 8px; margin-bottom: 200px; }
 .nocode { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 32px; }
 .nocode p { margin: 0; max-width: 320px; text-align: center; color: var(--secondary); }
@@ -256,7 +258,8 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .add-desk { width: 36px; height: 36px; border-radius: 18px; background: var(--accent); color: var(--on-accent); align-items: center; justify-content: center; }
   .kbd-hint { padding: 24px 12px 48px; margin: 0; font-size: 13px; color: var(--secondary); }
 
-  .list { margin: 0; padding: 0; }
+  .list { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  body.view-done .list { display: block; }
   body.view-done .list { padding: 0 12px 48px; }
   .row { border-radius: 10px; }
   .row + .row::before { display: none; }
@@ -270,7 +273,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .row:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
   .move-btn { display: flex; visibility: hidden; width: 36px; height: 36px; align-items: center; justify-content: center; color: var(--secondary); border-radius: 8px; }
   .row:hover .move-btn, .row:focus-visible .move-btn, .row.menu-open .move-btn { visibility: visible; }
-  .inline-add { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 12px; margin-bottom: 4px; border-radius: 10px; border: 1.5px solid var(--accent-text); }
+  .inline-add { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 12px; margin-bottom: 8px; border-radius: 10px; border: 1.5px solid var(--accent-text); }
   .empty { margin-top: 120px; }
   .install { display: none !important; }
 
