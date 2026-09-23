@@ -26,3 +26,4 @@ id = "a8b5f676c79f416f9e5ae37b5c589b4a"
 #   CALENDAR_PUSH_TOKEN  Odysseus, POST /api/morning/calendar and nothing else
 #   FIXED_EVENTS         Morning Screen: repeating events and countdowns (JSON)
 #   BIN_ADDRESS          Morning Screen: postcode and house number, for bin days
+#   BIRTHDAYS            Morning Screen: names and birthdays (JSON)
