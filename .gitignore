@@ -12,3 +12,5 @@ Thumbs.db
 
 # Local verifier output
 verify-shots/
+live-shots/
+.secrets.tmp.json

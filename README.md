@@ -16,15 +16,14 @@ The code, the Odysseus read token and the admin token live in `secrets.local.txt
 
 ## Setting it up (once)
 
-Run these in PowerShell from the `worker` folder. Deploy first, so the Worker exists, then add the three secrets. Each `secret put` reads the value straight from `secrets.local.txt`, so nothing is typed or shown.
+Run these from the `worker` folder. Deploy first, so the Worker exists, then upload the three secrets in one go from a temporary JSON file that is deleted straight after, so nothing is typed or shown. Do not pipe values into `npx wrangler secret put` on Windows: the npx shim does not pass stdin through and the secret ends up empty.
 
-```powershell
+```bash
 cd worker
 npx wrangler deploy
-$s = Get-Content ..\secrets.local.txt | Where-Object { $_ -match '^[A-Z_]+=' } | ConvertFrom-StringData
-$s.TODO_CODE       | npx wrangler secret put TODO_CODE
-$s.TODO_READ_TOKEN | npx wrangler secret put TODO_READ_TOKEN
-$s.ADMIN_TOKEN     | npx wrangler secret put ADMIN_TOKEN
+node -e 'const fs=require("fs");const o={};for(const l of fs.readFileSync("../secrets.local.txt","utf8").split(/\r?\n/)){const m=l.match(/^([A-Z_]+)=(.*)$/);if(m)o[m[1]]=m[2];}fs.writeFileSync("../.secrets.tmp.json",JSON.stringify(o))'
+npx wrangler secret bulk ../.secrets.tmp.json
+rm ../.secrets.tmp.json
 ```
 
 Then switch on GitHub Pages with GitHub Actions as the source and publish:
