@@ -1,6 +1,6 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins }
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news }
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                  -> { ok: true, count }
@@ -13,10 +13,11 @@
  *   cache:weather        Open-Meteo, 15 minutes
  *   cache:arsenal        ESPN, 1 hour
  *   cache:bins:<hash>    Den Haag huisvuilkalender, 12 hours
+ *   cache:news           NOS headlines, 30 minutes
  * Cached entries are { at, data }. If a source fails, the last good copy is used for a
  * while (see STALE), so one bad minute at ESPN does not blank the block.
  *
- * Secrets (never in this repo): TODO_CODE, CALENDAR_PUSH_TOKEN, FIXED_EVENTS, BIN_ADDRESS.
+ * Secrets (never in this repo): TODO_CODE, CALENDAR_PUSH_TOKEN, FIXED_EVENTS, BIN_ADDRESS, BIRTHDAYS.
  */
 
 import { CODE, safeEqual, bearer } from './todo.js';
@@ -36,8 +37,8 @@ export const RIDES = [
   { time: '17:30', label: 'home', leg: 'home' },
 ];
 
-const TTL = { weather: 15 * MIN, arsenal: HOUR, bins: 12 * HOUR };
-const STALE = { weather: 3 * HOUR, arsenal: DAY, bins: 7 * DAY };
+const TTL = { weather: 15 * MIN, arsenal: HOUR, bins: 12 * HOUR, news: 30 * MIN };
+const STALE = { weather: 3 * HOUR, arsenal: DAY, bins: 7 * DAY, news: 6 * HOUR };
 const KEEP_SECONDS = 8 * 24 * 3600; // KV expiry for cache entries
 const FETCH_MS = 6000;
 
@@ -149,9 +150,11 @@ export async function cached(env, key, ttl, stale, now, load) {
   return data;
 }
 
-/* ---------- To-dos: open items in Today ---------- */
+/* ---------- To-dos: open items in Today, and yesterday's wins ---------- */
 
-export async function todosBlock(env) {
+export const WINS_SHOWN = 5;
+
+export async function todosBlock(env, now = Date.now()) {
   const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));
   const r = await stub.fetch('https://list/read');
   const d = await r.json();
@@ -160,7 +163,16 @@ export async function todosBlock(env) {
     .filter((i) => !i.done && i.section === 'today')
     .sort((a, b) => b.pos - a.pos)
     .map((i) => ({ text: i.text }));
-  return { items, updated: d.updated || null };
+  // Everything ticked off yesterday (Amsterdam), in any section, newest first. Read only.
+  const yesterday = addDays(local(now).date, -1);
+  const won = d.items
+    .filter((i) => i.done && Number.isFinite(i.doneAt) && local(i.doneAt).date === yesterday)
+    .sort((a, b) => b.doneAt - a.doneAt);
+  return {
+    items,
+    updated: d.updated || null,
+    yesterday: { count: won.length, items: won.slice(0, WINS_SHOWN).map((i) => i.text) },
+  };
 }
 
 /* ---------- Calendar: pushed by Odysseus ---------- */
@@ -715,6 +727,103 @@ async function bins(env, now) {
   return binsBlock(list, now);
 }
 
+/* ---------- Birthdays, from the BIRTHDAYS secret ---------- */
+
+export const BIRTHDAY_DAYS = 14;
+
+/* [{ name, date: "MM-DD" | "YYYY-MM-DD" }]. Tolerant: a missing or broken secret, or a
+ * broken entry, is skipped, never an error. */
+export function parseBirthdays(raw) {
+  let list = raw;
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw); } catch (e) { list = null; }
+  }
+  const out = [];
+  for (const b of Array.isArray(list) ? list : []) {
+    if (!b || typeof b.name !== 'string' || !clean(b.name) || typeof b.date !== 'string') continue;
+    const m = b.date.match(/^(?:(\d{4})-)?(\d{2})-(\d{2})$/);
+    if (!m) continue;
+    const year = m[1] ? Number(m[1]) : null;
+    // Any real date, 29 February included; with a year, it must exist in that year.
+    if (!validDay(`${m[1] || '2000'}-${m[2]}-${m[3]}`)) continue;
+    out.push({ name: clean(b.name).slice(0, 60), year, month: m[2], day: m[3] });
+  }
+  return out;
+}
+
+/* Birthdays today and in the next 14 days, with the age they turn when the year is known.
+ * 29 February counts on 28 February in other years. */
+export function birthdaysBlock(raw, now) {
+  const today = local(now).date;
+  const thisYear = Number(today.slice(0, 4));
+  const on = (y, b) => (validDay(`${y}-${b.month}-${b.day}`) ? `${y}-${b.month}-${b.day}` : `${y}-02-28`);
+  const birthdays = [];
+  for (const b of parseBirthdays(raw)) {
+    let date = on(thisYear, b);
+    if (date < today) date = on(thisYear + 1, b);
+    const days = daysBetween(today, date);
+    if (days > BIRTHDAY_DAYS) continue;
+    const age = b.year ? Number(date.slice(0, 4)) - b.year : null;
+    birthdays.push({ name: b.name, date, days, age: age !== null && age > 0 && age < 130 ? age : null });
+  }
+  birthdays.sort((a, b) => a.days - b.days || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { birthdays };
+}
+
+/* ---------- News: NOS headlines ---------- */
+
+export const NEWS_URL = 'https://feeds.nos.nl/nosnieuwsalgemeen';
+export const NEWS_SHOWN = 3;
+
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+function decode(s) {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, e) => {
+    if (e[0] === '#') {
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : '';
+    }
+    return ENTITIES[e.toLowerCase()] ?? all;
+  });
+}
+
+function tag(xml, name) {
+  const re = new RegExp('<' + name + '\\b[^>]*>\\s*(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))\\s*</' + name + '>', 'i');
+  const m = xml.match(re);
+  if (!m) return '';
+  return m[1] !== undefined ? m[1] : decode(m[2] || '');
+}
+
+/* The first items of an RSS feed as [{ title, link }]. Only https links on nos.nl are kept.
+ * A spaced dash in a title becomes a colon, to match the page's no dash style. */
+export function parseNews(xml) {
+  if (typeof xml !== 'string' || !/<rss\b|<channel\b/i.test(xml)) throw new Error('not rss');
+  const items = [];
+  for (const m of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+    const title = clean(tag(m[1], 'title').replace(/<[^>]*>/g, ' '))
+      .replace(/\s+[–—-]\s+/g, ': ')
+      .replace(/[–—]/g, ', ')
+      .slice(0, 200);
+    let url;
+    try { url = new URL(clean(tag(m[1], 'link'))); } catch (e) { continue; }
+    if (!title || url.protocol !== 'https:' || !/(^|\.)nos\.nl$/.test(url.hostname)) continue;
+    items.push({ title, link: url.href });
+    if (items.length === NEWS_SHOWN) break;
+  }
+  if (!items.length) throw new Error('no items');
+  return { items };
+}
+
+async function news(env, now) {
+  return cached(env, 'cache:news', TTL.news, STALE.news, now, async () => {
+    const r = await fetch(NEWS_URL, {
+      headers: { Accept: 'application/rss+xml, application/xml, text/xml', 'User-Agent': 'paul-hub morning screen' },
+      signal: AbortSignal.timeout(FETCH_MS),
+    });
+    if (!r.ok) throw new Error('status ' + r.status);
+    return parseNews(await r.text());
+  });
+}
+
 /* ---------- The route ---------- */
 
 const block = (fn, message) => Promise.resolve().then(fn).catch(() => ({ error: message }));
@@ -727,13 +836,15 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   if (!env.TODO_CODE || !safeEqual(code, env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed] = await Promise.all([
-    block(() => todosBlock(env), "To-dos can't load right now"),
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB] = await Promise.all([
+    block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
     block(() => arsenal(env, now), "Arsenal can't load right now"),
     block(() => bins(env, now), "Bin days can't load right now"),
     block(() => fixedBlock(env.FIXED_EVENTS, now), 'Fixed events could not be read'),
+    block(() => birthdaysBlock(env.BIRTHDAYS, now), 'Birthdays could not be read'),
+    block(() => news(env, now), "News can't load right now"),
   ]);
   return json({
     now: new Date(now).toISOString(),
@@ -743,5 +854,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     weather: weatherB,
     arsenal: arsenalB,
     bins: binsB,
+    birthdays: birthdays.error ? { birthdays: [] } : birthdays,
+    news: newsB,
   }, request);
 }
