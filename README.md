@@ -33,7 +33,7 @@ gh api -X POST repos/mellowt1/todo/pages -f build_type=workflow
 gh workflow run pages.yml -R mellowt1/todo
 ```
 
-1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets for the to-do: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups). Four more for the Morning Screen, see below.
+1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets for the to-do: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups). Four more for the Morning Screen and `KITCHEN_CODE` for the Kitchen, see below.
 2. **Storage**: the list lives in a SQLite-backed Durable Object (`TodoList`, `worker/src/list.js`), one per code, created by the first deploy. It handles one write at a time, so two devices can never overwrite each other's batch. SQLite Durable Objects are on the Workers Free plan. The KV namespace `paul-hub` (`HUB_KV`) belongs to the Morning Screen and is not used by the to-do.
 3. **Site**: `.github/workflows/pages.yml` publishes the `app/` folder on every push to `main` that touches it. Until Pages is on, the workflow skips.
 
@@ -80,6 +80,51 @@ BIRTHDAYS=[{"name":"Nick","date":"1986-10-12"},{"name":"Ada","date":"03-21"}]
 
 `FIXED_EVENTS` is one line of JSON. An event without `start` is all day; `repeat` can only be `weekly`; `until` is the last date it may fall on. `BIN_ADDRESS` is postcode, space, house number (a letter or addition may follow). `BIRTHDAYS` is one line of JSON: a name and either `MM-DD`, or `YYYY-MM-DD` to show the age they turn. The values above are examples; the real ones live only in the secrets file and in Cloudflare. Piping a value into `npx wrangler secret put` stores an empty secret on Windows, so always use the temp JSON file.
 
+## Kitchen (`worker/src/kitchen.js`)
+
+The Kitchen app (repo `mellowt1/kitchen`) keeps the week's dinners, recipes, the shopping list and the pizza dough settings in its own SQLite Durable Object (`KitchenStore`, `worker/src/kitchen-store.js`), one per kitchen code. It has its **own** code, `KITCHEN_CODE`: the to-do code never opens the kitchen and the kitchen code never opens the to-do or the Morning Screen.
+
+| Route | Auth | What |
+|---|---|---|
+| `GET /api/kitchen/:code` | the kitchen code | `{ items, rev, updated }`, or `{ unchanged: true }` with `?since=<rev>` |
+| `POST /api/kitchen/:code/ops` | the kitchen code | `{ ops: [{ op: "upsert" \| "delete", type, item }] }`, returns `{ rev, updated, items, rejected }` |
+| `POST /api/admin/kitchen/recipes` | `Bearer ADMIN_TOKEN` | `{ recipes: [recipe, ...] }`, at most 25. No `id`: a new recipe. An existing `id`: replaced. All or nothing: a bad recipe refuses the call and `errors` says which one and why. Returns `{ ok, ids, rev }`. |
+| `GET /api/admin/kitchen/export` | `Bearer ADMIN_TOKEN` | every kitchen record, tombstones included, for backups |
+
+Records, each merged on its own like the to-do's tasks (newest `updatedAt` wins, a delete leaves a tombstone for 90 days):
+
+* `recipe`: `{ id, title, servings, time, veg, ingredients: [{ qty, unit, item, aisle }], steps: [text], notes }`. `qty` is a number or `null` ("salt to taste"). `aisle` is one of `produce, bread, dairy, meat, vegetarian, pasta, tins, baking, spices, frozen, drinks, household, other`, in the shop's order.
+* `day`: id `2026-W39:sat` (ISO week, Monday first). `kind` is `recipe` (with `recipeId`), `text` (with `text`) or `pizza`; `servings` optional.
+* `extra`: a free item on one week's shopping list, `{ id, week, text, qty, aisle }`.
+* `tick`: a ticked line, id `2026-W39|<item key>`, `{ on }`.
+* `dough`: the one settings record, id `dough`: `{ size, count, thickness, gf, night, tweaks }`.
+
+Limits: titles 200 characters, 80 ingredients, 40 steps of up to 1,000 characters, notes 4,000, 200 ops per batch, 20,000 records in all. Anything off contract is skipped and reported by index.
+
+A recipe for the admin route, as Claude Code sends it:
+
+```json
+{ "recipes": [{
+  "title": "Chickpea and spinach curry", "servings": 4, "time": "35 min", "veg": true,
+  "ingredients": [
+    { "qty": 2, "unit": "tins", "item": "chickpeas, drained", "aisle": "tins" },
+    { "qty": 200, "unit": "g", "item": "spinach", "aisle": "produce" },
+    { "qty": null, "unit": "", "item": "salt", "aisle": "spices" }
+  ],
+  "steps": ["Soften the onion in a little oil, 5 minutes.", "Serve with rice."],
+  "notes": ""
+}] }
+```
+
+```powershell
+curl.exe -s -X POST -H "Authorization: Bearer $($s.ADMIN_TOKEN)" -H "Content-Type: application/json" --data-binary "@recipe.json" https://paul-hub.paul-o-a04.workers.dev/api/admin/kitchen/recipes
+curl.exe -s -H "Authorization: Bearer $($s.ADMIN_TOKEN)" https://paul-hub.paul-o-a04.workers.dev/api/admin/kitchen/export > kitchen-backup.json
+```
+
+**The Morning Screen's Tonight line.** `GET /api/morning/:code` (still the to-do code) gains a `kitchen` block, read inside the Worker from the kitchen for `KITCHEN_CODE`: `{ tonight: { kind, title, veg } | null, mixToday, pizzaOn }`. `tonight` is today's dinner (a recipe's title, the typed text, or "Pizza night"). `mixToday` is true 3 days before a pizza night (1 day when the dough is gluten free), from a pizza day in the week or the dough's pizza night date. No `KITCHEN_CODE`, or nothing planned today: `null`.
+
+**Setting it up.** The first deploy with this code runs the `v2` migration, which creates the `KitchenStore` class next to `TodoList` (the `v1` tag is never edited). Then add the kitchen code (16 characters, `a-z0-9`, not the to-do code) to `secrets.local.txt` as `KITCHEN_CODE=...` and upload it with the same temp JSON file and `wrangler secret bulk` lines as above. Never pipe it into `npx wrangler secret put` on Windows: the secret ends up empty.
+
 ## How the sync works
 
 Every change is an operation on one task: `{ id, text, section, done, doneAt, pos, updatedAt }`. The app keeps them in a queue in `localStorage`, one per task, shows them at once, and sends the queue in batches 1.2 seconds after the last change (or straight away when the app goes to the background). A batch holds at most 200 ops and stays well under the Worker's body limit. Offline, the queue just waits; the pill says how many changes are waiting. The app cleans text exactly as the Worker does; if the Worker still refuses an op, it names it, that op alone is dropped and the sync banner shows.
@@ -97,6 +142,7 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `GET /api/todo/open` | `Bearer TODO_READ_TOKEN` | open tasks only, `[{ text, section }]`. No done history, no writes. The token works here and nowhere else. |
 | `GET /api/admin/todo/export` | `Bearer ADMIN_TOKEN` | the whole stored document, tombstones included, for backups |
 | `/api/morning/...` | | see Morning Screen above |
+| `/api/kitchen/...`, `/api/admin/kitchen/...` | | see Kitchen above |
 
 Input is whitelisted: text up to 500 characters, section one of `today`, `soon`, `someday`, ids 8 to 32 lowercase letters and digits, at most 200 ops per batch. An op that breaks these rules is skipped and reported; a malformed batch is refused. CORS allows `https://mellowt1.github.io` and localhost only. Routes are namespaced by module (`/api/todo/...`, `/api/morning/...`), so one app never touches another's.
 
@@ -110,7 +156,7 @@ curl.exe -s -H "Authorization: Bearer $($s.ADMIN_TOKEN)" https://paul-hub.paul-o
 
 ```powershell
 npm install
-npm test                      # Worker unit tests: merge, tombstones, validation, tokens, CORS, morning blocks
+npm test                      # Worker unit tests: merge, tombstones, validation, tokens, CORS, morning blocks, kitchen
 cd worker; npx wrangler dev --persist-to C:\wd   # Worker on :8787, dev values from worker/.dev.vars
 npm run serve                 # app on :8080, in a second window
 npm run check                 # drives the app in Chromium and saves screenshots/
@@ -124,7 +170,7 @@ On localhost the app talks to `http://localhost:8787` and skips the service work
 
 ```
 app/        the PWA: index.html, app.css, app.js, sw.js, manifest, icons
-worker/     paul-hub: wrangler.toml, src/worker.js (routes), src/list.js (the list's Durable Object), src/todo.js (merge, validation), src/morning.js (Morning Screen), test/
+worker/     paul-hub: wrangler.toml, src/worker.js (routes), src/list.js (the list's Durable Object), src/todo.js (merge, validation), src/morning.js (Morning Screen), src/kitchen.js and src/kitchen-store.js (Kitchen), test/
 scripts/    icons, local server, end to end check
 design/     the Claude Design brief
 SPEC.md     what was agreed
