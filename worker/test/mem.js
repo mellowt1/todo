@@ -23,14 +23,14 @@ export class MemStorage {
   }
 }
 
-export function memNamespace() {
+export function memNamespace(Klass = TodoList) {
   const objs = new Map();
   const storages = new Map();
   return {
     storages,
     idFromName: (n) => n,
     get(id) {
-      if (!objs.has(id)) { const s = new MemStorage(); storages.set(id, s); objs.set(id, new TodoList({ storage: s })); }
+      if (!objs.has(id)) { const s = new MemStorage(); storages.set(id, s); objs.set(id, new Klass({ storage: s })); }
       const o = objs.get(id);
       return { fetch: (url, init) => o.fetch(new Request(url, init)) };
     },
