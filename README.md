@@ -33,8 +33,8 @@ gh api -X POST repos/mellowt1/todo/pages -f build_type=workflow
 gh workflow run pages.yml -R mellowt1/todo
 ```
 
-1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups).
-2. **Storage**: the list lives in a SQLite-backed Durable Object (`TodoList`, `worker/src/list.js`), one per code, created by the first deploy. It handles one write at a time, so two devices can never overwrite each other's batch. SQLite Durable Objects are on the Workers Free plan. The KV namespace `paul-hub` (`HUB_KV`) is kept for the Morning Screen's cache and is not used by the to-do.
+1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets for the to-do: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups). Three more for the Morning Screen, see below.
+2. **Storage**: the list lives in a SQLite-backed Durable Object (`TodoList`, `worker/src/list.js`), one per code, created by the first deploy. It handles one write at a time, so two devices can never overwrite each other's batch. SQLite Durable Objects are on the Workers Free plan. The KV namespace `paul-hub` (`HUB_KV`) belongs to the Morning Screen and is not used by the to-do.
 3. **Site**: `.github/workflows/pages.yml` publishes the `app/` folder on every push to `main` that touches it. Until Pages is on, the workflow skips.
 
 If the Worker lives somewhere other than `paul-hub.paul-o-a04.workers.dev`, add `&api=https://...` to the link once, or change the default near the top of `app/app.js`.
@@ -44,6 +44,38 @@ If the Worker lives somewhere other than `paul-hub.paul-o-a04.workers.dev`, add 
 * **App**: edit files in `app/`, commit, push. The Pages workflow names the offline cache after the commit, so phones pick up the new version on the next launch. Nothing to bump by hand.
 * **Worker**: `cd worker; npx wrangler deploy`.
 * **New code**: generate one (16 characters, `a-z0-9`), put it in `secrets.local.txt`, run the `TODO_CODE` line above, open the new link. The old list stays in its own Durable Object under the old code; copy it over with the admin export if needed.
+
+## Morning Screen (`worker/src/morning.js`)
+
+The Morning Screen (repo `mellowt1/morning`) reads everything from one route, with the same code as the to-do. The to-do itself is only read, never changed.
+
+| Route | Auth | What |
+|---|---|---|
+| `GET /api/morning/:code` | the code | `{ now, todos, calendar, fixed, weather, arsenal, bins }`. Each block loads on its own; one that fails is `{ error: "..." }` and the rest still arrive. |
+| `POST /api/morning/calendar` | `Bearer CALENDAR_PUSH_TOKEN` | Odysseus sends `{ sent, events: [{ title, start, end, allDay, location }] }` every 15 minutes. Timed events carry an offset, all day events are `YYYY-MM-DD` with the day after as end. At most 500 events, titles up to 200 characters, body up to 200 KB. Answers `{ ok: true, count }`. |
+
+Where each block comes from:
+
+* **todos**: open items in Today, from the list's Durable Object.
+* **calendar**: the last Odysseus push (KV `morning:calendar`), today plus six days. `stale` is true when the last push is over an hour old.
+* **fixed**: the `FIXED_EVENTS` secret, turned into real dates for the same seven days, plus countdowns. Missing or broken: empty lists, no error.
+* **weather**: Open-Meteo, no key, The Hague. The 08:00 and 17:30 rides on the next ride day (weekdays; after 17:30 and at weekends, the next weekday), the next two hours in 15 minute steps, sunrise and sunset, and one verdict line. Cached 15 minutes.
+* **arsenal**: ESPN's open JSON, all competitions (`soccer/all/teams/359/schedule`, plus `?fixture=true` for what is coming). Next fixture and last result. Cached one hour. Unofficial: if ESPN changes it, the block says it can't load.
+* **bins**: Den Haag's huisvuilkalender (`huisvuilkalender.denhaag.nl/rest/adressen/...`, no key) for `BIN_ADDRESS`. The next collection days with GFT, Restafval, Papier, PMD. Cached 12 hours. No address set: `null`.
+
+If a source fails, the last good copy is served for a while (weather 3 hours, Arsenal a day, bins a week), then the block shows its error. Everything is fetched only when the page asks, so a day costs a few dozen KV writes, far inside the free plan.
+
+**Headwind and tailwind.** The Worker does not know which way the ride to work goes, so by default it only says the wind's strength and direction. To get "headwind home", set `WORK_BEARING` near the top of `worker/src/morning.js` to the direction of the ride to work in degrees (0 north, 90 east, 45 north east) and deploy.
+
+**The three secrets.** Add them to `secrets.local.txt` and upload them with the same `wrangler secret bulk` lines as above (it only adds or replaces the names in the file):
+
+```
+CALENDAR_PUSH_TOKEN=<long random string, also in Odysseus's .env.production>
+FIXED_EVENTS={"events":[{"title":"Evening class","date":"2026-09-07","start":"20:00","end":"22:00","repeat":"weekly","until":"2026-10-26"}],"countdowns":[{"what":"the trip","date":"2026-12-01"}]}
+BIN_ADDRESS=1234AB 5
+```
+
+`FIXED_EVENTS` is one line of JSON. An event without `start` is all day; `repeat` can only be `weekly`; `until` is the last date it may fall on. `BIN_ADDRESS` is postcode, space, house number (a letter or addition may follow). The values above are examples; the real ones live only in the secrets file and in Cloudflare. Piping a value into `npx wrangler secret put` stores an empty secret on Windows, so always use the temp JSON file.
 
 ## How the sync works
 
@@ -61,8 +93,9 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `POST /api/todo/:code/ops` | the code | `{ ops: [{ op: "upsert" \| "delete", item }] }`, returns `{ rev, updated, items, rejected }`; `rejected` lists the indexes of ops that failed validation, the rest still land |
 | `GET /api/todo/open` | `Bearer TODO_READ_TOKEN` | open tasks only, `[{ text, section }]`. No done history, no writes. The token works here and nowhere else. |
 | `GET /api/admin/todo/export` | `Bearer ADMIN_TOKEN` | the whole stored document, tombstones included, for backups |
+| `/api/morning/...` | | see Morning Screen above |
 
-Input is whitelisted: text up to 500 characters, section one of `today`, `soon`, `someday`, ids 8 to 32 lowercase letters and digits, at most 200 ops per batch. An op that breaks these rules is skipped and reported; a malformed batch is refused. CORS allows `https://mellowt1.github.io` and localhost only. Routes are namespaced by module (`/api/todo/...`), so `/api/morning` can be added later without touching the to-do.
+Input is whitelisted: text up to 500 characters, section one of `today`, `soon`, `someday`, ids 8 to 32 lowercase letters and digits, at most 200 ops per batch. An op that breaks these rules is skipped and reported; a malformed batch is refused. CORS allows `https://mellowt1.github.io` and localhost only. Routes are namespaced by module (`/api/todo/...`, `/api/morning/...`), so one app never touches another's.
 
 Backup:
 
@@ -74,7 +107,7 @@ curl.exe -s -H "Authorization: Bearer $($s.ADMIN_TOKEN)" https://paul-hub.paul-o
 
 ```powershell
 npm install
-npm test                      # Worker unit tests: merge, tombstones, validation, tokens, CORS
+npm test                      # Worker unit tests: merge, tombstones, validation, tokens, CORS, morning blocks
 cd worker; npx wrangler dev --persist-to C:\wd   # Worker on :8787, dev values from worker/.dev.vars
 npm run serve                 # app on :8080, in a second window
 npm run check                 # drives the app in Chromium and saves screenshots/
@@ -88,7 +121,7 @@ On localhost the app talks to `http://localhost:8787` and skips the service work
 
 ```
 app/        the PWA: index.html, app.css, app.js, sw.js, manifest, icons
-worker/     paul-hub: wrangler.toml, src/worker.js (routes), src/list.js (the list's Durable Object), src/todo.js (merge, validation), test/
+worker/     paul-hub: wrangler.toml, src/worker.js (routes), src/list.js (the list's Durable Object), src/todo.js (merge, validation), src/morning.js (Morning Screen), test/
 scripts/    icons, local server, end to end check
 design/     the Claude Design brief
 SPEC.md     what was agreed
