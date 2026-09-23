@@ -38,6 +38,7 @@ function cleanTime(v, now, allowNull) {
 }
 
 // Collapse whitespace the way the app shows it. Control characters are dropped.
+// app/app.js has the same function; keep the two identical.
 export function cleanText(v) {
   if (typeof v !== 'string') return null;
   const t = v.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -67,20 +68,22 @@ export function cleanOp(raw, now = Date.now()) {
   return { op: 'upsert', item: { id: it.id, text, section: it.section, done, doneAt, updatedAt, pos } };
 }
 
-/* Validate a whole batch. Returns { ops } or { error }. One bad op rejects the batch,
- * so a broken client finds out instead of silently losing a change. */
+/* Validate a batch. Returns { ops, rejected } or { error }.
+ * A bad op is skipped on its own and reported back by index, so one broken task
+ * never holds up the others. Only a malformed batch as a whole is an error. */
 export function cleanBatch(body, now = Date.now()) {
   const list = body && Array.isArray(body.ops) ? body.ops : Array.isArray(body) ? body : null;
   if (!list) return { error: 'ops required' };
   if (list.length === 0) return { error: 'ops empty' };
   if (list.length > MAX_OPS) return { error: 'too many ops' };
   const ops = [];
-  for (const raw of list) {
+  const rejected = [];
+  list.forEach((raw, index) => {
     const op = cleanOp(raw, now);
-    if (!op) return { error: 'bad op' };
-    ops.push(op);
-  }
-  return { ops };
+    if (op) ops.push(op);
+    else rejected.push(index);
+  });
+  return { ops, rejected };
 }
 
 /* Apply clean ops to a document. Mutates and returns { doc, changed }.

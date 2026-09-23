@@ -88,12 +88,15 @@ test('a clock far in the future is clamped to now', () => {
   assert.ok(op.item.updatedAt <= NOW + 5 * 60 * 1000);
 });
 
-test('batch caps and one bad op rejects the batch', () => {
+test('batch caps; a bad op is skipped on its own and reported', () => {
   assert.equal(cleanBatch({ ops: [] }, NOW).error, 'ops empty');
   const many = Array.from({ length: MAX_OPS + 1 }, (_, i) => ({ op: 'upsert', item: item('a' + String(i).padStart(8, '0')) }));
   assert.equal(cleanBatch({ ops: many }, NOW).error, 'too many ops');
-  assert.equal(cleanBatch({ ops: [{ op: 'upsert', item: item('aaaaaaaa') }, { op: 'upsert' }] }, NOW).error, 'bad op');
+  const r = cleanBatch({ ops: [{ op: 'upsert', item: item('aaaaaaaa') }, { op: 'upsert' }, { op: 'upsert', item: item('bbbbbbbb', { text: '' }) }] }, NOW);
+  assert.equal(r.ops.length, 1);
+  assert.deepEqual(r.rejected, [1, 2]);
   assert.equal(cleanBatch({ ops: [{ op: 'upsert', item: item('aaaaaaaa') }] }, NOW).ops.length, 1);
+  assert.equal(cleanBatch({ ops: 'x' }, NOW).error, 'ops required');
 });
 
 test('open view shows open tasks with section only', () => {
