@@ -13,12 +13,16 @@ tag = "v1"
 new_sqlite_classes = ["TodoList"]
 
 # One KV namespace, "paul-hub" in the dashboard, reached from the Worker as HUB_KV.
-# Not used by the to-do. Reserved for the Morning Screen's cache:<block> entries.
+# Not used by the to-do. The Morning Screen keeps the calendar push from Odysseus
+# (morning:calendar) and its weather, Arsenal and bin cache (cache:<block>) here.
 [[kv_namespaces]]
 binding = "HUB_KV"
 id = "a8b5f676c79f416f9e5ae37b5c589b4a"
 
-# Secrets, set with `npx wrangler secret put <NAME>`, never written here:
-#   TODO_CODE        the 16 character list code in Paul's private link
-#   TODO_READ_TOKEN  Odysseus, read only, GET /api/todo/open and nothing else
-#   ADMIN_TOKEN      full backup, GET /api/admin/todo/export
+# Secrets, uploaded with `npx wrangler secret bulk <file.json>` (see README), never written here:
+#   TODO_CODE            the 16 character list code in Paul's private link
+#   TODO_READ_TOKEN      Odysseus, read only, GET /api/todo/open and nothing else
+#   ADMIN_TOKEN          full backup, GET /api/admin/todo/export
+#   CALENDAR_PUSH_TOKEN  Odysseus, POST /api/morning/calendar and nothing else
+#   FIXED_EVENTS         Morning Screen: repeating events and countdowns (JSON)
+#   BIN_ADDRESS          Morning Screen: postcode and house number, for bin days

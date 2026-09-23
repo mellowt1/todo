@@ -1,7 +1,7 @@
 /* paul-hub
  *
- * One small Worker for Paul's own apps. Routes are namespaced by module, so the
- * Morning Screen can add /api/morning later without touching the to-do.
+ * One small Worker for Paul's own apps. Routes are namespaced by module
+ * (/api/<module>/...), so each app has its own corner and never touches another's.
  *
  * To-do (the code in the link is the key; there are no accounts):
  *   GET  /api/todo/:code             -> { items, rev, updated }
@@ -11,6 +11,13 @@
  *   GET  /api/todo/open              Authorization: Bearer <TODO_READ_TOKEN>
  *                                    -> { items: [{ text, section }], updated }  open tasks only
  *
+ * Morning Screen (src/morning.js; the to-do's code, read only):
+ *   GET  /api/morning/:code          -> { now, todos, calendar, fixed, weather, arsenal, bins }
+ *                                    every block loads on its own; a failed one is { error }
+ *   POST /api/morning/calendar       Authorization: Bearer <CALENDAR_PUSH_TOKEN>
+ *                                    <- { sent, events: [{ title, start, end, allDay, location }] }
+ *                                    -> { ok: true, count }   (Odysseus, every 15 minutes)
+ *
  * Admin (backup):
  *   GET  /api/admin/todo/export      Authorization: Bearer <ADMIN_TOKEN>
  *                                    -> the whole list, tombstones included
@@ -18,9 +25,11 @@
  * The list itself lives in a Durable Object (src/list.js), one per code, so writes
  * are serialised. Only the one list code the Worker knows as TODO_CODE is served.
  * Any other code gets a 404, so nobody can use this as free storage.
+ * HUB_KV (KV) holds the Morning Screen's calendar push and its weather, Arsenal and bin cache.
  */
 
 import { CODE, cleanBatch, safeEqual, bearer } from './todo.js';
+import { handleMorning } from './morning.js';
 
 export { TodoList } from './list.js';
 
@@ -110,6 +119,7 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
+  morning: (request, env, rest) => handleMorning(request, env, rest, json),
   admin: handleAdmin,
 };
 
