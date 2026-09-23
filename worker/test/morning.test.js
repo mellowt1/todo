@@ -418,6 +418,17 @@ test('arsenal: draws, wins on penalties, and half broken feeds', () => {
   assert.throws(() => parseArsenal({ events: [] }, { events: [{ nonsense: true }] }));
 });
 
+test('arsenal: when the first ESPN host refuses, the second one is asked', async () => {
+  const env = makeEnv();
+  allSources();
+  routes[ESPN_RESULTS] = routes[ESPN_FIXTURES] = () => new Response('Forbidden', { status: 403 });
+  routes['https://site.api.espn.com/'] = (u) => (u.includes('fixture=true') ? FIXTURES : RESULTS);
+  const b = await (await get(env, zoned('2026-10-07', '07:40'))).json();
+  assert.equal(b.arsenal.next.opponent, 'Northern');
+  assert.equal(b.arsenal.last.opponent, 'Seaside');
+  assert.equal(hits('https://site.api.espn.com/'), 2);
+});
+
 /* ---------- Bins ---------- */
 
 test('bins: address parsing, stream names, next collections grouped by day', () => {

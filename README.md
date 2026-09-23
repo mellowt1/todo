@@ -60,7 +60,7 @@ Where each block comes from:
 * **calendar**: the last Odysseus push (KV `morning:calendar`), today plus six days. `stale` is true when the last push is over an hour old.
 * **fixed**: the `FIXED_EVENTS` secret, turned into real dates for the same seven days, plus countdowns. Missing or broken: empty lists, no error.
 * **weather**: Open-Meteo, no key, The Hague. The 08:00 and 17:30 rides on the next ride day (weekdays; after 17:30 and at weekends, the next weekday), the next two hours in 15 minute steps, sunrise and sunset, and one verdict line. Cached 15 minutes.
-* **arsenal**: ESPN's open JSON, all competitions (`soccer/all/teams/359/schedule`, plus `?fixture=true` for what is coming). Next fixture and last result. Cached one hour. Unofficial: if ESPN changes it, the block says it can't load.
+* **arsenal**: ESPN's open JSON, all competitions (`site.web.api.espn.com/apis/site/v2/sports/soccer/all/teams/359/schedule`, plus `?fixture=true` for what is coming; `site.api.espn.com` is the fallback, as its bot filter refuses some callers). Next fixture and last result. Cached one hour. Unofficial: if ESPN changes it, the block says it can't load.
 * **bins**: Den Haag's huisvuilkalender (`huisvuilkalender.denhaag.nl/rest/adressen/...`, no key) for `BIN_ADDRESS`. The next collection days with GFT, Restafval, Papier, PMD. Cached 12 hours. No address set: `null`.
 
 If a source fails, the last good copy is served for a while (weather 3 hours, Arsenal a day, bins a week), then the block shows its error. Everything is fetched only when the page asks, so a day costs a few dozen KV writes, far inside the free plan.

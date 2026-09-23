@@ -537,8 +537,20 @@ async function weather(env, now) {
 /* ---------- Arsenal: ESPN's open JSON ---------- */
 
 export const ARSENAL = '359';
-export const ESPN_RESULTS = 'https://site.api.espn.com/apis/site/v2/sports/soccer/all/teams/359/schedule';
+// Two hosts serve the same feed. site.api.espn.com sits behind a bot filter that refuses
+// some callers (403), so site.web.api.espn.com is asked first and the other is the fallback.
+const ESPN_PATH = '/apis/site/v2/sports/soccer/all/teams/359/schedule';
+export const ESPN_HOSTS = ['https://site.web.api.espn.com', 'https://site.api.espn.com'];
+export const ESPN_RESULTS = ESPN_HOSTS[0] + ESPN_PATH;
 export const ESPN_FIXTURES = ESPN_RESULTS + '?fixture=true';
+
+async function espn(query) {
+  let err;
+  for (const host of ESPN_HOSTS) {
+    try { return await getJson(host + ESPN_PATH + query); } catch (e) { err = e; }
+  }
+  throw err;
+}
 
 const competitionName = (e) => {
   const n = (e.league && (e.league.shortName || e.league.abbreviation || e.league.name)) || '';
@@ -618,7 +630,7 @@ export function arsenalBlock(data, now) {
 
 async function arsenal(env, now) {
   const data = await cached(env, 'cache:arsenal', TTL.arsenal, STALE.arsenal, now, async () => {
-    const [r, f] = await Promise.allSettled([getJson(ESPN_RESULTS), getJson(ESPN_FIXTURES)]);
+    const [r, f] = await Promise.allSettled([espn(''), espn('?fixture=true')]);
     if (r.status === 'rejected' && f.status === 'rejected') throw new Error('espn down');
     return parseArsenal(r.value, f.value);
   });
