@@ -1,0 +1,11 @@
+# Dependencies and tool state
+node_modules/
+.wrangler/
+
+# Secrets. Never committed.
+.dev.vars
+secrets.local.txt
+*.local.txt
+
+.DS_Store
+Thumbs.db
