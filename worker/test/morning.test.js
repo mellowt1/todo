@@ -8,6 +8,7 @@ import {
   trimWeather, weatherBlock, rainSlots, rainLine, relativeWind, compass, parseArsenal, arsenalBlock,
   parseAddress, parseBins, streamNames, binsBlock, cached, handleMorning, CAL_KEY,
   WEATHER_URL, ESPN_RESULTS, ESPN_FIXTURES, BINS_BASE,
+  parseBirthdays, birthdaysBlock, parseNews, NEWS_URL, addDays as addDaysW,
 } from '../src/morning.js';
 import { memNamespace } from './mem.js';
 
@@ -464,6 +465,7 @@ function allSources({ weather = openMeteo(), results = RESULTS, fixtures = FIXTU
   routes[BINS_BASE + '9999ZZ-12'] = () => [{ bagId: '0000000000000001', huisletter: '', huisnummerToevoeging: '' }];
   routes[BINS_BASE + '0000000000000001/afvalstromen'] = () => streams;
   routes[BINS_BASE + '0000000000000001/kalender/'] = () => cal;
+  routes[NEWS_URL] = () => new Response(RSS, { headers: { 'Content-Type': 'text/xml' } });
 }
 
 const get = (env, now, path = '/api/morning/' + CODE, init = {}) =>
@@ -525,7 +527,7 @@ test('GET: one failing source never breaks the others', async () => {
   assert.deepEqual(b.weather, { error: "Weather can't load right now" });
   assert.deepEqual(b.arsenal, { error: "Arsenal can't load right now" });
   assert.deepEqual(b.bins, { error: "Bin days can't load right now" });
-  assert.deepEqual(b.todos, { items: [], updated: null });
+  assert.deepEqual(b.todos, { items: [], updated: null, yesterday: { count: 0, items: [] } });
   assert.deepEqual(b.fixed, { events: [], countdowns: [] });
   assert.equal(b.calendar.stale, true);
 
@@ -612,4 +614,99 @@ test('cached(): fresh hit, miss, stale fallback, and a KV that is down', async (
   await assert.rejects(cached(env, 'k', 1000, 5000, 9000, boom));
   env.HUB_KV.fail = true;
   assert.equal(await cached(env, 'k', 1000, 5000, 9000, load), 3);
+});
+
+/* ---------- Second pass: yesterday's wins, birthdays, news ---------- */
+
+test("todos: yesterday's wins, from done items finished yesterday in Amsterdam", async () => {
+  const env = makeEnv();
+  const now = Date.now();
+  const today = local(now).date;
+  const y = addDaysW(today, -1);
+  const at = (date, time) => zoned(date, time);
+  const t = (id, text, done, doneAt, section = 'today') => ({ op: 'upsert', item: { id, text, section, done, doneAt: done ? doneAt : null, updatedAt: now - 1000, pos: now - 1000 } });
+  const ops = [
+    t('aaaaaaaa', 'Water the plants', true, at(y, '09:00')),
+    t('bbbbbbbb', 'Call the garage', true, at(y, '23:30'), 'soon'),
+    t('cccccccc', 'Two days ago', true, at(addDaysW(today, -2), '12:00')),
+    t('dddddddd', 'Still open', false, null),
+    t('eeeeeeee', 'Just before midnight the day before', true, at(y, '00:00') - 60000),
+    ...['ffffffff', 'gggggggg', 'hhhhhhhh', 'iiiiiiii'].map((id, n) => t(id, 'Win ' + n, true, at(y, '10:0' + n))),
+  ];
+  const r = await worker.fetch(new Request(`${BASE}/api/todo/${CODE}/ops`, { method: 'POST', body: JSON.stringify({ ops }) }), env);
+  assert.equal(r.status, 200);
+  const b = await (await get(env, now)).json();
+  assert.equal(b.todos.yesterday.count, 6);
+  assert.deepEqual(b.todos.yesterday.items, ['Call the garage', 'Win 3', 'Win 2', 'Win 1', 'Win 0']);
+  assert.deepEqual(b.todos.items, [{ text: 'Still open' }]);
+});
+
+test('birthdays: the next 14 days, ages when the year is known, 29 February', () => {
+  const raw = JSON.stringify([
+    { name: 'Nick', date: '1986-10-12' },
+    { name: 'Ada', date: '10-07' },
+    { name: 'Bea', date: '10-21' },
+    { name: 'Cas', date: '10-22' }, // 15 days: out
+    { name: 'Dora', date: '2001-10-06' }, // yesterday: next year, out
+    { name: '  ', date: '10-08' },
+    { name: 'Bad', date: '13-01' },
+    { name: 'Bad2', date: '1999-02-29' },
+    { name: 'Bad3' },
+  ]);
+  const b = birthdaysBlock(raw, zoned('2026-10-07', '07:40'));
+  assert.deepEqual(b.birthdays, [
+    { name: 'Ada', date: '2026-10-07', days: 0, age: null },
+    { name: 'Nick', date: '2026-10-12', days: 5, age: 40 },
+    { name: 'Bea', date: '2026-10-21', days: 14, age: null },
+  ]);
+  assert.equal(parseBirthdays(raw).length, 5);
+  // Leap day birthdays land on 28 February in other years; across the new year too.
+  const leap = JSON.stringify([{ name: 'Leo', date: '2000-02-29' }, { name: 'Noor', date: '1990-01-02' }]);
+  assert.deepEqual(birthdaysBlock(leap, zoned('2027-02-20', '09:00')).birthdays, [{ name: 'Leo', date: '2027-02-28', days: 8, age: 27 }]);
+  assert.deepEqual(birthdaysBlock(leap, zoned('2026-12-30', '09:00')).birthdays, [{ name: 'Noor', date: '2027-01-02', days: 3, age: 37 }]);
+  for (const bad of [undefined, '', 'nope', '{}', 'null', '[1,2]']) assert.deepEqual(birthdaysBlock(bad, Date.now()), { birthdays: [] });
+});
+
+const RSS = `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>News</title>
+  <item><title><![CDATA[First headline about the harbour]]></title><link>https://nos.nl/l/1</link><description><![CDATA[<p>body</p>]]></description></item>
+  <item><title>Second &amp; plain &#8220;quoted&#8221; title - with a dash</title><link>https://nos.nl/l/2</link></item>
+  <item><title><![CDATA[Not NOS]]></title><link>https://example.com/x</link></item>
+  <item><title><![CDATA[Insecure]]></title><link>http://nos.nl/l/9</link></item>
+  <item><title><![CDATA[Third one]]></title><link>https://nos.nl/l/3</link></item>
+  <item><title><![CDATA[Fourth, not shown]]></title><link>https://nos.nl/l/4</link></item>
+</channel></rss>`;
+
+test('news: top three NOS headlines, https nos.nl links only, no dashes', () => {
+  assert.deepEqual(parseNews(RSS).items, [
+    { title: 'First headline about the harbour', link: 'https://nos.nl/l/1' },
+    { title: 'Second & plain “quoted” title: with a dash', link: 'https://nos.nl/l/2' },
+    { title: 'Third one', link: 'https://nos.nl/l/3' },
+  ]);
+  assert.throws(() => parseNews('<html>nope</html>'));
+  assert.throws(() => parseNews('<rss><channel></channel></rss>'));
+  assert.throws(() => parseNews(undefined));
+});
+
+test('GET: birthdays and news blocks, news cached 30 minutes, errors stay in their block', async () => {
+  const now = zoned('2026-10-07', '07:40');
+  const env = makeEnv({ BIRTHDAYS: JSON.stringify([{ name: 'Ada', date: '1990-10-09' }]) });
+  allSources();
+  let b = await (await get(env, now)).json();
+  assert.deepEqual(b.birthdays, { birthdays: [{ name: 'Ada', date: '2026-10-09', days: 2, age: 36 }] });
+  assert.equal(b.news.items.length, 3);
+  assert.equal(hits(NEWS_URL), 1);
+  await get(env, now + 29 * MIN);
+  assert.equal(hits(NEWS_URL), 1);
+  await get(env, now + 31 * MIN);
+  assert.equal(hits(NEWS_URL), 2);
+  // NOS down with no cached copy: an error in the news block only.
+  const env2 = makeEnv();
+  routes[NEWS_URL] = () => new Response('nope', { status: 503 });
+  b = await (await get(env2, now)).json();
+  assert.deepEqual(b.news, { error: "News can't load right now" });
+  assert.deepEqual(b.birthdays, { birthdays: [] });
+  assert.equal(b.weather.rides.length, 2);
+  // Garbage instead of RSS is an error too.
+  routes[NEWS_URL] = () => new Response('<html></html>');
+  assert.deepEqual((await (await get(makeEnv(), now)).json()).news, { error: "News can't load right now" });
 });
