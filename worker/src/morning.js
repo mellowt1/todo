@@ -1,6 +1,6 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news }
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news, kitchen }
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                  -> { ok: true, count }
@@ -18,9 +18,12 @@
  * while (see STALE), so one bad minute at ESPN does not blank the block.
  *
  * Secrets (never in this repo): TODO_CODE, CALENDAR_PUSH_TOKEN, FIXED_EVENTS, BIN_ADDRESS, BIRTHDAYS.
+ * The kitchen block is read inside the Worker with KITCHEN_CODE; that code never leaves it.
  */
 
 import { CODE, safeEqual, bearer } from './todo.js';
+import { kitchen } from './kitchen-store.js';
+import { tonightView } from './kitchen.js';
 
 export const TZ = 'Europe/Amsterdam';
 const MIN = 60 * 1000;
@@ -826,6 +829,17 @@ async function news(env, now) {
 
 /* ---------- The route ---------- */
 
+/* ---------- Kitchen: tonight's dinner and the pizza dough's mix day ---------- */
+
+/* { tonight: { kind, title, veg } | null, mixToday, pizzaOn } from the kitchen's Durable
+ * Object, or null when KITCHEN_CODE is not set or there is nothing to say today. */
+export async function kitchenBlock(env, now = Date.now()) {
+  if (!env.KITCHEN_CODE || !env.KITCHEN_STORE) return null;
+  const d = (await kitchen(env, env.KITCHEN_CODE, '/read')).data;
+  if (!d || !Array.isArray(d.items)) throw new Error('no items');
+  return tonightView(d.items, local(now).date);
+}
+
 const block = (fn, message) => Promise.resolve().then(fn).catch(() => ({ error: message }));
 
 export async function handleMorning(request, env, rest, json, now = Date.now()) {
@@ -836,7 +850,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   if (!env.TODO_CODE || !safeEqual(code, env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB] = await Promise.all([
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB, kitchenB] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
@@ -845,6 +859,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => fixedBlock(env.FIXED_EVENTS, now), 'Fixed events could not be read'),
     block(() => birthdaysBlock(env.BIRTHDAYS, now), 'Birthdays could not be read'),
     block(() => news(env, now), "News can't load right now"),
+    block(() => kitchenBlock(env, now), "Kitchen can't load right now"),
   ]);
   return json({
     now: new Date(now).toISOString(),
@@ -856,5 +871,6 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     bins: binsB,
     birthdays: birthdays.error ? { birthdays: [] } : birthdays,
     news: newsB,
+    kitchen: kitchenB,
   }, request);
 }
