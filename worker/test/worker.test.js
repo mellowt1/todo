@@ -104,7 +104,8 @@ test('CORS allows Pages and localhost only', async () => {
   assert.equal(await origin('http://localhost.evil.example'), null);
 });
 
-test('unknown module is a 404, leaving room for /api/morning later', async () => {
+test('unknown module is a 404', async () => {
   const { env } = makeEnv();
+  assert.equal((await call(env, '/api/nothing')).status, 404);
   assert.equal((await call(env, '/api/morning')).status, 404);
 });
