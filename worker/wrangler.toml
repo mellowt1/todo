@@ -8,9 +8,19 @@ compatibility_date = "2026-09-01"
 name = "TODO_LIST"
 class_name = "TodoList"
 
+# The kitchen, one SQLite Durable Object per kitchen code (src/kitchen-store.js).
+[[durable_objects.bindings]]
+name = "KITCHEN_STORE"
+class_name = "KitchenStore"
+
+# Migrations run once each, in order. Never edit a tag that has been deployed; add a new one.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodoList"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["KitchenStore"]
 
 # One KV namespace, "paul-hub" in the dashboard, reached from the Worker as HUB_KV.
 # Not used by the to-do. The Morning Screen keeps the calendar push from Odysseus
@@ -27,3 +37,4 @@ id = "a8b5f676c79f416f9e5ae37b5c589b4a"
 #   FIXED_EVENTS         Morning Screen: repeating events and countdowns (JSON)
 #   BIN_ADDRESS          Morning Screen: postcode and house number, for bin days
 #   BIRTHDAYS            Morning Screen: names and birthdays (JSON)
+#   KITCHEN_CODE         the 16 character kitchen code in the Kitchen link (never the same as TODO_CODE)
