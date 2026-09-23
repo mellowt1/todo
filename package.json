@@ -1,0 +1,12 @@
+{
+  "name": "todo",
+  "private": true,
+  "type": "module",
+  "description": "Paul's simple to-do: a static PWA and the paul-hub Worker.",
+  "scripts": {
+    "test": "node --test worker/test/*.test.js",
+    "icons": "node scripts/make-icons.mjs",
+    "serve": "node scripts/serve.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  }
+}
