@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>To-do</title>
+<meta name="description" content="Paul's to-do list.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="To-do">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body class="view-list">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-glyph" viewBox="0 0 24 24"><path d="M8 12.3l2.8 2.8L16.2 9.5"/></symbol>
+  <symbol id="i-move" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-offline" viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .8-7.9A6 6 0 0 0 6.3 9.2 4.5 4.5 0 0 0 7 18z"/><path d="M3 3l18 18"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M6 11v9h12v-9"/></symbol>
+  <symbol id="i-addbox" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+</svg>
+
+<nav class="sidebar" aria-label="Sections">
+  <div class="brand">To-do</div>
+  <button class="nav-item" data-section="today"><span>Today</span><span class="count"></span></button>
+  <button class="nav-item" data-section="soon"><span>Soon</span><span class="count"></span></button>
+  <button class="nav-item" data-section="someday"><span>Someday</span><span class="count"></span></button>
+  <div class="nav-sep" role="separator"></div>
+  <button class="nav-item nav-done" data-section="done"><svg class="ic" width="18" height="18"><use href="#i-clock"/></svg><span>Done</span></button>
+</nav>
+
+<main class="main">
+  <div class="col">
+    <header class="top">
+      <div class="title-row">
+        <h1 id="title">Today</h1>
+        <button id="historyBtn" class="icon-btn phone-only list-only" aria-label="Done history"><svg class="ic" width="24" height="24"><use href="#i-clock"/></svg></button>
+        <button id="closeDone" class="text-btn phone-only done-only">Close</button>
+        <button id="addDesk" class="add-desk desk-only list-only" aria-label="Add task"><svg class="ic ic-2" width="20" height="20"><use href="#i-plus"/></svg></button>
+      </div>
+      <div id="pill" class="pill" role="status" hidden><svg class="ic" width="16" height="16"><use href="#i-offline"/></svg><span></span></div>
+      <div id="banner" class="banner" hidden>
+        <span>Could not sync. Your changes are saved on this device.</span>
+        <button id="retry" class="text-btn">Retry</button>
+      </div>
+    </header>
+
+    <div id="inlineAdd" class="inline-add" hidden>
+      <span class="circle-static" aria-hidden="true"></span>
+      <label for="inlineInput" class="sr-only">New task</label>
+      <input id="inlineInput" type="text" placeholder="New task" maxlength="500" autocomplete="off" autocapitalize="sentences">
+      <span class="meta">Enter to add</span>
+    </div>
+
+    <ul id="list" class="list" aria-labelledby="title"></ul>
+
+    <div id="empty" class="empty" hidden>
+      <svg class="ic ic-glyph" width="40" height="40"><use href="#i-glyph"/></svg>
+      <p></p>
+    </div>
+
+    <div id="install" class="install" hidden>
+      <div class="install-body">
+        <div class="install-title">Add To-do to your Home Screen</div>
+        <div class="install-text">
+          <span>Tap Share</span><span class="glyph"><svg class="ic" width="18" height="18"><use href="#i-share"/></svg></span><span>, then Add to Home Screen</span><span class="glyph"><svg class="ic" width="18" height="18"><use href="#i-addbox"/></svg></span><span>.</span>
+        </div>
+      </div>
+      <button id="installClose" class="icon-btn install-close" aria-label="Dismiss"><svg class="ic" width="20" height="20"><use href="#i-close"/></svg></button>
+    </div>
+
+    <p class="kbd-hint desk-only list-only">N new task · 1 2 3 sections · Space done · Enter edit</p>
+  </div>
+</main>
+
+<button id="fab" class="fab phone-only list-only" aria-label="Add task"><svg class="ic ic-2" width="26" height="26"><use href="#i-plus"/></svg></button>
+
+<div id="switcher" class="seg switcher phone-only list-only" role="tablist" aria-label="Sections">
+  <button role="tab" data-section="today">Today</button>
+  <button role="tab" data-section="soon">Soon</button>
+  <button role="tab" data-section="someday">Someday</button>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden>
+  <span id="toastText"></span>
+  <button id="toastUndo">Undo</button>
+</div>
+
+<div id="capture" class="sheet-wrap" hidden>
+  <div class="scrim" data-close></div>
+  <div class="sheet capture-sheet" role="dialog" aria-label="New task">
+    <div class="grabber"></div>
+    <label for="capInput" id="capLabel" class="meta">Adds to Today</label>
+    <div class="cap-row">
+      <span class="circle-static" aria-hidden="true"></span>
+      <input id="capInput" type="text" maxlength="500" autocomplete="off" autocapitalize="sentences">
+    </div>
+  </div>
+</div>
+
+<div id="edit" class="sheet-wrap" hidden>
+  <div class="scrim" data-close></div>
+  <div class="sheet edit-sheet" role="dialog" aria-label="Edit task">
+    <div class="grabber"></div>
+    <div class="edit-head"><button id="editClose" class="text-btn big">Close</button></div>
+    <label for="editText" class="meta">Task</label>
+    <textarea id="editText" rows="3" maxlength="500" autocapitalize="sentences"></textarea>
+    <div class="meta">Section</div>
+    <div id="editSeg" class="seg" role="radiogroup" aria-label="Section">
+      <button role="radio" data-section="today">Today</button>
+      <button role="radio" data-section="soon">Soon</button>
+      <button role="radio" data-section="someday">Someday</button>
+    </div>
+    <div class="grow"></div>
+    <button id="editDelete" class="danger-btn">Delete task</button>
+  </div>
+</div>
+
+<div id="confirm" class="dialog-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="dialog" role="alertdialog" aria-labelledby="confirmText">
+    <p id="confirmText">Delete this task? It will not go to Done.</p>
+    <div class="dialog-actions">
+      <button id="confirmCancel">Cancel</button>
+      <button id="confirmDelete" class="danger">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div id="menu" class="menu" role="menu" hidden></div>
+
+<div id="nocode" class="nocode" hidden>
+  <p>This link is missing its code. Open the private link again.</p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
