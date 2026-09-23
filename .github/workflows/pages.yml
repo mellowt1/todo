@@ -26,6 +26,12 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # Name the offline cache after the commit, so every publish is a new cache and
+      # phones never mix files from two versions, even when nobody bumped it by hand.
+      - name: Stamp the service worker cache
+        run: |
+          sed -i "s/^const CACHE = 'todo-[^']*';/const CACHE = 'todo-${GITHUB_SHA::12}';/" app/sw.js
+          grep -q "^const CACHE = 'todo-${GITHUB_SHA::12}';" app/sw.js
       - uses: actions/upload-pages-artifact@v3
         with:
           path: app

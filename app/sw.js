@@ -1,6 +1,7 @@
 // To-do offline cache. Feeling App pattern: versioned, cache first, refreshed in the background.
-// Bump CACHE on every release so phones pick up the new files on the next launch.
-const CACHE = 'todo-v1';
+// The Pages workflow replaces CACHE with the commit on every publish, so phones pick up the
+// new files on the next launch. The value here is only used locally.
+const CACHE = 'todo-dev';
 const FILES = [
   './',
   './index.html',
