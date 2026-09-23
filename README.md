@@ -33,7 +33,7 @@ gh api -X POST repos/mellowt1/todo/pages -f build_type=workflow
 gh workflow run pages.yml -R mellowt1/todo
 ```
 
-1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets for the to-do: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups). Three more for the Morning Screen, see below.
+1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets for the to-do: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups). Four more for the Morning Screen, see below.
 2. **Storage**: the list lives in a SQLite-backed Durable Object (`TodoList`, `worker/src/list.js`), one per code, created by the first deploy. It handles one write at a time, so two devices can never overwrite each other's batch. SQLite Durable Objects are on the Workers Free plan. The KV namespace `paul-hub` (`HUB_KV`) belongs to the Morning Screen and is not used by the to-do.
 3. **Site**: `.github/workflows/pages.yml` publishes the `app/` folder on every push to `main` that touches it. Until Pages is on, the workflow skips.
 
@@ -51,31 +51,34 @@ The Morning Screen (repo `mellowt1/morning`) reads everything from one route, wi
 
 | Route | Auth | What |
 |---|---|---|
-| `GET /api/morning/:code` | the code | `{ now, todos, calendar, fixed, weather, arsenal, bins }`. Each block loads on its own; one that fails is `{ error: "..." }` and the rest still arrive. |
+| `GET /api/morning/:code` | the code | `{ now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news }`. Each block loads on its own; one that fails is `{ error: "..." }` and the rest still arrive. |
 | `POST /api/morning/calendar` | `Bearer CALENDAR_PUSH_TOKEN` | Odysseus sends `{ sent, events: [{ title, start, end, allDay, location }] }` every 15 minutes. Timed events carry an offset, all day events are `YYYY-MM-DD` with the day after as end. At most 500 events, titles up to 200 characters, body up to 200 KB. Answers `{ ok: true, count }`. |
 
 Where each block comes from:
 
-* **todos**: open items in Today, from the list's Durable Object.
+* **todos**: open items in Today, from the list's Durable Object, plus `yesterday`: how many items were finished yesterday (Amsterdam time, any section) and up to five of their names. Read only.
 * **calendar**: the last Odysseus push (KV `morning:calendar`), today plus six days. `stale` is true when the last push is over an hour old.
 * **fixed**: the `FIXED_EVENTS` secret, turned into real dates for the same seven days, plus countdowns. Missing or broken: empty lists, no error.
 * **weather**: Open-Meteo, no key, The Hague. The 08:00 and 17:30 rides on the next ride day (weekdays; after 17:30 and at weekends, the next weekday), the next two hours in 15 minute steps, sunrise and sunset, and one verdict line. Cached 15 minutes.
 * **arsenal**: ESPN's open JSON, all competitions (`site.web.api.espn.com/apis/site/v2/sports/soccer/all/teams/359/schedule`, plus `?fixture=true` for what is coming; `site.api.espn.com` is the fallback, as its bot filter refuses some callers). Next fixture and last result. Cached one hour. Unofficial: if ESPN changes it, the block says it can't load.
 * **bins**: Den Haag's huisvuilkalender (`huisvuilkalender.denhaag.nl/rest/adressen/...`, no key) for `BIN_ADDRESS`. The next collection days with GFT, Restafval, Papier, PMD. Cached 12 hours. No address set: `null`.
+* **birthdays**: the `BIRTHDAYS` secret, birthdays today and in the next 14 days, with the age turned when the year is known. Missing or broken: an empty list, no error.
+* **news**: the top three headlines from the NOS feed (`feeds.nos.nl/nosnieuwsalgemeen`, no key), title and link. Cached 30 minutes; a failure is `{ error }` in this block only. NOS sends no CORS header, so the page cannot fetch it itself if Cloudflare is ever refused.
 
 If a source fails, the last good copy is served for a while (weather 3 hours, Arsenal a day, bins a week), then the block shows its error. Everything is fetched only when the page asks, so a day costs a few dozen KV writes, far inside the free plan.
 
 **Headwind and tailwind.** The Worker does not know which way the ride to work goes, so by default it only says the wind's strength and direction. To get "headwind home", set `WORK_BEARING` near the top of `worker/src/morning.js` to the direction of the ride to work in degrees (0 north, 90 east, 45 north east) and deploy.
 
-**The three secrets.** Add them to `secrets.local.txt` and upload them with the same `wrangler secret bulk` lines as above (it only adds or replaces the names in the file):
+**The four secrets.** Add them to `secrets.local.txt` and upload them with the same `wrangler secret bulk` lines as above (it only adds or replaces the names in the file):
 
 ```
 CALENDAR_PUSH_TOKEN=<long random string, also in Odysseus's .env.production>
 FIXED_EVENTS={"events":[{"title":"Evening class","date":"2026-09-07","start":"20:00","end":"22:00","repeat":"weekly","until":"2026-10-26"}],"countdowns":[{"what":"the trip","date":"2026-12-01"}]}
 BIN_ADDRESS=1234AB 5
+BIRTHDAYS=[{"name":"Nick","date":"1986-10-12"},{"name":"Ada","date":"03-21"}]
 ```
 
-`FIXED_EVENTS` is one line of JSON. An event without `start` is all day; `repeat` can only be `weekly`; `until` is the last date it may fall on. `BIN_ADDRESS` is postcode, space, house number (a letter or addition may follow). The values above are examples; the real ones live only in the secrets file and in Cloudflare. Piping a value into `npx wrangler secret put` stores an empty secret on Windows, so always use the temp JSON file.
+`FIXED_EVENTS` is one line of JSON. An event without `start` is all day; `repeat` can only be `weekly`; `until` is the last date it may fall on. `BIN_ADDRESS` is postcode, space, house number (a letter or addition may follow). `BIRTHDAYS` is one line of JSON: a name and either `MM-DD`, or `YYYY-MM-DD` to show the age they turn. The values above are examples; the real ones live only in the secrets file and in Cloudflare. Piping a value into `npx wrangler secret put` stores an empty secret on Windows, so always use the temp JSON file.
 
 ## How the sync works
 
