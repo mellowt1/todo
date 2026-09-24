@@ -24,6 +24,11 @@
  *   POST /api/kitchen/:code/ops         <- { ops: [{ op: "upsert" | "delete", type, item }] }
  *                                       -> { rev, updated, items, rejected: [index, ...] }
  *
+ * German tutor calls (src/german.js; the PC pushes, Odysseus reads):
+ *   POST /api/german/week     Bearer <GERMAN_PUSH_TOKEN>  <- { calls: [...] }  -> { ok: true, count }
+ *   POST /api/german/outcome  Bearer <GERMAN_PUSH_TOKEN>  <- { id, status, minutes?, outcomeAt, fixes? }
+ *   GET  /api/german/calls    Bearer <GERMAN_READ_TOKEN>  ?from=YYYY-MM-DD  -> { calls, updated }
+ *
  * Admin (Authorization: Bearer <ADMIN_TOKEN>):
  *   GET  /api/admin/todo/export         -> the whole list, tombstones included
  *   POST /api/admin/kitchen/recipes     <- { recipes: [recipe, ...] }  (no id: a new recipe)
@@ -36,13 +41,15 @@
  * are serialised. Only the one list code the Worker knows as TODO_CODE is served.
  * Any other code gets a 404, so nobody can use this as free storage. The kitchen works
  * the same way with its own Durable Object (src/kitchen-store.js) and KITCHEN_CODE.
- * HUB_KV (KV) holds the Morning Screen's calendar push and its weather, Arsenal and bin cache.
+ * HUB_KV (KV) holds the Morning Screen's calendar push and its weather, Arsenal and bin cache,
+ * and the German calls (german:calls).
  */
 
 import { CODE, cleanBatch, safeEqual, bearer } from './todo.js';
 import { handleMorning, putProjects } from './morning.js';
 import { cleanBatch as cleanKitchenBatch, cleanRecipe, ID as KITCHEN_ID } from './kitchen.js';
 import { kitchen } from './kitchen-store.js';
+import { handleGerman } from './german.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -235,6 +242,7 @@ const MODULES = {
   todo: handleTodo,
   morning: (request, env, rest) => handleMorning(request, env, rest, json),
   kitchen: handleKitchen,
+  german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   admin: handleAdmin,
 };
 

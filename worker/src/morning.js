@@ -1,6 +1,6 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news, kitchen, projects }
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news, kitchen, projects, german }
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                  -> { ok: true, count }
@@ -26,6 +26,7 @@
 import { CODE, safeEqual, bearer } from './todo.js';
 import { kitchen } from './kitchen-store.js';
 import { tonightView } from './kitchen.js';
+import { germanBlock } from './german.js';
 
 export const TZ = 'Europe/Amsterdam';
 const MIN = 60 * 1000;
@@ -906,7 +907,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   if (!env.TODO_CODE || !safeEqual(code, env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB, kitchenB, projects] = await Promise.all([
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB, kitchenB, projects, german] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
@@ -917,6 +918,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => news(env, now), "News can't load right now"),
     block(() => kitchenBlock(env, now), "Kitchen can't load right now"),
     block(() => projectsBlock(env), "Projects can't load right now"),
+    block(() => germanBlock(env, now), "German calls can't load right now"),
   ]);
   return json({
     now: new Date(now).toISOString(),
@@ -930,5 +932,6 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     news: newsB,
     kitchen: kitchenB,
     projects,
+    german,
   }, request);
 }
