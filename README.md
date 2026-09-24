@@ -33,7 +33,7 @@ gh api -X POST repos/mellowt1/todo/pages -f build_type=workflow
 gh workflow run pages.yml -R mellowt1/todo
 ```
 
-1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets for the to-do: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups). Four more for the Morning Screen and `KITCHEN_CODE` for the Kitchen, see below.
+1. **Worker**: `paul-hub`, from `worker/src/worker.js`. Three secrets for the to-do: `TODO_CODE` (the only list code it serves), `TODO_READ_TOKEN` (Odysseus), `ADMIN_TOKEN` (backups). Four more for the Morning Screen, `KITCHEN_CODE` for the Kitchen and two for the German calls, see below.
 2. **Storage**: the list lives in a SQLite-backed Durable Object (`TodoList`, `worker/src/list.js`), one per code, created by the first deploy. It handles one write at a time, so two devices can never overwrite each other's batch. SQLite Durable Objects are on the Workers Free plan. The KV namespace `paul-hub` (`HUB_KV`) belongs to the Morning Screen and is not used by the to-do.
 3. **Site**: `.github/workflows/pages.yml` publishes the `app/` folder on every push to `main` that touches it. Until Pages is on, the workflow skips.
 
@@ -126,6 +126,27 @@ curl.exe -s -H "Authorization: Bearer $($s.ADMIN_TOKEN)" https://paul-hub.paul-o
 
 **Setting it up.** The first deploy with this code runs the `v2` migration, which creates the `KitchenStore` class next to `TodoList` (the `v1` tag is never edited). Then add the kitchen code (16 characters, `a-z0-9`, not the to-do code) to `secrets.local.txt` as `KITCHEN_CODE=...` and upload it with the same temp JSON file and `wrangler secret bulk` lines as above. Never pipe it into `npx wrangler secret put` on Windows: the secret ends up empty.
 
+## German calls (`worker/src/german.js`)
+
+The German tutor app on Paul's Windows PC "calls" him on four random evenings a week. The PC pushes the week's plan and each call's outcome; Odysseus pulls them to show calendar events. Dates and windows are Europe/Amsterdam.
+
+| Route | Auth | What |
+|---|---|---|
+| `POST /api/german/week` | `Bearer GERMAN_PUSH_TOKEN` | `{ calls: [{ id, date: "YYYY-MM-DD", windowStart: "18:00", windowEnd: "21:00", at: "<ISO with offset>", persona: "Ingrid" \| "Hartmut", topic }] }`. Upserts by `id` (`[a-z0-9-]{1,64}`), never touching a call's status, minutes, fixes or outcome. A call that is still `planned`, dated today or later and missing from the body is removed (the PC replanned); past calls stay. At most 20 calls, strings up to 80 characters; one bad item refuses the whole body with 400 and a reason. Returns `{ ok, count }`. |
+| `POST /api/german/outcome` | `Bearer GERMAN_PUSH_TOKEN` | `{ id, status: "answered" \| "missed" \| "declined", minutes?: 0..180, outcomeAt: ISO, fixes?: 0..99 }`. Unknown id: 404. A later outcome replaces the earlier one whole (missed, then answered on a call back). Returns `{ ok }`. |
+| `GET /api/german/calls` | `Bearer GERMAN_READ_TOKEN` | `?from=YYYY-MM-DD`, default 28 days ago. `{ calls: [{ id, date, windowStart, windowEnd, at, persona, topic, status, minutes, fixes, outcomeAt, updated }], updated }`, sorted by date, then ring time. `status` is `planned`, `answered`, `missed` or `declined`. |
+
+Everything lives in one KV key, `german:calls` in `HUB_KV`, a JSON array. The PC is the only writer, so no Durable Object is needed. Calls older than 90 days are pruned on each write. With a secret unset, its routes answer 503 `{ error: "not configured" }`.
+
+The Morning Screen answer gains a `german` field for later use (the page does not show it yet): `{ thisWeek: { planned, answered, missed, declined }, streak }`, where the week is Monday to Sunday and `streak` is the number of answered calls in a row counting back from the most recent call that is no longer planned. No calls stored: `null`.
+
+**The two secrets.** Two long random strings, added to `secrets.local.txt` and uploaded with the same temp JSON file and `wrangler secret bulk` lines as above:
+
+```
+GERMAN_PUSH_TOKEN=<long random string, also on the Windows PC>
+GERMAN_READ_TOKEN=<long random string, also in Odysseus's .env.production>
+```
+
 ## How the sync works
 
 Every change is an operation on one task: `{ id, text, section, done, doneAt, pos, updatedAt }`. The app keeps them in a queue in `localStorage`, one per task, shows them at once, and sends the queue in batches 1.2 seconds after the last change (or straight away when the app goes to the background). A batch holds at most 200 ops and stays well under the Worker's body limit. Offline, the queue just waits; the pill says how many changes are waiting. The app cleans text exactly as the Worker does; if the Worker still refuses an op, it names it, that op alone is dropped and the sync banner shows.
@@ -144,6 +165,7 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `GET /api/admin/todo/export` | `Bearer ADMIN_TOKEN` | the whole stored document, tombstones included, for backups |
 | `/api/morning/...` | | see Morning Screen above |
 | `/api/kitchen/...`, `/api/admin/kitchen/...` | | see Kitchen above |
+| `/api/german/...` | | see German calls above |
 
 Input is whitelisted: text up to 500 characters, section one of `today`, `soon`, `someday`, ids 8 to 32 lowercase letters and digits, at most 200 ops per batch. An op that breaks these rules is skipped and reported; a malformed batch is refused. CORS allows `https://mellowt1.github.io` and localhost only. Routes are namespaced by module (`/api/todo/...`, `/api/morning/...`), so one app never touches another's.
 
@@ -171,7 +193,7 @@ On localhost the app talks to `http://localhost:8787` and skips the service work
 
 ```
 app/        the PWA: index.html, app.css, app.js, sw.js, manifest, icons
-worker/     paul-hub: wrangler.toml, src/worker.js (routes), src/list.js (the list's Durable Object), src/todo.js (merge, validation), src/morning.js (Morning Screen), src/kitchen.js and src/kitchen-store.js (Kitchen), test/
+worker/     paul-hub: wrangler.toml, src/worker.js (routes), src/list.js (the list's Durable Object), src/todo.js (merge, validation), src/morning.js (Morning Screen), src/kitchen.js and src/kitchen-store.js (Kitchen), src/german.js (German calls), test/
 scripts/    icons, local server, end to end check
 design/     the Claude Design brief
 SPEC.md     what was agreed

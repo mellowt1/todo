@@ -38,3 +38,5 @@ id = "a8b5f676c79f416f9e5ae37b5c589b4a"
 #   BIN_ADDRESS          Morning Screen: postcode and house number, for bin days
 #   BIRTHDAYS            Morning Screen: names and birthdays (JSON)
 #   KITCHEN_CODE         the 16 character kitchen code in the Kitchen link (never the same as TODO_CODE)
+#   GERMAN_PUSH_TOKEN    the German tutor PC, POST /api/german/week and /api/german/outcome
+#   GERMAN_READ_TOKEN    Odysseus, read only, GET /api/german/calls
