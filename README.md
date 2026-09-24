@@ -88,6 +88,7 @@ The Kitchen app (repo `mellowt1/kitchen`) keeps the week's dinners, recipes, the
 |---|---|---|
 | `GET /api/kitchen/:code` | the kitchen code | `{ items, rev, updated }`, or `{ unchanged: true }` with `?since=<rev>` |
 | `POST /api/kitchen/:code/ops` | the kitchen code | `{ ops: [{ op: "upsert" \| "delete", type, item }] }`, returns `{ rev, updated, items, rejected }` |
+| `POST /api/admin/morning/projects` | `Bearer ADMIN_TOKEN` | `{ projects: [{ name, status, next }], parked: [{ text, from }] }`. `status` is `active`, `waiting`, `live`, `next` or `parked`. Replaces the Morning Screen's whole Projects block (KV `morning:projects`). Returns `{ ok, projects, parked }`. |
 | `POST /api/admin/kitchen/recipes` | `Bearer ADMIN_TOKEN` | `{ recipes: [recipe, ...] }`, at most 25. No `id`: a new recipe. An existing `id`: replaced, always, even over a newer edit from a phone whose clock runs ahead. All or nothing: a bad recipe refuses the call and `errors` says which one and why. Returns `{ ok, ids, rev }`. |
 | `GET /api/admin/kitchen/export` | `Bearer ADMIN_TOKEN` | every kitchen record, tombstones included, for backups |
 

@@ -1,6 +1,6 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news, kitchen }
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news, kitchen, projects }
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                  -> { ok: true, count }
@@ -10,6 +10,8 @@
  *
  * HUB_KV keys:
  *   morning:calendar     the last push from Odysseus, { sent, received, events }
+ *   morning:projects     projects and parked items, { updated, projects, parked }, set
+ *                        with POST /api/admin/morning/projects (ADMIN_TOKEN)
  *   cache:weather        Open-Meteo, 15 minutes
  *   cache:arsenal        ESPN, 1 hour
  *   cache:bins:<hash>    Den Haag huisvuilkalender, 12 hours
@@ -827,6 +829,60 @@ async function news(env, now) {
   });
 }
 
+/* ---------- Projects: what is pending, set by Claude Code through the admin route ---------- */
+
+export const PROJECTS_KEY = 'morning:projects';
+export const PROJECT_STATUS = ['active', 'waiting', 'live', 'next', 'parked'];
+export const MAX_PROJECTS = 20;
+export const MAX_PARKED = 30;
+const MAX_LINE = 240;
+
+/* Validate a projects push. Returns { doc } or { error }. The page only reads it.
+ *   { projects: [{ name, status, next }], parked: [{ text, from }] }
+ * status is one of PROJECT_STATUS; next and from may be left out. */
+export function cleanProjects(body, now = Date.now()) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'body must be an object' };
+  if (!Array.isArray(body.projects)) return { error: 'projects must be a list' };
+  const parkedIn = body.parked === undefined ? [] : body.parked;
+  if (!Array.isArray(parkedIn)) return { error: 'parked must be a list' };
+  if (body.projects.length > MAX_PROJECTS) return { error: `at most ${MAX_PROJECTS} projects` };
+  if (parkedIn.length > MAX_PARKED) return { error: `at most ${MAX_PARKED} parked items` };
+  const text = (v, max) => (typeof v === 'string' ? clean(v).slice(0, max) : '');
+  const projects = [];
+  for (let i = 0; i < body.projects.length; i++) {
+    const p = body.projects[i];
+    if (!p || typeof p !== 'object') return { error: `project ${i}: not an object` };
+    const name = text(p.name, 80);
+    if (!name) return { error: `project ${i}: name is required` };
+    if (!PROJECT_STATUS.includes(p.status)) return { error: `project ${i}: status must be one of ${PROJECT_STATUS.join(', ')}` };
+    if (p.next !== undefined && typeof p.next !== 'string') return { error: `project ${i}: next must be text` };
+    projects.push({ name, status: p.status, next: text(p.next, MAX_LINE) });
+  }
+  const parked = [];
+  for (let i = 0; i < parkedIn.length; i++) {
+    const p = typeof parkedIn[i] === 'string' ? { text: parkedIn[i] } : parkedIn[i];
+    if (!p || typeof p !== 'object') return { error: `parked ${i}: not an object` };
+    const t = text(p.text, MAX_LINE);
+    if (!t) return { error: `parked ${i}: text is required` };
+    if (p.from !== undefined && typeof p.from !== 'string') return { error: `parked ${i}: from must be text` };
+    parked.push({ text: t, from: text(p.from, 80) });
+  }
+  return { doc: { updated: new Date(now).toISOString(), projects, parked } };
+}
+
+/* Null until the first push, so the page can hide the block. */
+export async function projectsBlock(env) {
+  const doc = await env.HUB_KV.get(PROJECTS_KEY, 'json');
+  return doc || null;
+}
+
+export async function putProjects(env, body, now = Date.now()) {
+  const out = cleanProjects(body, now);
+  if (out.error) return out;
+  await env.HUB_KV.put(PROJECTS_KEY, JSON.stringify(out.doc));
+  return out;
+}
+
 /* ---------- The route ---------- */
 
 /* ---------- Kitchen: tonight's dinner and the pizza dough's mix day ---------- */
@@ -850,7 +906,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   if (!env.TODO_CODE || !safeEqual(code, env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB, kitchenB] = await Promise.all([
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB, kitchenB, projects] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
@@ -860,6 +916,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => birthdaysBlock(env.BIRTHDAYS, now), 'Birthdays could not be read'),
     block(() => news(env, now), "News can't load right now"),
     block(() => kitchenBlock(env, now), "Kitchen can't load right now"),
+    block(() => projectsBlock(env), "Projects can't load right now"),
   ]);
   return json({
     now: new Date(now).toISOString(),
@@ -872,5 +929,6 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     birthdays: birthdays.error ? { birthdays: [] } : birthdays,
     news: newsB,
     kitchen: kitchenB,
+    projects,
   }, request);
 }

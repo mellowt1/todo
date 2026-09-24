@@ -9,6 +9,7 @@ import {
   parseAddress, parseBins, streamNames, binsBlock, cached, handleMorning, CAL_KEY,
   WEATHER_URL, ESPN_RESULTS, ESPN_FIXTURES, BINS_BASE,
   parseBirthdays, birthdaysBlock, parseNews, NEWS_URL, addDays as addDaysW,
+  cleanProjects, PROJECTS_KEY, MAX_PROJECTS,
 } from '../src/morning.js';
 import { memNamespace } from './mem.js';
 
@@ -709,4 +710,55 @@ test('GET: birthdays and news blocks, news cached 30 minutes, errors stay in the
   // Garbage instead of RSS is an error too.
   routes[NEWS_URL] = () => new Response('<html></html>');
   assert.deepEqual((await (await get(makeEnv(), now)).json()).news, { error: "News can't load right now" });
+});
+
+/* ---------- Projects ---------- */
+
+test('projects: cleanProjects keeps the contract and refuses the rest', () => {
+  const now = Date.parse('2026-10-07T06:00:00Z');
+  const good = cleanProjects({
+    projects: [{ name: '  Made up app ', status: 'active', next: 'Write\nthe tests' }, { name: 'Other', status: 'parked' }],
+    parked: ['Loose idea', { text: 'Tidy files', from: 'Admin' }],
+  }, now);
+  assert.deepEqual(good.doc, {
+    updated: '2026-10-07T06:00:00.000Z',
+    projects: [{ name: 'Made up app', status: 'active', next: 'Write the tests' }, { name: 'Other', status: 'parked', next: '' }],
+    parked: [{ text: 'Loose idea', from: '' }, { text: 'Tidy files', from: 'Admin' }],
+  });
+  assert.deepEqual(cleanProjects({ projects: [] }).doc.parked, []);
+  assert.match(cleanProjects(null).error, /object/);
+  assert.match(cleanProjects({}).error, /projects must be a list/);
+  assert.match(cleanProjects({ projects: [{ name: 'X', status: 'done' }] }).error, /status/);
+  assert.match(cleanProjects({ projects: [{ name: ' ', status: 'live' }] }).error, /name/);
+  assert.match(cleanProjects({ projects: [{ name: 'X', status: 'live', next: 5 }] }).error, /next/);
+  assert.match(cleanProjects({ projects: [], parked: [{ text: '' }] }).error, /parked 0/);
+  assert.match(cleanProjects({ projects: Array(MAX_PROJECTS + 1).fill({ name: 'X', status: 'live' }) }).error, /at most/);
+});
+
+test('projects: admin route stores them, the morning answer serves them read only', async () => {
+  const env = makeEnv({ ADMIN_TOKEN: 'admin-token-for-tests' });
+  allSources();
+  const push = (body, token = 'admin-token-for-tests', method = 'POST') => worker.fetch(new Request(BASE + '/api/admin/morning/projects', {
+    method, headers: { Authorization: 'Bearer ' + token }, body: method === 'POST' ? JSON.stringify(body) : undefined,
+  }), env);
+  const morning = async () => (await worker.fetch(new Request(`${BASE}/api/morning/${CODE}`), env)).json();
+
+  assert.equal((await morning()).projects, null);
+  assert.equal((await push({ projects: [] }, 'wrong')).status, 401);
+  assert.equal((await push(null, 'admin-token-for-tests', 'GET')).status, 405);
+  const bad = await push({ projects: [{ name: 'X', status: 'nope' }] });
+  assert.equal(bad.status, 400);
+  assert.equal(env.HUB_KV.m.has(PROJECTS_KEY), false);
+
+  const r = await push({ projects: [{ name: 'Made up app', status: 'waiting', next: 'Answer three questions' }], parked: ['Loose idea'] });
+  assert.deepEqual(await r.json(), { ok: true, projects: 1, parked: 1 });
+  const b = await morning();
+  assert.deepEqual(b.projects.projects, [{ name: 'Made up app', status: 'waiting', next: 'Answer three questions' }]);
+  assert.deepEqual(b.projects.parked, [{ text: 'Loose idea', from: '' }]);
+  assert.ok(Date.parse(b.projects.updated));
+
+  // A push replaces the whole block.
+  await push({ projects: [] });
+  assert.deepEqual((await morning()).projects.projects, []);
+  assert.deepEqual((await morning()).projects.parked, []);
 });

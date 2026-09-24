@@ -12,7 +12,7 @@
  *                                    -> { items: [{ text, section }], updated }  open tasks only
  *
  * Morning Screen (src/morning.js; the to-do's code, read only):
- *   GET  /api/morning/:code          -> { now, todos, calendar, fixed, weather, arsenal, bins }
+ *   GET  /api/morning/:code          -> { now, todos, calendar, fixed, weather, arsenal, bins, ..., projects }
  *                                    every block loads on its own; a failed one is { error }
  *   POST /api/morning/calendar       Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                    <- { sent, events: [{ title, start, end, allDay, location }] }
@@ -29,6 +29,8 @@
  *   POST /api/admin/kitchen/recipes     <- { recipes: [recipe, ...] }  (no id: a new recipe)
  *                                       -> { ok: true, ids, rev }  all or nothing; errors name the recipe
  *   GET  /api/admin/kitchen/export      -> every kitchen record, tombstones included
+ *   POST /api/admin/morning/projects    <- { projects: [{ name, status, next }], parked: [{ text, from }] }
+ *                                       -> { ok: true, projects, parked }  replaces the whole block
  *
  * The list itself lives in a Durable Object (src/list.js), one per code, so writes
  * are serialised. Only the one list code the Worker knows as TODO_CODE is served.
@@ -38,7 +40,7 @@
  */
 
 import { CODE, cleanBatch, safeEqual, bearer } from './todo.js';
-import { handleMorning } from './morning.js';
+import { handleMorning, putProjects } from './morning.js';
 import { cleanBatch as cleanKitchenBatch, cleanRecipe, ID as KITCHEN_ID } from './kitchen.js';
 import { kitchen } from './kitchen-store.js';
 
@@ -212,6 +214,14 @@ async function handleAdmin(request, env, rest) {
   if (rest.join('/') === 'kitchen/recipes') {
     if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
     return adminRecipes(request, env);
+  }
+  if (rest.join('/') === 'morning/projects') {
+    if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
+    const got = await readBody(request, MAX_BODY);
+    if (got.error) return json({ error: got.error }, request, got.status);
+    const out = await putProjects(env, got.body);
+    if (out.error) return json({ error: out.error }, request, 400);
+    return json({ ok: true, projects: out.doc.projects.length, parked: out.doc.parked.length }, request);
   }
   if (request.method === 'GET' && rest.join('/') === 'kitchen/export') {
     if (!env.KITCHEN_CODE) return json({ error: 'not configured' }, request, 503);
