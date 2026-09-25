@@ -197,6 +197,12 @@ body.view-done .toast { bottom: var(--bottom); }
 .cap-row { display: flex; align-items: center; gap: 14px; min-height: 52px; }
 .cap-row input, .inline-add input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 17px; padding: 0; caret-color: var(--accent-text); }
 .capture-sheet { padding-bottom: 16px; }
+.cap-head { display: flex; align-items: center; justify-content: space-between; margin: -6px 0 -10px; }
+.cap-added { list-style: none; margin: 0; padding: 2px 0 0; display: flex; flex-direction: column; }
+.cap-added:empty { display: none; }
+.cap-added li { display: flex; align-items: center; gap: 14px; min-height: 30px; color: var(--secondary); animation: row-in 240ms var(--ease); }
+.cap-added .ok { width: 24px; display: flex; justify-content: center; color: var(--accent-text); }
+.cap-added .t { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-sheet { gap: 16px; min-height: min(460px, 70vh); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 .edit-head { display: flex; justify-content: flex-end; margin: -6px 0 -10px; }
 .edit-sheet .meta { margin-bottom: -8px; }
@@ -291,7 +297,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 @media (prefers-reduced-motion: reduce) {
   :root { --t: 1ms; }
   .sheet, .toast { animation: fade-in 160ms ease !important; }
-  .row.enter { animation: fade-in 160ms ease; }
+  .row.enter, .cap-added li { animation: fade-in 160ms ease; }
   .row.nudge .row-inner { animation: none; }
   .row.sliding .row-inner { transition: opacity 160ms ease; }
   .circle .ic, .row.armed .swipe-done .ic { transition: opacity 120ms ease; transform: none !important; }

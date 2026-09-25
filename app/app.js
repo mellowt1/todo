@@ -363,7 +363,7 @@
       const c = b.querySelector('.count');
       if (c) { const n = openIn(b.dataset.section).length; c.textContent = n ? String(n) : ''; }
     }
-    $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
+    if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
 
     const all = Object.values(items);
     const empty = $('empty');
@@ -773,8 +773,19 @@
     if (view !== 'list') setSection(ui.section);
     if (desk.matches) return showInline();
     capInput.value = '';
+    capAdded = [];
+    showCapAdded();
     openSheet($('capture'));
     capInput.focus(); // inside the tap, so iOS brings the keyboard up
+  }
+  // What Return just saved stays in the sheet, ticked, so a cleared field reads as saved.
+  let capAdded = [];
+  function showCapAdded() {
+    $('capAdded').innerHTML = capAdded.slice(-3).map((t) =>
+      '<li><span class="ok"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span><span class="t">' + esc(t) + '</span></li>').join('');
+    $('capLabel').textContent = capAdded.length
+      ? 'Added to ' + LABEL[ui.section]
+      : 'Adds to ' + LABEL[ui.section];
   }
   let capClosing = false;
   function closeCapture() {
@@ -788,7 +799,11 @@
   capInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
-      addTask(capInput.value);
+      const v = cleanText(capInput.value);
+      if (!v) return closeCapture(); // Return on an empty field means finished
+      addTask(v);
+      capAdded.push(v);
+      showCapAdded();
       capInput.value = '';
     } else if (e.key === 'Escape') {
       e.stopPropagation();
@@ -796,6 +811,7 @@
     }
   });
   $('fab').addEventListener('click', openAdd);
+  $('capDone').addEventListener('click', closeCapture);
   $('addDesk').addEventListener('click', () => ($('inlineAdd').hidden ? showInline() : hideInline()));
 
   const inlineInput = $('inlineInput');

@@ -104,10 +104,14 @@
   <div class="scrim" data-close></div>
   <div class="sheet capture-sheet" role="dialog" aria-label="New task">
     <div class="grabber"></div>
-    <label for="capInput" id="capLabel" class="meta">Adds to Today</label>
+    <div class="cap-head">
+      <label for="capInput" id="capLabel" class="meta">Adds to Today</label>
+      <button id="capDone" class="text-btn">Done</button>
+    </div>
+    <ul id="capAdded" class="cap-added" aria-live="polite"></ul>
     <div class="cap-row">
       <span class="circle-static" aria-hidden="true"></span>
-      <input id="capInput" type="text" maxlength="500" autocomplete="off" autocapitalize="sentences">
+      <input id="capInput" type="text" placeholder="New task" maxlength="500" autocomplete="off" autocapitalize="sentences">
     </div>
   </div>
 </div>
