@@ -113,6 +113,13 @@ test('cleanOp: every type, ids per type, and anything off contract is dropped', 
   assert.equal(day({ id: '2026-W39:xyz', kind: 'pizza' }), null);
   assert.equal(day({ id: '2025-W53:mon', kind: 'pizza' }), null);
   assert.equal(day({ id: '2026-W39:wed', kind: 'pizza', servings: 99 }), null);
+  // one meal of one person
+  assert.equal(day({ id: '2026-W39:wed:olivia:lunch', kind: 'text', text: 'Salad' }).item.id, '2026-W39:wed:olivia:lunch');
+  assert.equal(day({ id: '2026-W39:wed:paul:dinner', kind: 'pizza' }).item.kind, 'pizza');
+  assert.equal(day({ id: '2026-W39:wed:paul:snack', kind: 'pizza' }), null);
+  assert.equal(day({ id: '2026-W39:wed:nick:dinner', kind: 'pizza' }), null);
+  assert.equal(day({ id: '2026-W39:wed:paul', kind: 'pizza' }), null);
+  assert.equal(day({ id: '2026-W39:wed:paul:dinner:x', kind: 'pizza' }), null);
 
   const ex = cleanOp(up('extra', { id: 'xxxxxxxx', week: '2026-W39', text: 'Bread flour', qty: '870 g', aisle: 'baking', junk: 1 }), NOW);
   assert.deepEqual(ex.item, { type: 'extra', id: 'xxxxxxxx', week: '2026-W39', text: 'Bread flour', qty: '870 g', aisle: 'baking', updatedAt: NOW });
@@ -405,6 +412,11 @@ test('tonightView: recipe, text, pizza, mix day 3 days ahead or 1 when gluten fr
   // gluten free: the day before
   assert.equal(tonightView([dough({ gf: true })], today), null);
   assert.equal(tonightView([dough({ gf: true })], '2026-09-25').mixToday, true);
+  // each has a plan: the Morning Screen shows Paul's dinner, a pizza night in either plan counts
+  assert.equal(tonightView([rec('day', { id: '2026-W39:wed:olivia:dinner', kind: 'text', text: 'Hers' })], today), null);
+  assert.equal(tonightView([rec('day', { id: '2026-W39:wed', kind: 'text', text: 'Old' }), rec('day', { id: '2026-W39:wed:paul:dinner', kind: 'text', text: 'His' })], today).tonight.title, 'His');
+  assert.equal(tonightView([rec('day', { id: '2026-W39:wed:paul:lunch', kind: 'text', text: 'Lunch' })], today), null);
+  assert.equal(tonightView([rec('day', { id: '2026-W39:sat:olivia:dinner', kind: 'pizza' })], today).mixToday, true);
   assert.equal(tonightView([dough({ gf: true, night: null }), rec('day', { id: '2026-W39:thu', kind: 'pizza' })], today).pizzaOn, '2026-09-24');
 });
 

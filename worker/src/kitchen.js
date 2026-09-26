@@ -6,7 +6,9 @@
  * tombstone), so two phones editing different things never lose each other's work:
  *
  *   recipe  { id, title, servings, time, veg, ingredients: [{ qty, unit, item, aisle }], steps: [text], notes }
- *   day     { id: "<YYYY-Www>:<mon..sun>", kind: "recipe" | "text" | "pizza", recipeId, text, servings }
+ *   day     { id: "<YYYY-Www>:<mon..sun>:<person>:<meal>", kind: "recipe" | "text" | "pizza", recipeId, text, servings }
+ *           one meal of one person. The old "<YYYY-Www>:<mon..sun>" (a dinner for both, before
+ *           each had a plan) is still accepted, so a phone on the old page keeps working.
  *   extra   { id, week, text, qty, aisle }         a free item on the shopping list of one week
  *   tick    { id: "<YYYY-Www>|<item key>", on }     a ticked line on that week's list
  *   dough   { id: "dough", size, count, thickness, gf, night, tweaks }   one settings record
@@ -20,6 +22,9 @@ export const TYPES = ['recipe', 'day', 'extra', 'tick', 'dough'];
 export const AISLES = ['produce', 'bread', 'dairy', 'meat', 'vegetarian', 'pasta', 'tins', 'baking', 'spices', 'frozen', 'drinks', 'household', 'other'];
 export const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const THICKNESS = ['thin', 'regular', 'thick'];
+// Whose plan and which meal a day record is. app/logic.js has the same.
+export const PEOPLE = ['paul', 'olivia'];
+export const MEALS = ['breakfast', 'lunch', 'dinner'];
 
 export const ID = /^[a-z0-9]{8,32}$/;
 const WEEK_RE = /^(\d{4})-W(\d{2})$/;
@@ -201,8 +206,9 @@ export function validId(type, id) {
     case 'extra':
       return ID.test(id);
     case 'day': {
-      const [week, day, more] = id.split(':');
-      return more === undefined && validWeek(week) && WEEKDAYS.includes(day);
+      const [week, day, who, meal, more] = id.split(':');
+      if (!validWeek(week) || !WEEKDAYS.includes(day) || more !== undefined) return false;
+      return who === undefined || (PEOPLE.includes(who) && MEALS.includes(meal));
     }
     case 'tick': {
       const i = id.indexOf('|');
@@ -299,7 +305,9 @@ export function tonightView(items, today) {
   const dough = byKey['dough:dough'] || null;
   const gf = !!(dough && dough.gf);
   const { week, day } = isoWeek(today);
-  const rec = byKey[keyOf('day', week + ':' + day)];
+  // The Morning Screen is Paul's: his dinner, else an old shared one.
+  const dinner = (id, who) => byKey[keyOf('day', id + ':' + who + ':dinner')];
+  const rec = dinner(week + ':' + day, 'paul') || byKey[keyOf('day', week + ':' + day)];
   let tonight = null;
   if (rec && rec.kind === 'pizza') tonight = { kind: 'pizza', title: 'Pizza night', veg: false };
   else if (rec && rec.kind === 'text') tonight = { kind: 'text', title: rec.text, veg: false };
@@ -309,8 +317,9 @@ export function tonightView(items, today) {
   }
   const night = addDays(today, gf ? MIX_DAYS.gf : MIX_DAYS.regular);
   const nightWeek = isoWeek(night);
-  const planned = byKey[keyOf('day', nightWeek.week + ':' + nightWeek.day)];
-  const mixToday = (dough && dough.night === night) || (planned && planned.kind === 'pizza') || false;
+  const nightId = nightWeek.week + ':' + nightWeek.day;
+  const pizza = (r) => !!(r && r.kind === 'pizza');
+  const mixToday = (dough && dough.night === night) || pizza(byKey[keyOf('day', nightId)]) || PEOPLE.some((p) => pizza(dinner(nightId, p)));
   if (!tonight && !mixToday) return null;
   return { tonight, mixToday: !!mixToday, pizzaOn: mixToday ? night : null };
 }
