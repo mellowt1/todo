@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker, * as entry from '../src/worker.js';
 import {
-  isoWeek, weekStart, validWeek, dayDate, cleanRecipe, cleanOp, cleanBatch, applyOps, tonightView, validId, LIMITS,
+  isoWeek, weekStart, validWeek, dayDate, cleanRecipe, cleanOp, cleanBatch, applyOps, tonightView, validId, titleCase, LIMITS,
 } from '../src/kitchen.js';
 import { KitchenData, KitchenStore } from '../src/kitchen-store.js';
 import { handleMorning, kitchenBlock } from '../src/morning.js';
@@ -82,7 +82,7 @@ test('ISO weeks: Monday first, week 53, and years that start in the old year', (
 
 test('cleanRecipe keeps the contract, rounds amounts and says what is wrong', () => {
   const ok = cleanRecipe({ ...recipe(), extra: 'dropped', title: '  Chickpea   curry ' });
-  assert.equal(ok.value.title, 'Chickpea curry');
+  assert.equal(ok.value.title, 'Chickpea Curry');
   assert.equal(ok.value.extra, undefined);
   assert.equal(cleanRecipe(recipe({ ingredients: [{ qty: 1 / 3, unit: 'cup', item: 'rice', aisle: 'pasta' }] })).value.ingredients[0].qty, 0.333);
   assert.equal(cleanRecipe(recipe({ time: undefined, notes: undefined })).value.time, '');
@@ -100,6 +100,77 @@ test('cleanRecipe keeps the contract, rounds amounts and says what is wrong', ()
   assert.match(why({ notes: 'x'.repeat(LIMITS.notes + 1) }), /notes/);
   assert.match(why({ ingredients: Array.from({ length: LIMITS.ingredients + 1 }, () => ({ qty: 1, unit: 'g', item: 'x', aisle: 'other' })) }), /ingredients/);
   assert.match(cleanRecipe(null).error, /object/);
+});
+
+// The same pairs as the page's titleCase in app/logic.js; the two must stay identical.
+const TITLES = [
+  ['chickpea and spinach curry', 'Chickpea and Spinach Curry'],
+  ['Bulgogi Chicken', 'Bulgogi Chicken'],
+  ['seco de pollo', 'Seco de Pollo'],
+  ['pasta alla norma', 'Pasta alla Norma'],
+  ["bucatini all'amatriciana", "Bucatini all'Amatriciana"],
+  ['lemon chicken traybake', 'Lemon Chicken Traybake'],
+  ['oyakodon', 'Oyakodon'],
+  ['BBQ pulled pork', 'BBQ Pulled Pork'],
+  ['CHICKEN CURRY WITH RICE', 'Chicken Curry with Rice'],
+  ['BLT', 'BLT'],
+  ['stir-fry with ready-to-eat noodles', 'Stir-Fry with Ready-to-Eat Noodles'],
+  ["shepherd's pie", "Shepherd's Pie"],
+  ['a simple salad', 'A Simple Salad'],
+  ['pasta e fagioli', 'Pasta e Fagioli'],
+  ['coq au vin', 'Coq au Vin'],
+  ["canard à l'orange", "Canard à l'Orange"],
+  ['5-minute overnight oats', '5-Minute Overnight Oats'],
+  ['Chickpea And Spinach Curry', 'Chickpea and Spinach Curry'],
+  ['salmon: a quick one', 'Salmon: A Quick One'],
+  ['curry (with rice)', 'Curry (with Rice)'],
+  ['NY-style pizza', 'NY-Style Pizza'],
+  ['what to cook with', 'What to Cook With'],
+  ['  lots   of  space ', 'Lots of Space'],
+  ['', ''],
+  ['crème brûlée', 'Crème Brûlée'],
+  ['pollo a la brasa', 'Pollo a la Brasa'],
+  ['Seco De Pollo', 'Seco de Pollo'],
+  ["l'orange tart", "L'Orange Tart"],
+  ['MAC n CHEESE', 'Mac n Cheese'],
+  ['CHILLI (v)', 'Chilli (V)'],
+  ['chana dal curry', 'Chana Dal Curry'],
+  ['bbq chicken wings', 'BBQ Chicken Wings'],
+  ['BBQ PULLED PORK', 'BBQ Pulled Pork'],
+  ['4th of july burgers', '4th of July Burgers'],
+  ['70s prawn cocktail', '70s Prawn Cocktail'],
+  ["nell's chicken pie", "Nell's Chicken Pie"],
+  ["mac 'n' cheese", "Mac 'n' Cheese"],
+  ['TOM YUM', 'Tom Yum'],
+  ['İSKENDER KEBAP İLE PİLAV', 'Iskender Kebap Ile Pilav'],
+  ['ijsbergsla met kip', 'IJsbergsla met Kip'],
+  ["hachee van 't oosten", "Hachee van 't Oosten"],
+  ['grilled t-bone steak', 'Grilled T-Bone Steak'],
+  ['stir\u2011fry', 'Stir\u2011Fry'], // a non-breaking hyphen
+  ['ხაჭაპური', 'ხაჭაპური'],
+];
+
+test('titleCase: capitals on the words that need them, and a second run changes nothing', () => {
+  for (const [typed, want] of TITLES) {
+    assert.equal(titleCase(typed), want, typed);
+    assert.equal(titleCase(titleCase(typed)), titleCase(typed), 'twice: ' + typed);
+  }
+});
+
+test('recipe titles are stored in Title Case, from a phone and from the admin route', async () => {
+  assert.equal(cleanRecipe(recipe({ title: 'seco de pollo' })).value.title, 'Seco de Pollo');
+  assert.equal(cleanRecipe(recipe({ title: ' CHICKEN   CURRY WITH RICE ' })).value.title, 'Chicken Curry with Rice');
+  // formatting keeps the length, even where lower case would add a dot (İ)
+  const long = 'İ'.repeat(LIMITS.title);
+  assert.equal(titleCase(long).length, LIMITS.title);
+  assert.equal(cleanRecipe(recipe({ title: long })).value.title, 'I' + 'i'.repeat(LIMITS.title - 1));
+
+  assert.equal(cleanOp(up('recipe', { id: 'rrrrrrrr', ...recipe({ title: "bucatini all'amatriciana" }) }), NOW).item.title, "Bucatini all'Amatriciana");
+  const env = makeEnv();
+  const b = await (await admin(env, recipe({ id: 'pastanorma', title: 'pasta alla norma' }))).json();
+  assert.equal(b.ok, true);
+  const items = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
+  assert.equal(items.find((i) => i.id === 'pastanorma').title, 'Pasta alla Norma');
 });
 
 test('cleanOp: every type, ids per type, and anything off contract is dropped', () => {
@@ -312,7 +383,7 @@ test('admin recipes: token, upsert of one or many, ids kept, all or nothing with
   assert.deepEqual(b.ids, ['pastanorma']);
   const list = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
   assert.equal(list.length, 2);
-  assert.equal(list.find((i) => i.id === 'pastanorma').title, 'Pasta alla Norma, better');
+  assert.equal(list.find((i) => i.id === 'pastanorma').title, 'Pasta alla Norma, Better');
 
   // one bad recipe refuses the whole call and says which and why
   r = await admin(env, { recipes: [recipe({ title: 'Fine' }), recipe({ title: 'Broken', ingredients: [{ qty: 1, unit: 'g', item: 'rice', aisle: 'grains' }] }), recipe({ id: 'BAD' })] });
@@ -345,12 +416,12 @@ test('admin recipes always win: same millisecond twice, a phone clock ahead, a n
     // a phone 4 minutes ahead edits the recipe; the admin replace a moment later still wins
     await post(env, [up('recipe', { id: 'samemilli', ...recipe({ title: 'From a fast phone' }) }, frozen + 4 * 60000)]);
     items = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
-    assert.equal(items.find((i) => i.id === 'samemilli').title, 'From a fast phone');
+    assert.equal(items.find((i) => i.id === 'samemilli').title, 'From a Fast Phone');
     b = await (await admin(env, recipe({ id: 'samemilli', title: 'Admin again' }))).json();
     assert.equal(b.ok, true);
     items = (await (await call(env, `/api/kitchen/${KIT}`)).json()).items;
     const r = items.find((i) => i.id === 'samemilli');
-    assert.equal(r.title, 'Admin again');
+    assert.equal(r.title, 'Admin Again');
     assert.ok(r.updatedAt > frozen + 4 * 60000);
 
     // deleted on a fast phone, then re-added by the admin: it comes back

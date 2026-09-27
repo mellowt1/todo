@@ -100,6 +100,8 @@ Records, each merged on its own like the to-do's tasks (newest `updatedAt` wins,
 * `tick`: a ticked line, id `2026-W39|<item key>`, `{ on }`.
 * `dough`: the one settings record, id `dough`: `{ size, count, thickness, gf, night, tweaks }`.
 
+Recipe titles are stored in Title Case, with capitals on the words that need them: "seco de pollo" becomes "Seco de Pollo", "BBQ" stays "BBQ" (the same rule as the page's `titleCase` in `app/logic.js`).
+
 Limits: titles 200 characters, 80 ingredients, 40 steps of up to 1,000 characters, notes 4,000, 200 ops per batch, 20,000 records in all. Anything off contract is skipped and reported by index.
 
 A recipe for the admin route, as Claude Code sends it:

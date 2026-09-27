@@ -105,6 +105,73 @@ export function cleanBlock(v, max) {
   return t.length > max ? null : t;
 }
 
+/* Recipe titles: capitals on the words that need them. app/logic.js has the same; keep the two identical.
+ * "chickpea and spinach curry" -> "Chickpea and Spinach Curry", "seco de pollo" -> "Seco de Pollo",
+ * "pasta alla norma" -> "Pasta alla Norma", "bucatini all'amatriciana" -> "Bucatini all'Amatriciana".
+ * Small words stay small unless first, last or after a colon. BBQ, BLT and a few more are always
+ * in capitals; any other word with a capital after its first letter (McCain) is kept as typed.
+ * A title typed in capitals starts from lower case. Running it twice changes nothing. */
+const SMALL_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'n', 'but', 'or', 'nor', 'as', 'at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'onto', 'per', 'to', 'via', 'vs', 'with',
+  'al', 'alla', 'alle', 'allo', 'ai', 'agli', 'di', 'del', 'della', 'delle', 'dello', 'dei', 'degli', 'da', 'dalla', 'e', 'con',
+  'de', 'la', 'las', 'los', 'el', 'y', 'en', 'à', 'au', 'aux', 'du', 'des', 'le', 'les', 'et',
+  'met', 'van', 'het',
+]);
+// Always in capitals, however they were typed.
+const UPPER_WORDS = new Set(['bbq', 'blt', 'kfc', 'pb&j', 'ny', 'nyc', 'uk', 'usa', 'gf', 'df', 'vg']);
+// l'orange, all'amatriciana; not the English 's of "Nell's".
+const ELISION = /^(\P{L}*)(l|d|all|dell|nell|sull|dall)(['’])(?![sS]$)(\p{L}.*)$/iu;
+// Hyphens (the two Unicode ones too) and slashes join the parts of a word.
+const JOINERS = /([-\u2010\u2011/])/u;
+const wordCore = (w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase();
+// Upper case the letter a word starts with (not the h of 4th). Letters that would not come back
+// in lower case (ß, ı) and scripts with no capitals for titles (Georgian, the dž letters) stay.
+const capFirst = (w) => w.replace(/^([^\p{L}\p{N}]*)(\p{L})/u, (m, pre, c) => {
+  const u = c.toUpperCase();
+  return pre + (u.length === 1 && u.toLowerCase() === c && !/\p{Script=Georgian}|[\u01c4-\u01cc\u01f1-\u01f3]/u.test(c) ? u : c);
+});
+
+function titleWord(w, first, last) {
+  const core = wordCore(w);
+  if (!core) return w;
+  if (/^['’]t$/i.test(w)) return w.toLowerCase(); // Dutch 't, as in "Hachee van 't Oosten"
+  if (!first && !last && SMALL_WORDS.has(core)) return w.toLowerCase();
+  if (UPPER_WORDS.has(core)) return w.toUpperCase();
+  if (/\p{L}.*\p{Lu}/u.test(w)) return w; // McCain, all'Amatriciana: as typed
+  const el = ELISION.exec(w);
+  if (el) return el[1] + (first ? capFirst(el[2]) : el[2].toLowerCase()) + el[3] + capFirst(el[4]);
+  if (/^ij\p{L}/u.test(core)) return w.replace(/ij/i, 'IJ'); // Dutch IJskoffie
+  return capFirst(w);
+}
+
+// Typed in capitals: no lower-case letter after a letter, and at least three capitals after one
+// (TOM YUM, CHICKEN CURRY). BBQ and the like count neither way. The answer is then the same for
+// the formatted title, so a second run changes nothing.
+function typedInCaps(t) {
+  const rest = t.split(/[ \-\u2010\u2011/]/u).filter((p) => !UPPER_WORDS.has(wordCore(p))).join(' ');
+  if (/\p{L}\p{Ll}/u.test(rest)) return false;
+  let n = 0;
+  for (const m of rest.match(/\p{L}\p{Lu}+/gu) || []) n += [...m].length - 1;
+  return n >= 3;
+}
+
+export function titleCase(v) {
+  // The page's cleanLine(v) without a limit: the same cleaning, nothing cut.
+  let t = cleanLine(String(v == null ? '' : v), Infinity, true);
+  // İ as a plain I, so the title keeps its length.
+  if (typedInCaps(t)) t = t.replace(/İ/g, 'I').toLowerCase();
+  const words = t ? t.split(' ') : [];
+  let lastWord = words.length - 1;
+  while (lastWord > 0 && !/[\p{L}\p{N}]/u.test(words[lastWord])) lastWord--;
+  let first = true;
+  return words.map((w, i) => {
+    const parts = w.split(JOINERS);
+    const out = parts.map((p, j) => (j % 2 ? p : titleWord(p, first && j === 0, i === lastWord && j === parts.length - 1))).join('');
+    if (/[\p{L}\p{N}]/u.test(w)) first = /:$/.test(w);
+    return out;
+  }).join(' ');
+}
+
 /* ---------- Records ---------- */
 
 const bad = (error) => ({ error });
@@ -113,8 +180,11 @@ const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 /* A recipe, from the app or the admin route. Returns { value } or { error } with a reason. */
 export function cleanRecipe(it) {
   if (!it || typeof it !== 'object' || Array.isArray(it)) return bad('recipe must be an object');
-  const title = cleanLine(it.title, LIMITS.title);
-  if (title === null) return bad(`title must be text, 1 to ${LIMITS.title} characters`);
+  const typed = cleanLine(it.title, LIMITS.title);
+  if (typed === null) return bad(`title must be text, 1 to ${LIMITS.title} characters`);
+  // Stored in Title Case, as typed when that would run past the limit.
+  const titled = titleCase(typed);
+  const title = titled.length > LIMITS.title ? typed : titled;
   if (!int(it.servings, 1, LIMITS.servings)) return bad(`servings must be a whole number from 1 to ${LIMITS.servings}`);
   const time = it.time === undefined || it.time === null ? '' : cleanLine(it.time, LIMITS.time, true);
   if (time === null) return bad(`time must be text up to ${LIMITS.time} characters, like "35 min"`);
