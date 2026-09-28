@@ -1,6 +1,8 @@
 // Release 1 checks: per-row locks (M1) and the swipe, toast, sheet and keyboard fixes (B1 B2 B3 B8 B9).
 // Release 2a checks: motion tokens and awaited exits (M2), FLIP (M3), overlay exits (A2), the check (A3),
 // the toast (A4), Undo (A6), the sidebar drop (C1), focus (X1) and modals (X2).
+// Release 2b checks: section fade (A5), swipe fill and flick (A7), reopen (A8), sheet drag (A9), capture
+// lines (A10), the Done layer (A12), hand-offs (A13), press feedback (I1), edit sheet move (I2), reveal (I3).
 // Every check runs twice, with reduced motion off and on, in Chromium or WebKit.
 //   npm run feel           Chromium
 //   npm run feel:webkit    WebKit
@@ -231,6 +233,38 @@ function kit() {
       dx: b.left + b.width / 2 - innerWidth / 2, dy: b.top + b.height / 2 - innerHeight / 2,
     };
   });
+  /* Release 2b helpers */
+  // Who added a touchstart listener, and whether it was passive (the app runs after this script).
+  window.__touchstarts = [];
+  const addListener = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function (type, fn, o) {
+    if (type === 'touchstart') __touchstarts.push({ on: this === document ? 'document' : this === window ? 'window' : this.id || this.nodeName, passive: !!(o && typeof o === 'object' && o.passive) });
+    return addListener.call(this, type, fn, o);
+  };
+  // A colour as the page computes it, e.g. __color('var(--accent-soft)').
+  window.__color = (v) => {
+    const p = document.createElement('span');
+    p.style.color = v;
+    document.body.append(p);
+    const c = getComputedStyle(p).color;
+    p.remove();
+    return c;
+  };
+  // Counts layout reads (offset sizes and getBoundingClientRect) while on.
+  window.__layoutReads = () => {
+    let n = 0, on = true;
+    const undo = [];
+    for (const k of ['offsetWidth', 'offsetHeight', 'offsetTop', 'offsetLeft']) {
+      const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, k);
+      Object.defineProperty(HTMLElement.prototype, k, { configurable: true, get() { if (on) n++; return d.get.call(this); } });
+      undo.push(() => Object.defineProperty(HTMLElement.prototype, k, d));
+    }
+    const gb = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () { if (on) n++; return gb.call(this); };
+    undo.push(() => { Element.prototype.getBoundingClientRect = gb; });
+    return () => { on = false; for (const u of undo) u(); return n; };
+  };
+
   // Rows that are half gone: squashed, faded, or still carrying exit styles.
   window.__ghosts = () => [...document.querySelectorAll('#list .row:not(.skeleton)')]
     .filter((r) => r.offsetHeight < 30 || r.style.height || r.style.opacity || r.classList.contains('collapsing') || r.classList.contains('sliding')
@@ -604,6 +638,7 @@ for (const motion of ['no-preference', 'reduce']) {
     const t = await touch(page, ENGINE);
     await t.down(x, y);
     for (const d of [10, 20, 30]) { await t.move(x, y + d); await page.waitForTimeout(16); }
+    await page.waitForTimeout(150); // held still before letting go, so it is not a flick (A9)
     await t.up();
     await page.waitForTimeout(400);
     assert.ok(await page.isVisible('#capture'), 'a 30px drag snaps back');
@@ -1414,6 +1449,595 @@ for (const motion of ['no-preference', 'reduce']) {
     await page.waitForSelector('#capture', { state: 'hidden' });
     await page.waitForTimeout(150);
     assert.deepEqual((await modalState(page)).inert, none, 'inert left behind after the capture sheet');
+  });
+
+  /* ================= Release 2b ================= */
+  // Samples the list, the empty state and the title on every frame while act runs.
+  const switchFrames = async (page, act, ms = 450) => {
+    await page.evaluate(() => {
+      window.__stopSw = __frames(() => {
+        const l = document.getElementById('list'), e = document.getElementById('empty'), h = document.getElementById('title');
+        const lt = __tr(l), et = __tr(e), ht = __tr(h);
+        const first = l.querySelector('.row .text');
+        return {
+          title: h.textContent, first: first ? first.textContent : '', hop: +getComputedStyle(h).opacity, hmove: Math.abs(ht.x) + Math.abs(ht.y),
+          lop: +getComputedStyle(l).opacity, lmove: Math.abs(lt.x) + Math.abs(lt.y),
+          eon: !e.hidden, eop: +getComputedStyle(e).opacity, emove: Math.abs(et.x) + Math.abs(et.y),
+        };
+      });
+    });
+    await act();
+    await page.waitForTimeout(ms);
+    return page.evaluate(() => __stopSw());
+  };
+  const faded = (fr, k) => fr.some((f) => f[k] > 0.02 && f[k] < 0.95);
+
+  await test('A5 section switch: the list and empty state fade in, no slide, no fade out, the title at once', motion, async (open) => {
+    await seed([['Today one'], ['Today two'], ['Soon one', 'soon']]);
+    const page = await open();
+    let fr = await switchFrames(page, () => page.click('#switcher button[data-section="soon"]'));
+    const soon = fr.filter((f) => f.title === 'Soon');
+    assert.ok(soon.length, 'the title never read Soon');
+    assert.equal(soon[0].first, 'Soon one', 'the title changed before the list did');
+    assert.ok(faded(soon, 'lop'), 'the Soon list did not fade in: ' + soon.map((f) => f.lop.toFixed(2)).join(' '));
+    assert.ok(fr.filter((f) => f.title === 'Today').every((f) => f.lop > 0.99), 'the Today list faded out first (an outgoing phase)');
+    assert.ok(fr.every((f) => f.lmove < 0.5 && f.hmove < 0.5), 'the list or the title moved on a section switch');
+    assert.ok(fr.every((f) => f.hop > 0.99), 'the title faded');
+    assert.ok(soon[soon.length - 1].lop > 0.99, 'the list ended faded');
+
+    // Into an empty section: the empty state fades in the same way, without its 4px rise.
+    fr = await switchFrames(page, () => page.click('#switcher button[data-section="someday"]'));
+    const on = fr.filter((f) => f.eon);
+    assert.ok(on.length && faded(on, 'eop'), 'the empty state did not fade in: ' + on.map((f) => f.eop.toFixed(2)).join(' '));
+    assert.ok(on.every((f) => f.emove < 0.5), 'the empty state rose on a section switch');
+
+    // Desktop: the sidebar and the 1/2/3 keys take the same path.
+    const desk = await open({ desktop: true });
+    fr = await switchFrames(desk, () => desk.click('.nav-item[data-section="soon"]'));
+    assert.ok(faded(fr.filter((f) => f.title === 'Soon'), 'lop'), 'sidebar: the list did not fade in');
+    assert.ok(fr.every((f) => f.lmove < 0.5 && f.hop > 0.99), 'sidebar: the list moved or the title faded');
+    fr = await switchFrames(desk, () => desk.keyboard.press('1'));
+    const today = fr.filter((f) => f.title === 'Today');
+    assert.ok(today.length && today[0].first === 'Today one', 'key 1: the title changed before the list');
+    assert.ok(faded(today, 'lop'), 'key 1: the list did not fade in');
+    assert.ok(fr.every((f) => f.lmove < 0.5 && f.hop > 0.99), 'key 1: the list moved or the title faded');
+  });
+
+  await test('A7 swipe: soft fill before the threshold, solid with the check pop at .armed, no layout reads while it moves', motion, async (open, motion) => {
+    const ids = await seed([['Swipe me slowly'], ['Neighbour'], ['Third']]);
+    const page = await open();
+    const w = await page.evaluate(() => innerWidth);
+    const look = () => page.evaluate((id) => {
+      const r = __row(id);
+      const sd = r.querySelector('.swipe-done');
+      const cs = getComputedStyle(sd);
+      return { armed: r.classList.contains('armed'), bg: cs.backgroundColor, fg: cs.color, scale: __tr(sd.querySelector('.ic')).s, trans: cs.transitionProperty + ' ' + cs.transitionDuration };
+    }, ids[0]);
+    const c = await page.evaluate(() => ({ soft: __color('var(--accent-soft)'), text: __color('var(--accent-text)'), accent: __color('var(--accent)'), on: __color('var(--on-accent)') }));
+    const t = await touch(page, ENGINE);
+    await t.drag(page.locator(`.row[data-id="${ids[0]}"]`), Math.round(w * 0.3), { end: false });
+    await page.waitForTimeout(250);
+    let l = await look();
+    assert.ok(!l.armed, 'armed at 30%');
+    assert.deepEqual([l.bg, l.fg], [c.soft, c.text], 'before the threshold: --accent-soft with an --accent-text check');
+    assert.ok(/background-color/.test(l.trans) && /0\.14s/.test(l.trans), 'the fill changes over --dur-press: ' + l.trans);
+    // Past the start, a move measures nothing.
+    await page.evaluate(() => { window.__stopReads = __layoutReads(); });
+    await t.to(Math.round(w * 0.36), 4);
+    const reads = await page.evaluate(() => __stopReads());
+    assert.equal(reads, 0, 'layout reads during pointermove');
+    await t.to(Math.round(w * 0.5), 4);
+    await page.waitForTimeout(250);
+    l = await look();
+    assert.ok(l.armed, 'not armed at 50%');
+    assert.deepEqual([l.bg, l.fg], [c.accent, c.on], 'at .armed: solid --accent with a white check');
+    if (motion === 'reduce') assert.ok(Math.abs(l.scale - 1) < 0.01, 'the check pops with reduced motion (' + l.scale + ')');
+    else assert.ok(Math.abs(l.scale - 1.25) < 0.01, 'the approved check pop scale(1.25) is gone (' + l.scale + ')');
+    await t.release();
+    await gone(page, [ids[0]]);
+    await serverHas((i) => i.id === ids[0] && i.done, 'done on server');
+  });
+
+  await test('A7 flick: fast past 20% finishes, slow does not; a fast 40px left reveals, slow does not; settles take 140 to 240ms', motion, async (open, motion) => {
+    const ids = await seed([['Slow right'], ['Flick right'], ['Flick left'], ['Slow left'], ['Stays']]);
+    const page = await open();
+    const w = await page.evaluate(() => innerWidth);
+    const t = await touch(page, ENGINE);
+    const row = (i) => page.locator(`.row[data-id="${ids[i]}"]`);
+    // The duration of the glide the row is on right after the finger lifts (none with reduced motion).
+    const glide = (id) => page.evaluate((id) => {
+      const a = __row(id) && __row(id).querySelector('.row-inner').getAnimations()[0];
+      return a ? a.effect.getTiming().duration : null;
+    }, id);
+    const x = (id) => page.evaluate((id) => { const r = __row(id); return r ? Math.round(__tr(r.querySelector('.row-inner')).x) : null; }, id);
+    const durs = [];
+
+    await t.drag(row(0), Math.round(w * 0.25), { end: false, steps: 10 });
+    await page.waitForTimeout(250); // held still: no speed left
+    await t.release();
+    durs.push(await glide(ids[0]));
+    await page.waitForTimeout(500);
+    assert.equal(await x(ids[0]), 0, 'a slow 25% swipe did not settle home');
+
+    await t.drag(row(1), Math.round(w * 0.25), { end: false, steps: 3 });
+    await t.release();
+    durs.push(await glide(ids[1]));
+    await gone(page, [ids[1]]);
+    await serverHas((i) => i.id === ids[1] && i.done, 'the flicked task done on server');
+
+    await t.drag(row(2), -40, { end: false, steps: 2 });
+    await t.release();
+    durs.push(await glide(ids[2]));
+    await page.waitForTimeout(500);
+    const rev = await page.evaluate((id) => { const r = __row(id); return { l: r.classList.contains('swipe-l'), x: Math.round(__tr(r.querySelector('.row-inner')).x) }; }, ids[2]);
+    assert.ok(rev.l && rev.x < -60, 'a fast 40px flick left did not reveal (' + JSON.stringify(rev) + ')');
+    await page.evaluate(() => __tapSel('#title'));
+    await page.waitForTimeout(500);
+
+    await t.drag(row(3), -40, { end: false, steps: 6 });
+    await page.waitForTimeout(250);
+    await t.release();
+    durs.push(await glide(ids[3]));
+    await page.waitForTimeout(500);
+    assert.equal(await x(ids[3]), 0, 'a slow 40px swipe left did not settle home');
+    assert.ok(!(await getList()).find((i) => i.id === ids[0]).done, 'the slow swipe right finished the task');
+
+    if (motion === 'reduce') assert.ok(durs.every((d) => d === null), 'rows glide with reduced motion: ' + durs.join(' '));
+    else assert.ok(durs.every((d) => d >= 140 && d <= 240), 'settle durations ' + durs.join(' '));
+  });
+
+  await test('A8 reopen from Done: the tick drains and the text comes back before the row closes, an empty day header goes with it', motion, async (open, motion) => {
+    const now = Date.now();
+    const ids = await seed([['Open task'], ['Alone on its day', 'soon', { done: true, doneAt: now - 3 * 86400000 }],
+      ['Done today one', 'today', { done: true, doneAt: now - 60000 }], ['Done today two', 'today', { done: true, doneAt: now - 120000 }]]);
+    const page = await open();
+    await page.click('#historyBtn');
+    await page.waitForSelector(`.drow[data-id="${ids[1]}"]`);
+    await page.waitForTimeout(400);
+    const heads0 = await page.locator('.dhead').count();
+    const r = await page.evaluate(async (id) => {
+      const d = document.querySelector(`.drow[data-id="${id}"]`);
+      const head = d.previousElementSibling;
+      const h0 = d.getBoundingClientRect().height, hh0 = head.getBoundingClientRect().height;
+      const text = __color('var(--text)');
+      const stop = __frames(() => {
+        if (!d.isConnected) return { gone: true };
+        const ch = getComputedStyle(d.querySelector('.dcheck'));
+        const tx = getComputedStyle(d.querySelector('.dtext'));
+        return {
+          h: d.getBoundingClientRect().height, hh: head.isConnected ? head.getBoundingClientRect().height : 0, op: +getComputedStyle(d).opacity,
+          drained: /rgba\(.*, 0\)|transparent/.test(ch.backgroundColor) && +getComputedStyle(d.querySelector('.dcheck .ic')).opacity < 0.05,
+          back: tx.color === text && /rgba\(.*, 0\)|transparent/.test(tx.textDecorationColor),
+        };
+      });
+      const b = d.getBoundingClientRect();
+      __tapAt(b.x + 60, b.y + b.height / 2);
+      const queued = __queue().some((o) => o.item.id === id && o.item.done === false);
+      const toast = document.getElementById('toastText').textContent;
+      await new Promise((r) => setTimeout(r, 1000));
+      return { h0, hh0, queued, toast, fr: stop() };
+    }, ids[1]);
+    assert.ok(r.queued, 'the reopen was not written at the tap');
+    assert.equal(r.toast, 'Reopened in Soon.');
+    const before = r.fr.filter((f) => !f.gone && f.h >= r.h0 - 0.5 && f.op > 0.99);
+    assert.ok(before.some((f) => f.drained && f.back), 'the check never drained and the text never came back before the row closed');
+    const mid = r.fr.filter((f) => !f.gone && f.h > 1 && f.h < r.h0 - 1);
+    if (motion === 'reduce') {
+      assert.equal(mid.length, 0, 'the row closed its height with reduced motion');
+      assert.ok(r.fr.some((f) => !f.gone && f.op > 0.02 && f.op < 0.95), 'the row did not fade');
+    } else {
+      assert.ok(mid.length >= 2, 'the row did not collapse: ' + r.fr.map((f) => f.gone ? 'x' : f.h.toFixed(0)).join(' '));
+      assert.ok(r.fr.some((f) => !f.gone && f.hh > 1 && f.hh < r.hh0 - 1), 'its day header did not collapse with it');
+    }
+    await until(async () => !(await page.$(`.drow[data-id="${ids[1]}"]`)), 2000, 'the reopened row to leave Done');
+    assert.equal(await page.locator('.dhead').count(), heads0 - 1, 'the empty day header stayed');
+    // A day that still has rows keeps its header.
+    await page.click(`.drow[data-id="${ids[2]}"]`);
+    await until(async () => !(await page.$(`.drow[data-id="${ids[2]}"]`)), 2000, 'the second reopened row to leave Done');
+    await page.waitForTimeout(300);
+    assert.deepEqual(await page.locator('.dhead').allTextContents(), ['Today'], 'day headers');
+    assert.ok(await page.$(`.drow[data-id="${ids[3]}"]`), 'the other row of the day stayed');
+    await serverHas((i) => i.id === ids[1] && !i.done, 'reopened on server');
+  });
+
+  await test('A9 sheet drag: the scrim follows the finger, a slow let-go glides back within 220ms, a flick closes from where it is', motion, async (open, motion) => {
+    await seed([['Anything']]);
+    const page = await open();
+    await page.click('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#capture .scrim')).touchAction), 'none', 'scrim touch-action');
+    const g = await box(page, '#capture .grabber');
+    const sh = await box(page, '#capture .sheet');
+    const x = g.cx, y = g.top + g.h / 2;
+    const t = await touch(page, ENGINE);
+    await t.down(x, y);
+    for (let d = 10; d <= 60; d += 10) { await t.move(x, y + d); await page.waitForTimeout(16); }
+    await page.waitForTimeout(60);
+    const mid = await page.evaluate(() => +getComputedStyle(document.querySelector('#capture .scrim')).opacity);
+    const want = 1 - 60 / sh.h;
+    assert.ok(Math.abs(mid - want) <= 0.05, `scrim at ${mid.toFixed(2)} for a 60px drag of a ${Math.round(sh.h)}px sheet, not ${want.toFixed(2)}`);
+    await page.waitForTimeout(150); // held still
+    await t.up();
+    const snap = await page.evaluate(() => document.querySelector('#capture .sheet').getAnimations().map((a) => a.effect.getTiming().duration));
+    await page.waitForTimeout(400);
+    const rest = await page.evaluate(() => ({ top: document.querySelector('#capture .sheet').getBoundingClientRect().top, scrim: +getComputedStyle(document.querySelector('#capture .scrim')).opacity, open: !document.getElementById('capture').hidden }));
+    assert.ok(rest.open, 'a slow 60px drag closed the sheet');
+    assert.ok(Math.abs(rest.top - sh.top) <= 1 && rest.scrim > 0.99, 'the sheet or scrim did not come back: ' + JSON.stringify(rest));
+    if (motion === 'reduce') assert.deepEqual(snap, [], 'the sheet glides back with reduced motion');
+    else assert.ok(snap.length === 1 && snap[0] <= 220, 'snap-back durations ' + JSON.stringify(snap));
+
+    // A flick: 50px (under the 70px that closes by distance) in two quick moves. The sheet leaves
+    // from where the finger let go, and the scrim never darkens again.
+    await t.down(x, y);
+    for (const d of [25, 50]) await t.move(x, y + d);
+    await page.evaluate(() => { window.__stopOv = __overlay('#capture', '#capture .sheet'); });
+    await t.up();
+    await page.waitForTimeout(500);
+    const fr = await page.evaluate(() => __stopOv());
+    assert.ok(!fr[fr.length - 1].open, 'a 50px flick did not close the sheet');
+    const on = fr.filter((f) => f.open);
+    assert.equal(on.findIndex((f, i) => i > 0 && f.top < on[i - 1].top - 1), -1, 'the sheet went back up before leaving: ' + on.map((f) => Math.round(f.top - sh.top)).join(' '));
+    assert.equal(on.findIndex((f, i) => i > 0 && f.scrim > on[i - 1].scrim + 0.02), -1, 'the scrim darkened again while closing');
+  });
+
+  await test('A10 capture: each Return grows one new line, past three the first closes so the sheet holds, the label fades once', motion, async (open, motion) => {
+    await seed([['Anything']]);
+    const page = await open();
+    await page.click('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      window.__cap = { added: 0, removed: 0 };
+      new MutationObserver((ms) => { for (const m of ms) { __cap.added += m.addedNodes.length; __cap.removed += m.removedNodes.length; } })
+        .observe(document.getElementById('capAdded'), { childList: true });
+    });
+    const saves = [];
+    for (let i = 1; i <= 4; i++) {
+      await page.keyboard.type('Line ' + i);
+      const r = await page.evaluate(async () => {
+        const sheet = document.querySelector('#capture .sheet');
+        const label = document.getElementById('capLabel');
+        const keep = [...document.getElementById('capAdded').children];
+        const a0 = __cap.added, r0 = __cap.removed;
+        const top0 = sheet.getBoundingClientRect().top;
+        const stop = __frames(() => ({ top: sheet.getBoundingClientRect().top, lab: label.getAnimations().length }));
+        const input = document.getElementById('capInput');
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        await new Promise((r) => setTimeout(r, 450));
+        const fr = stop();
+        return { top0, fr, added: __cap.added - a0, removed: __cap.removed - r0, kept: keep.filter((li) => li.isConnected).length, had: keep.length, label: label.textContent };
+      });
+      saves.push(r);
+    }
+    assert.deepEqual(saves.map((s) => s.added), [1, 1, 1, 1], 'lines added per Return');
+    assert.deepEqual(saves.map((s) => s.removed), [0, 0, 0, 1], 'lines removed per Return');
+    assert.deepEqual(saves.map((s) => s.kept + '/' + s.had), ['0/0', '1/1', '2/2', '2/3'], 'lines kept as they were (not rebuilt)');
+    assert.deepEqual(await page.locator('#capAdded li .t').allTextContents(), ['Line 2', 'Line 3', 'Line 4'], 'the three lines shown');
+    assert.equal(saves[0].label, 'Added to Today');
+    assert.ok(saves[0].fr.some((f) => f.lab > 0), 'the label did not crossfade when its words changed');
+    assert.ok(saves.slice(1).every((s) => s.fr.every((f) => f.lab === 0)), 'the label crossfaded with the same words');
+    const last = saves[3];
+    const drift = last.fr.filter((f) => Math.abs(f.top - last.top0) > 1.5);
+    assert.deepEqual(drift.slice(0, 3).map((f) => f.t + 'ms ' + (f.top - last.top0).toFixed(1)), [], 'the sheet moved on the fourth line');
+    if (motion === 'no-preference') {
+      for (const [i, s] of saves.slice(0, 3).entries()) {
+        const end = s.fr[s.fr.length - 1].top;
+        const between = s.fr.filter((f) => f.top < s.top0 - 1 && f.top > end + 1).length;
+        assert.ok(s.top0 - end > 20 && between >= 2, `line ${i + 1}: the sheet jumped ${Math.round(s.top0 - end)}px in ${between ? between + ' frames' : 'one frame'}`);
+      }
+    }
+    await page.keyboard.press('Escape');
+  });
+
+  // Samples the column, the add button, the switcher and the leaving copy of Done.
+  const layerFrames = async (page, act, ms = 500) => {
+    await page.evaluate(() => {
+      const shown = (el) => { const b = el.getBoundingClientRect(); return getComputedStyle(el).display !== 'none' && b.width > 0; };
+      window.__stopLayer = __frames(() => {
+        const col = document.querySelector('main .col');
+        const gh = document.querySelector('.col-ghost');
+        const fab = document.getElementById('fab'), sw = document.getElementById('switcher');
+        return {
+          done: document.body.classList.contains('view-done'), cop: +getComputedStyle(col).opacity, cy: __tr(col).y,
+          fab: shown(fab), fop: +getComputedStyle(fab).opacity, sw: shown(sw), sop: +getComputedStyle(sw).opacity,
+          gh: !!gh, gop: gh ? +getComputedStyle(gh).opacity : 0, gy: gh ? __tr(gh).y : 0, gids: gh ? gh.querySelectorAll('[id]').length : 0,
+          gl: gh ? gh.getBoundingClientRect().left : 0, gw: gh ? gh.getBoundingClientRect().width : 0, rows: document.querySelectorAll('#list .row').length,
+        };
+      });
+    });
+    await act();
+    await page.waitForTimeout(ms);
+    return page.evaluate(() => __stopLayer());
+  };
+
+  await test('A12 Done is a layer: it rises 12px and fades in as the add button and switcher fade out; closing reverses', motion, async (open, motion) => {
+    await seed([['Open one'], ['Open two'], ['Done one', 'today', { done: true, doneAt: Date.now() - 60000 }]]);
+    const page = await open();
+    let fr = await layerFrames(page, () => page.click('#historyBtn'));
+    const d = fr.filter((f) => f.done);
+    assert.ok(d.length, 'Done never opened');
+    assert.ok(faded(d, 'cop'), 'the Done column did not fade in: ' + d.map((f) => f.cop.toFixed(2)).join(' '));
+    assert.ok(d.every((f) => f.cy <= 12.5 && f.cy >= -0.5), 'the column moved outside 0 to 12px');
+    if (motion === 'reduce') assert.ok(d.every((f) => Math.abs(f.cy) < 0.5), 'the column rose with reduced motion');
+    else assert.ok(d.some((f) => f.cy > 1), 'the column did not rise: ' + d.map((f) => f.cy.toFixed(1)).join(' '));
+    assert.ok(d.some((f) => f.fab && f.fop > 0.02 && f.fop < 0.95) && d.some((f) => f.sw && f.sop > 0.02 && f.sop < 0.95), 'the add button and switcher did not fade out');
+    assert.ok(!fr[fr.length - 1].fab && !fr[fr.length - 1].sw, 'the add button or switcher is still shown in Done');
+
+    fr = await layerFrames(page, () => page.click('#closeDone'));
+    const l = fr.filter((f) => !f.done);
+    assert.ok(l.length && l[0].rows > 0, 'the list was not there at once under Done as it left');
+    const gh = l.filter((f) => f.gh);
+    assert.ok(gh.length && faded(gh, 'gop'), 'Done did not fade out over the list');
+    assert.ok(gh.every((f) => f.gids === 0), 'the leaving copy of Done has ids');
+    if (motion === 'reduce') assert.ok(gh.every((f) => Math.abs(f.gy) < 0.5), 'Done sank with reduced motion');
+    else assert.ok(gh.some((f) => f.gy > 1) && gh.every((f) => f.gy <= 12.5), 'Done did not sink 12px: ' + gh.map((f) => f.gy.toFixed(1)).join(' '));
+    assert.ok(!fr[fr.length - 1].gh, 'the copy of Done stayed');
+    assert.ok(l.some((f) => f.fab && f.fop > 0.02 && f.fop < 0.95), 'the add button did not fade in');
+    assert.ok(fr[fr.length - 1].fab && fr[fr.length - 1].fop > 0.99 && fr[fr.length - 1].sop > 0.99, 'the add button or switcher did not come back');
+
+    // Desktop: the copy lies exactly over the column.
+    const desk = await open({ desktop: true });
+    await desk.click('.nav-item[data-section="done"]');
+    await desk.waitForSelector('.drow');
+    await desk.waitForTimeout(400);
+    const col = await box(desk, 'main .col');
+    fr = await layerFrames(desk, () => desk.keyboard.press('1'));
+    const g = fr.find((f) => f.gh);
+    assert.ok(g, 'no leaving copy of Done on the desktop');
+    assert.ok(Math.abs(g.gl - col.left) <= 1 && Math.abs(g.gw - (col.right - col.left)) <= 1, `copy at ${g.gl}+${g.gw}, column at ${col.left}+${col.right - col.left}`);
+    assert.ok(!fr[fr.length - 1].gh, 'the copy of Done stayed on the desktop');
+  });
+
+  await test('A13 the empty state fades in and rises 4px after the last row leaves, 60ms late', motion, async (open, motion) => {
+    const [, id] = await seed([['Keeps Today busy'], ['The only soon task', 'soon']]);
+    const page = await open();
+    await page.click('#switcher button[data-section="soon"]');
+    await page.waitForSelector(`.row[data-id="${id}"]`);
+    await page.waitForTimeout(400);
+    const fr = await switchFrames(page, () => page.evaluate((id) => {
+      window.__delays = [];
+      const e = document.getElementById('empty');
+      new MutationObserver(() => { for (const a of e.getAnimations()) __delays.push(a.effect.getTiming().delay); }).observe(e, { attributes: true });
+      __tap(id);
+    }, id), 1300);
+    const on = fr.filter((f) => f.eon);
+    assert.ok(on.length, 'the empty state never showed');
+    assert.ok(on[0].eop < 0.5, 'the empty state showed at ' + on[0].eop.toFixed(2) + ' opacity');
+    assert.ok(faded(on, 'eop'), 'the empty state did not fade in');
+    assert.ok(on[on.length - 1].eop > 0.99, 'the empty state ended faded');
+    assert.ok((await page.evaluate(() => __delays)).includes(60), 'no 60ms delay on the entrance');
+    if (motion === 'reduce') assert.ok(on.every((f) => f.emove < 0.5), 'the empty state rose with reduced motion');
+    else assert.ok(on.some((f) => f.emove > 0.5) && on.every((f) => f.emove <= 4.5), 'the empty state did not rise 4px: ' + on.map((f) => f.emove.toFixed(1)).join(' '));
+  });
+
+  await test('A13 the desktop add field opens in a slot and takes focus; the skeleton gives way to all rows at once', motion, async (open, motion) => {
+    await seed([['First row'], ['Second row']]);
+    const desk = await open({ desktop: true });
+    const slotFrames = async (act) => {
+      await desk.evaluate(() => {
+        const s = document.getElementById('inlineSlot');
+        window.__stopSlot = __frames(() => ({ h: s.getBoundingClientRect().height, op: +getComputedStyle(s).opacity, shown: !document.getElementById('inlineAdd').hidden }));
+      });
+      await act();
+      await desk.waitForTimeout(450);
+      return desk.evaluate(() => __stopSlot());
+    };
+    let fr = await slotFrames(() => desk.keyboard.press('n'));
+    assert.equal(await desk.evaluate(() => document.activeElement.id), 'inlineInput', 'focus after opening');
+    const full = fr[fr.length - 1].h;
+    assert.ok(full > 40, 'the slot opened to ' + full + 'px');
+    const mid = fr.filter((f) => f.h > 1 && f.h < full - 1).length;
+    if (motion === 'reduce') {
+      assert.equal(mid, 0, 'the slot grew with reduced motion');
+      assert.ok(faded(fr, 'op'), 'the field did not fade in with reduced motion');
+    } else assert.ok(mid >= 2, 'the slot opened in one frame: ' + fr.map((f) => f.h.toFixed(0)).join(' '));
+    fr = await slotFrames(() => desk.keyboard.press('Escape'));
+    assert.ok(!fr[fr.length - 1].shown && fr[fr.length - 1].h < 1, 'the field did not close');
+    if (motion === 'no-preference') assert.ok(fr.filter((f) => f.h > 1 && f.h < full - 1).length >= 2, 'the slot closed in one frame');
+
+    // A cold start: the skeleton is replaced by every row at once, fading over --dur-exit.
+    await desk.context().addInitScript(() => {
+      window.__skel = [];
+      const t0 = performance.now();
+      const tick = () => {
+        const l = document.getElementById('list');
+        if (l) {
+          const rows = [...l.querySelectorAll('.row:not(.skeleton)')];
+          __skel.push({ sk: l.querySelectorAll('.skeleton').length, rows: rows.length, op: +getComputedStyle(l).opacity,
+            anims: l.getAnimations().map((a) => a.effect.getTiming().duration), rowAnims: rows.reduce((n, r) => n + r.getAnimations().length, 0) });
+        }
+        if (performance.now() - t0 < 2500) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await desk.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('todo.v1.')) localStorage.removeItem(k); });
+    await desk.reload();
+    await desk.waitForSelector('#list .row:not(.skeleton)');
+    await desk.waitForTimeout(500);
+    const sk = await desk.evaluate(() => __skel);
+    const content = sk.filter((f) => f.rows > 0);
+    assert.ok(content.length, 'no rows after the skeleton');
+    assert.ok(content.some((f) => f.op > 0.02 && f.op < 0.95), 'the rows did not fade in: ' + content.slice(0, 8).map((f) => f.op.toFixed(2)).join(' '));
+    assert.ok(content.every((f) => f.rowAnims === 0), 'rows animated one by one (a stagger)');
+    assert.ok(content.some((f) => f.anims.includes(180)), 'the fade is not --dur-exit: ' + JSON.stringify(content[0].anims));
+  });
+
+  await test('I1 press feedback: :active on buttons, a still press lights the row, no progress fill, the menu row stays lit', motion, async (open, motion, part) => {
+    const ids = await seed([['Press me'], ['Second'], ['Third']]);
+    const page = await open();
+    assert.ok((await page.evaluate(() => __touchstarts)).some((l) => l.on === 'document' && l.passive), 'no passive touchstart listener on document');
+    const ta = await page.evaluate(() => ['fab', 'toastUndo', 'capDone'].map((id) => getComputedStyle(document.getElementById(id)).touchAction));
+    assert.deepEqual(ta, ['manipulation', 'manipulation', 'manipulation'], 'touch-action on buttons');
+
+    // Press and hold with the mouse, then slide off before letting go so nothing is clicked.
+    const held = async (sel) => {
+      const b = await box(page, sel);
+      await page.mouse.move(b.cx, b.top + b.h / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(250);
+      const s = await page.evaluate((sel) => { const el = document.querySelector(sel); return { active: el.matches(':active'), op: +getComputedStyle(el).opacity, s: __tr(el).s }; }, sel);
+      await page.mouse.move(5, 420);
+      await page.mouse.up();
+      await page.waitForTimeout(250);
+      return s;
+    };
+    const fab = await held('#fab');
+    const seg = await held('#switcher button[data-section="soon"]');
+    if (!fab.active) part(ENGINE + ' does not apply :active to a pressed button here');
+    else {
+      if (motion === 'reduce') assert.ok(Math.abs(fab.s - 1) < 0.01 && fab.op < 0.6, 'FAB press with reduced motion: ' + JSON.stringify(fab));
+      else assert.ok(Math.abs(fab.s - 0.94) < 0.005, 'FAB press scale ' + fab.s);
+      assert.ok(Math.abs(seg.op - 0.55) < 0.01, 'segment press opacity ' + seg.op);
+    }
+    assert.ok(await page.isHidden('#capture'), 'sliding off the FAB still opened the sheet');
+
+    // A still finger lights the row after about 90ms; a move or a lift clears it.
+    const surface = await page.evaluate(() => { const p = document.createElement('span'); p.style.background = 'var(--surface)'; document.body.append(p); const c = getComputedStyle(p).backgroundColor; p.remove(); return c; });
+    const t = await touch(page, ENGINE);
+    const tb = await page.locator(`.row[data-id="${ids[0]}"] .text`).boundingBox();
+    const cx = tb.x + tb.width / 2, cy = tb.y + tb.height / 2;
+    const lit = () => page.evaluate((id) => { const r = __row(id); return { on: r.classList.contains('pressing'), bg: getComputedStyle(r.querySelector('.row-inner')).backgroundColor, anims: r.getAnimations().length + r.querySelector('.row-inner').getAnimations().length }; }, ids[0]);
+    await t.down(cx, cy);
+    await page.waitForTimeout(40);
+    assert.ok(!(await lit()).on, 'the row lit at once');
+    await page.waitForTimeout(160);
+    let s = await lit();
+    assert.ok(s.on && s.bg === surface, 'a still press did not light the row: ' + JSON.stringify(s));
+    await page.waitForTimeout(200);
+    s = await lit();
+    assert.equal(s.anims, 0, 'something animates on the row while it is held (a progress fill)');
+    await t.move(cx, cy + 30);
+    await page.waitForTimeout(50);
+    assert.ok(!(await lit()).on, 'a move did not clear the highlight');
+    await t.up();
+    await t.down(cx, cy);
+    await page.waitForTimeout(200);
+    await t.up();
+    await page.waitForTimeout(50);
+    assert.ok(!(await lit()).on, 'lifting the finger did not clear the highlight');
+    await page.waitForTimeout(300);
+    if (!(await page.isHidden('#edit'))) { await page.click('#editClose'); await page.waitForSelector('#edit', { state: 'hidden' }); }
+
+    await t.longPress(page.locator(`.row[data-id="${ids[1]}"]`));
+    await page.waitForSelector('#menu:not([hidden])');
+    const m = await page.evaluate((id) => getComputedStyle(__row(id).querySelector('.row-inner')).backgroundColor, ids[1]);
+    assert.equal(m, surface, 'the long-pressed row is not lit while the menu is open (phone)');
+    await page.keyboard.press('Escape');
+  });
+
+  await test('I2 edit sheet: one toast for the section it ends in, Undo brings back the old section and place', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Move me twice'], ['Row C'], ['Move me and back']]);
+    const pos0 = (await getList()).find((i) => i.id === ids[1]).pos;
+    const page = await open();
+    await page.evaluate(() => {
+      window.__toasts = [];
+      new MutationObserver(() => __toasts.push(document.getElementById('toastText').textContent)).observe(document.getElementById('toastText'), { childList: true, characterData: true, subtree: true });
+    });
+    await page.evaluate((id) => __tap(id, '.text'), ids[1]);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(300);
+    await page.click('#editSeg button[data-section="soon"]');
+    await page.click('#editSeg button[data-section="someday"]');
+    await page.waitForTimeout(200);
+    assert.deepEqual(await page.evaluate(() => __toasts), [], 'a toast while the sheet is open');
+    await page.click('#editClose');
+    await page.waitForSelector('#edit', { state: 'hidden' });
+    await page.waitForSelector('#toast:not([hidden])');
+    await page.waitForTimeout(300);
+    assert.deepEqual(await page.evaluate(() => __toasts), ['Moved to Someday.'], 'toasts');
+    await serverHas((i) => i.id === ids[1] && i.section === 'someday', 'moved on server');
+    await page.click('#toastUndo');
+    await serverHas((i) => i.id === ids[1] && i.section === 'today' && i.pos === pos0, 'Undo restored the section and position on the server');
+    await until(async () => JSON.stringify(await page.locator('#list .row .text').allTextContents()) === JSON.stringify(['Row A', 'Move me twice', 'Row C', 'Move me and back']), 3000, 'the row back in its old place');
+
+    await page.waitForSelector('#toast', { state: 'hidden', timeout: 3000 });
+    await page.evaluate(() => { window.__toasts = []; });
+    await page.evaluate((id) => __tap(id, '.text'), ids[3]);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(300);
+    await page.click('#editSeg button[data-section="soon"]');
+    await page.click('#editSeg button[data-section="today"]');
+    await page.click('#editClose');
+    await page.waitForSelector('#edit', { state: 'hidden' });
+    await page.waitForTimeout(600);
+    assert.ok(await page.isHidden('#toast'), 'a toast after moving back to the same section');
+    assert.ok(await inList(page, ids[3]), 'the task is back in Today');
+  });
+
+  await test('I3 an open reveal closes on scroll, a touch elsewhere, the add button, the app hiding and a remote change', motion, async (open) => {
+    const ids = await seed(Array.from({ length: 22 }, (_, i) => ['Row ' + (i + 1)]));
+    const page = await open();
+    const t = await touch(page, ENGINE);
+    const state = (id) => page.evaluate((id) => { const r = __row(id); return r ? { l: r.classList.contains('swipe-l'), x: Math.round(__tr(r.querySelector('.row-inner')).x) } : null; }, id);
+    const reveal = async (id) => {
+      await t.drag(page.locator(`.row[data-id="${id}"]`), -200);
+      await page.waitForTimeout(400);
+      const s = await state(id);
+      assert.ok(s && s.l && s.x < -60, 'the row did not reveal: ' + JSON.stringify(s));
+    };
+    const shut = async (id, how) => {
+      await page.waitForTimeout(450);
+      const s = await state(id);
+      assert.ok(!s || (!s.l && s.x === 0), how + ': the reveal stayed open ' + JSON.stringify(s));
+    };
+
+    await reveal(ids[1]);
+    await page.evaluate(() => window.scrollBy(0, 30));
+    await shut(ids[1], 'scroll');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(200);
+
+    await reveal(ids[1]);
+    await page.evaluate(() => __tapSel('#title'));
+    await shut(ids[1], 'tap on the title');
+    await reveal(ids[1]);
+    await page.evaluate((id) => __tap(id), ids[3]);
+    await shut(ids[1], 'tap on another row');
+    assert.ok(!(await page.evaluate((id) => !!__row(id).querySelector('.circle.checked'), ids[3])), 'the tap that closed the reveal also ticked a row');
+
+    await reveal(ids[1]);
+    await page.evaluate(() => document.getElementById('fab').click());
+    await shut(ids[1], 'openAdd');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#capture', { state: 'hidden' });
+
+    await reveal(ids[1]);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      delete document.hidden;
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await shut(ids[1], 'visibilitychange');
+
+    // Deleted on the other device while open: the reveal lets go and the list draws again.
+    await reveal(ids[1]);
+    await postOps([{ op: 'delete', item: { id: ids[1], updatedAt: Date.now() + 1000 } }]);
+    const [newId] = await seed([['Arrived while revealed']]);
+    await page.evaluate(() => __poll());
+    await until(async () => !(await inList(page, ids[1])) && await inList(page, newId), 3000, 'the deleted row to leave and the new one to show');
+    // Moved on the other device while open.
+    await reveal(ids[2]);
+    await postOps([{ op: 'upsert', item: { id: ids[2], text: 'Row 3', section: 'soon', done: false, doneAt: null, pos: Date.now(), updatedAt: Date.now() + 1000 } }]);
+    await page.evaluate(() => __poll());
+    await until(async () => !(await inList(page, ids[2])), 3000, 'the row moved elsewhere to leave');
+    await page.waitForTimeout(400);
+    assert.deepEqual(await page.evaluate(() => __ghosts()), [], 'ghost rows');
+
+    // A finger that stops a scroll does not open the menu; the same hold without a scroll does.
+    const b = await page.locator(`.row[data-id="${ids[5]}"] .text`).boundingBox();
+    await page.evaluate(() => window.scrollBy(0, 4));
+    await page.waitForTimeout(30);
+    await t.down(b.x + b.width / 2, b.y + b.height / 2 - 4);
+    await page.waitForTimeout(650);
+    await t.up();
+    assert.ok(await page.isHidden('#menu'), 'a hold right after a scroll opened the menu');
+    await page.waitForTimeout(400);
+    if (!(await page.isHidden('#edit'))) { await page.click('#editClose'); await page.waitForSelector('#edit', { state: 'hidden' }); await page.waitForTimeout(300); }
+    await t.longPress(page.locator(`.row[data-id="${ids[5]}"]`));
+    await page.waitForSelector('#menu:not([hidden])', { timeout: 1500 });
+    await page.keyboard.press('Escape');
   });
 }
 

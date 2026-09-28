@@ -49,7 +49,7 @@
       <div class="title-row">
         <h1 id="title">Today</h1>
         <button id="historyBtn" class="icon-btn phone-only list-only" aria-label="Done history"><svg class="ic" width="24" height="24"><use href="#i-clock"/></svg></button>
-        <button id="closeDone" class="text-btn phone-only done-only">Close</button>
+        <button id="closeDone" class="text-btn big phone-only done-only">Close</button>
         <button id="addDesk" class="add-desk desk-only list-only" aria-label="Add task"><svg class="ic ic-2" width="20" height="20"><use href="#i-plus"/></svg></button>
       </div>
       <div id="pill" class="pill" role="status" hidden><svg class="ic" width="16" height="16"><use href="#i-offline"/></svg><span></span></div>
@@ -59,12 +59,14 @@
       </div>
     </header>
 
-    <div id="inlineAdd" class="inline-add" hidden>
-      <span class="circle-static" aria-hidden="true"></span>
-      <label for="inlineInput" class="sr-only">New task</label>
-      <input id="inlineInput" type="text" placeholder="New task" maxlength="500" autocomplete="off" autocapitalize="sentences">
-      <span class="meta">Enter to add</span>
-    </div>
+    <div id="inlineSlot" class="inline-slot"><div class="inline-clip">
+      <div id="inlineAdd" class="inline-add" hidden>
+        <span class="circle-static" aria-hidden="true"></span>
+        <label for="inlineInput" class="sr-only">New task</label>
+        <input id="inlineInput" type="text" placeholder="New task" maxlength="500" autocomplete="off" autocapitalize="sentences">
+        <span class="meta">Enter to add</span>
+      </div>
+    </div></div>
 
     <ul id="list" class="list" aria-labelledby="title"></ul>
 

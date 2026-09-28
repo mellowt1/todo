@@ -59,7 +59,7 @@ body {
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
 }
-button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
 input, textarea { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -80,6 +80,9 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .icon-btn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--secondary); margin-right: -10px; }
 .text-btn { height: 44px; padding: 0 4px; color: var(--accent-text); font-size: 15px; font-weight: 600; }
 .text-btn.big, #closeDone { font-size: 17px; }
+/* Press feedback (a touchstart listener in app.js lets WebKit apply :active on touch). */
+.seg button, .text-btn, .icon-btn, .toast button, .danger-btn { transition: opacity var(--dur-press) ease; }
+.seg button:active, .text-btn:active, .icon-btn:active, .toast button:active, .danger-btn:active { opacity: 0.55; }
 
 .pill {
   align-self: flex-start; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
@@ -99,6 +102,12 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .row-inner {
   position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 14px;
   min-height: 52px; padding: 14px 16px; background: var(--bg); touch-action: pan-y;
+}
+/* The plain iOS cell highlight: on after a still press, and on while the move menu is open. */
+.row.pressing .row-inner, .row.menu-open .row-inner { background: var(--surface); }
+@media (hover: none) {
+  .row-inner { transition: background-color var(--dur-press) ease; } /* fades off when the finger lifts */
+  .row.pressing .row-inner { transition: none; }
 }
 .row .text {
   flex: 1; min-width: 0; font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; cursor: default;
@@ -123,7 +132,12 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 
 /* Swipe backgrounds sit under the row and show as it slides. */
 .swipe-done, .swipe-move { position: absolute; inset: 0; display: none; align-items: center; }
-.swipe-done { background: var(--accent); color: var(--on-accent); padding-left: 20px; }
+/* Soft until the swipe would finish the task, then solid with the check popping (approved). */
+.swipe-done {
+  background: var(--accent-soft); color: var(--accent-text); padding-left: 20px;
+  transition: background-color var(--dur-press) ease, color var(--dur-press) ease;
+}
+.row.armed .swipe-done { background: var(--accent); color: var(--on-accent); }
 .swipe-done .ic { transition: transform var(--dur-press) var(--ease); }
 .row.armed .swipe-done .ic { transform: scale(1.25); }
 .row.swipe-r .swipe-done, .row.swipe-l .swipe-move { display: flex; }
@@ -150,9 +164,23 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 /* ---------- Done history ---------- */
 .dhead { padding: 18px 16px 6px; font-size: 13px; font-weight: 600; color: var(--secondary); }
 .drow { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; margin: 0 16px; border-top: 0.5px solid var(--sep); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 68px; }
-.dcheck { flex-shrink: 0; width: 24px; height: 24px; border-radius: 12px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; }
+.dcheck {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 12px; background: var(--accent); border: 1.5px solid var(--accent);
+  color: var(--on-accent); display: flex; align-items: center; justify-content: center;
+  transition: background-color var(--dur-press) ease, border-color var(--dur-press) ease;
+}
+.dcheck .ic { transition: opacity var(--dur-press) ease; }
 .dbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.dtext { font-size: 17px; line-height: 1.35; color: var(--secondary); text-decoration: line-through; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dtext {
+  font-size: 17px; line-height: 1.35; color: var(--secondary); text-decoration: line-through; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  transition: color var(--dur-press) ease, text-decoration-color var(--dur-press) ease;
+}
+/* Reopen: the tick drains to an empty ring and the text comes back, then the row closes. */
+.drow.reopening .dcheck { background: transparent; border-color: var(--ring); }
+.drow.reopening .dcheck .ic { opacity: 0; }
+.drow.reopening .dtext { color: var(--text); text-decoration-color: transparent; }
+.drow.collapsing, .dhead.collapsing { overflow: hidden; }
 .dtime { padding-top: 3px; }
 body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 
@@ -179,7 +207,15 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 .fab {
   position: fixed; right: 16px; bottom: calc(var(--bottom) + 60px); z-index: 11; width: 56px; height: 56px; border-radius: 28px;
   background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center;
+  transition: transform var(--dur-press) ease;
 }
+.fab:active { transform: scale(0.94); }
+/* Done opening: the add button and the switcher stay shown while they fade out (app.js). */
+@media (max-width: 899px) {
+  body.view-done #fab.layer-out, body.view-done #switcher.layer-out { display: flex !important; pointer-events: none; }
+}
+/* Done closing: a still copy of it sinks away over the list. */
+.col-ghost { position: fixed; z-index: 5; margin: 0; overflow: hidden; background: var(--bg); pointer-events: none; }
 .toast {
   position: fixed; left: 16px; right: 84px; bottom: calc(var(--bottom) + 60px); z-index: 12; height: 56px; padding: 0 8px 0 16px;
   border-radius: 14px; background: var(--toast); color: var(--toast-text); display: flex; align-items: center; justify-content: space-between;
@@ -193,14 +229,14 @@ body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button i
 
 /* ---------- Sheets and dialogs ---------- */
 .sheet-wrap, .dialog-wrap { position: fixed; inset: 0; z-index: 30; }
-.scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade-in var(--dur-move) ease; }
+.scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade-in var(--dur-move) ease; touch-action: none; }
 .sheet {
   position: absolute; left: 0; right: 0; bottom: 0; background: var(--sheet); border-radius: 16px 16px 0 0;
   padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px;
   animation: sheet-in var(--dur-move) var(--ease); touch-action: none;
   translate: 0 var(--kb, 0px); transition: translate 240ms var(--ease); /* rides above the keyboard */
 }
-.sheet.dragging { animation: none; transition: none; }
+.sheet.dragging { transition: none; } /* app.js ends the entry at the grab, so it never replays */
 /* The page panned under the keyboard: the offset follows at once. */
 .sheet.kb-snap { transition-property: transform; }
 .grabber { align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--ring); }
@@ -210,7 +246,7 @@ body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button i
 .cap-head { display: flex; align-items: center; justify-content: space-between; margin: -6px 0 -10px; }
 .cap-added { list-style: none; margin: 0; padding: 2px 0 0; display: flex; flex-direction: column; }
 .cap-added:empty { display: none; }
-.cap-added li { display: flex; align-items: center; gap: 14px; min-height: 30px; color: var(--secondary); animation: row-in var(--dur-move) var(--ease); }
+.cap-added li { display: flex; align-items: center; gap: 14px; min-height: 30px; color: var(--secondary); overflow: hidden; } /* app.js grows each new line */
 .cap-added .ok { width: 24px; display: flex; justify-content: center; color: var(--accent-text); }
 .cap-added .t { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-sheet { gap: 16px; min-height: min(460px, 70vh); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
@@ -288,11 +324,13 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .row-inner { align-items: center; padding: 0 12px; border-radius: 10px; min-height: 52px; }
   .row .text { padding: 14px 0; cursor: pointer; }
   .circle, .circle-static { width: 22px; height: 22px; border-radius: 11px; }
-  .row:hover .row-inner, .row:focus-visible .row-inner, .row.menu-open .row-inner { background: var(--surface); }
+  .row:hover .row-inner, .row:focus-visible .row-inner { background: var(--surface); }
   .row:hover .circle:not(.checked) { border-color: var(--accent-text); }
   .row:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
   .move-btn { display: flex; visibility: hidden; width: 36px; height: 36px; align-items: center; justify-content: center; color: var(--secondary); border-radius: 8px; }
   .row:hover .move-btn, .row:focus-visible .move-btn, .row.menu-open .move-btn { visibility: visible; }
+  .inline-slot { display: grid; grid-template-rows: 1fr; }
+  .inline-clip { min-height: 0; overflow: hidden; }
   .inline-add { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 12px; margin-bottom: 8px; border-radius: 10px; border: 1.5px solid var(--accent-text); }
   .empty { margin-top: 120px; }
   .install { display: none !important; }
@@ -314,7 +352,9 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   :root { --dist: 0; }
   .sheet, .toast { animation: fade-in var(--dur-move) ease !important; }
   .sheet { transition: none; } /* the keyboard offset (translate) moves at once */
-  .row.enter, .cap-added li { animation: fade-in var(--dur-move) ease; }
+  .row.enter { animation: fade-in var(--dur-move) ease; }
+  .fab { transition: opacity var(--dur-press) ease; }
+  .fab:active { transform: none; opacity: 0.55; }
   .row.nudge .row-inner { animation: none; }
   .circle .ic, .row.armed .swipe-done .ic { transition: opacity var(--dur-press) ease; transform: none !important; }
 }

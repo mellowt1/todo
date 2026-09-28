@@ -68,6 +68,19 @@
     a.cancel();
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Speed over the last 100ms of samples ({ t, v }), in px per ms. A finger held still reads 0.
+  function speed(pts) {
+    const t = performance.now();
+    const p = pts.filter((s) => t - s.t <= 100);
+    if (p.length < 2) return 0;
+    const a = p[0], b = p[p.length - 1];
+    return (b.v - a.v) / Math.max(1, b.t - a.t);
+  }
+  function sample(pts, v) {
+    const t = performance.now();
+    pts.push({ t, v });
+    while (pts.length && t - pts[0].t > 100) pts.shift();
+  }
 
   /* ---------- Storage (every access guarded; private mode can throw) ---------- */
   const store = {
@@ -393,6 +406,11 @@
   // move buttons, so nothing is rebuilt under a gesture.
   let renderQueued = false;
   function render() {
+    // A reveal on a task that is gone, done or moved elsewhere lets go, so it can not hold the list.
+    if (revealed) {
+      const it = items[revealed.dataset.id];
+      if (!it || it.done || view !== 'list' || it.section !== ui.section) closeReveal();
+    }
     renderChrome();
     if (leaving.size || pressed || menuRow || revealed) { renderQueued = true; return; }
     renderQueued = false;
@@ -483,8 +501,13 @@
       }
     }
 
+    const emptyWas = !empty.hidden;
     empty.hidden = !emptyText;
     empty.querySelector('p').textContent = emptyText;
+    // The empty state arrives a moment after the last row has gone, rising 4px.
+    if (same && emptyText && !emptyWas) {
+      play(empty, [{ opacity: 0, transform: 'translateY(' + 4 * M.dist + 'px)' }, { opacity: 1, transform: 'none' }], { delay: 60, fill: 'backwards' });
+    }
     const cmp = html.replace(/ class="row enter"/g, ' class="row"');
     if (same && cmp === lastHtml) { justAdded.clear(); return; } // nothing changed: a running entrance plays on
 
@@ -500,10 +523,12 @@
       }
     }
 
+    const from = shownKey;
     list.innerHTML = html;
     lastHtml = cmp;
     shownKey = key;
     justAdded.clear();
+    if (from && !same) handOff(from, key);
 
     // Last, invert, play: rows that stay glide from where they stood, new rows fade in.
     // Rows with .enter already have their entrance.
@@ -534,6 +559,17 @@
     const more = list.querySelector('.dmore');
     if (more) moreObserver.observe(more);
     maybeNudge();
+  }
+
+  // The list's content changed wholesale. A section switch fades it in with no slide and no
+  // outgoing phase; the skeleton gives way to all rows at once. The first paint and the Done
+  // layer (setSection) do not come through here.
+  function handOff(from, key) {
+    if (from === 'done' || key === 'done' || key === 'skeleton') return;
+    const duration = from === 'skeleton' ? M.exit : M.move;
+    for (const el of [$('list'), $('empty')]) {
+      if (!el.hidden) play(el, [{ opacity: 0 }, { opacity: 1 }], { duration, easing: 'ease' });
+    }
   }
 
   const moreObserver = new IntersectionObserver((entries) => {
@@ -570,11 +606,66 @@
     // Rows still leaving are cut short: their ops are already written.
     for (const t of leaving.values()) clearTimeout(t);
     leaving.clear();
+    const was = view;
+    // Leaving Done: a still copy of it stays on top and sinks away over the list.
+    const ghost = was === 'done' && s !== 'done' && shownKey === 'done' ? liftCol() : null;
     if (s === 'done') { view = 'done'; doneShown = DONE_PAGE; }
     else { view = 'list'; ui.section = s; saveUi(); }
-    hideInline();
+    hideInline(true);
     render();
     window.scrollTo(0, 0);
+    if (was !== view) layer(view === 'done', ghost);
+  }
+
+  // Done is a layer above the list. It rises 12px and fades in while the add button and the
+  // switcher fade out; closing it plays the reverse. Reduced motion: opacity only (--dist).
+  let colGhost = null;
+  function liftCol() {
+    const col = document.querySelector('.col');
+    const r = col.getBoundingClientRect();
+    const lc = getComputedStyle($('list'));
+    const gh = col.cloneNode(true);
+    // What shows in Done stays shown once the body says list, and no id is left twice.
+    for (const el of gh.querySelectorAll('.list-only, [hidden]')) el.remove();
+    for (const el of gh.querySelectorAll('.done-only')) el.classList.remove('done-only');
+    for (const el of gh.querySelectorAll('[id]')) el.removeAttribute('id');
+    const gl = gh.querySelector('.list');
+    if (gl) { gl.style.display = lc.display; gl.style.padding = lc.padding; }
+    gh.classList.add('col-ghost');
+    gh.setAttribute('aria-hidden', 'true');
+    gh.inert = true;
+    Object.assign(gh.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: Math.max(0, innerHeight - r.top) + 'px' });
+    return gh;
+  }
+  function layer(open, ghost) {
+    const col = document.querySelector('.col');
+    const bar = desk.matches ? [] : [$('fab'), $('switcher')];
+    const y = 'translateY(' + 12 * M.dist + 'px)';
+    if (colGhost) { colGhost.remove(); colGhost = null; }
+    if (open) {
+      play(col, [{ opacity: 0, transform: y }, { opacity: 1, transform: 'none' }]);
+      for (const el of bar) {
+        el.classList.add('layer-out'); // shown while it fades, though the body says Done
+        leave(el, [{ opacity: 1 }, { opacity: 0 }], { easing: 'ease' }).then((ok) => {
+          if (!ok) return;
+          el.classList.remove('layer-out');
+          rest(el);
+        });
+      }
+      return;
+    }
+    for (const el of bar) {
+      rest(el);
+      el.classList.remove('layer-out');
+      play(el, [{ opacity: 0 }, { opacity: 1 }], { easing: 'ease' });
+    }
+    if (!ghost) return;
+    colGhost = ghost;
+    document.body.append(ghost);
+    play(ghost, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: y }], { duration: M.exit, fill: 'forwards' }).then(() => {
+      ghost.remove();
+      if (colGhost === ghost) colGhost = null;
+    });
   }
   for (const b of document.querySelectorAll('#switcher button, .nav-item')) {
     b.addEventListener('click', () => setSection(b.dataset.section));
@@ -703,10 +794,42 @@
       row.style.opacity = '0';
       return play(row, [{ opacity: 1 }, { opacity: 0 }], { duration: M.exit, easing: 'ease' });
     }
-    const h = row.offsetHeight;
-    row.style.height = '0px';
-    row.style.opacity = '0';
-    return play(row, [{ height: h + 'px', opacity: 1 }, { height: '0px', opacity: 0 }]);
+    const cs = getComputedStyle(row);
+    const from = { height: row.offsetHeight + 'px', opacity: 1 };
+    const to = { height: '0px', opacity: 0 };
+    // Done rows and day headers carry padding and a hairline, which a height of 0 can not close.
+    for (const k of ['paddingTop', 'paddingBottom', 'borderTopWidth']) {
+      if (parseFloat(cs[k])) { from[k] = cs[k]; to[k] = '0px'; }
+    }
+    Object.assign(row.style, to);
+    return play(row, [from, to]);
+  }
+
+  // Reopen mirrors the check: the tick drains to an empty ring and the text comes back, then
+  // the row closes, with its day header if nothing is left under it. Written at the tap.
+  function reopenRow(d) {
+    const id = d.dataset.id;
+    if (!d.isConnected || leaving.has(id) || d.classList.contains('reopening') || d.classList.contains('collapsing')) return;
+    const unlock = lock(id);
+    lastHtml = null;
+    d.classList.add('reopening');
+    reopen(id);
+    // The drain (--dur-press), a short rest so the open ring registers, then the collapse.
+    sleep(M.press + 80).then(() => {
+      const it = items[id];
+      if (it && it.done) { d.classList.remove('reopening'); return; } // Undo came during the drain
+      const head = orphanHead(d);
+      return Promise.all([collapse(d), head ? collapse(head) : null]);
+    }).finally(unlock);
+  }
+  // The day header above a done row, when every other row under it is leaving too.
+  function orphanHead(d) {
+    const stays = (n) => n.classList.contains('drow') && !gone(n) && !n.classList.contains('reopening');
+    let h = d.previousElementSibling;
+    while (h && !h.classList.contains('dhead')) { if (stays(h)) return null; h = h.previousElementSibling; }
+    let n = d.nextElementSibling;
+    while (n && n.classList.contains('drow')) { if (stays(n)) return null; n = n.nextElementSibling; }
+    return h && !h.classList.contains('collapsing') ? h : null;
   }
 
   // The check: the circle fills, the tick draws, the text dims and is struck through, the row
@@ -781,7 +904,9 @@
     slides.delete(inner);
     a.cancel();
   }
-  function setX(row, x, animate) {
+  // A settle takes longer the further the row still has to go: 140 to 240ms.
+  const settleMs = (d, w) => Math.round(M.press + (240 - M.press) * Math.min(1, Math.abs(d) / Math.max(1, w)));
+  function setX(row, x, animate, duration) {
     lastHtml = null;
     const inner = row.querySelector('.row-inner');
     const from = animate ? getComputedStyle(inner).transform : 'none';
@@ -800,7 +925,7 @@
       return Promise.resolve(true);
     }
     row.classList.add('sliding');
-    const p = play(inner, [{ transform: from }, { transform: to || 'none' }]);
+    const p = play(inner, [{ transform: from }, { transform: to || 'none' }], duration ? { duration } : undefined);
     slides.set(inner, p.anim);
     return p.then((ok) => {
       if (!ok || slides.get(inner) !== p.anim) return false;
@@ -810,38 +935,66 @@
       return true;
     });
   }
+  let revealY = 0; // the scroll position when the row opened its move buttons
   function closeReveal() {
     if (!revealed) return;
     const r = revealed;
     revealed = null;
     setX(r, 0, true).then(() => { if (renderQueued) render(); });
   }
+  // A still finger lights the row up like an iOS cell; moving or letting go clears it.
+  function unpress(gs) {
+    if (!gs) return;
+    clearTimeout(gs.lit);
+    gs.row.classList.remove('pressing');
+  }
   // The gesture ends without a swipe or a tap (a scroll, a view change, a lost row).
   function dropGesture() {
-    if (g) clearTimeout(g.long);
+    if (g) { clearTimeout(g.long); unpress(g); }
     g = null;
     release();
   }
 
+  // Paul moves on: a scroll, a touch anywhere else or the app going away closes an open reveal.
+  let scrolledAt = -Infinity;
+  window.addEventListener('scroll', () => {
+    scrolledAt = performance.now();
+    if (revealed && Math.abs(scrollY - revealY) > 8) closeReveal();
+  }, { passive: true });
+  let revealTap = null; // the pointerdown that only closed a reveal
+  document.addEventListener('pointerdown', (e) => {
+    if (!revealed || revealed.contains(e.target)) return;
+    revealTap = e;
+    closeReveal();
+    swallow();
+  }, true);
+  // WebKit applies :active on touch only when a touchstart listener is there.
+  document.addEventListener('touchstart', () => {}, { passive: true });
+
   list.addEventListener('pointerdown', (e) => {
     const row = e.target.closest('.row');
-    if (!row || row.classList.contains('skeleton') || e.button !== 0) return;
-    if (revealed && revealed !== row) { closeReveal(); swallow(); return; }
+    if (!row || row.classList.contains('skeleton') || e.button !== 0 || e === revealTap) return;
     if (e.target.closest('.swipe-move button') || gone(row)) return;
-    if (g) clearTimeout(g.long);
+    if (g) { clearTimeout(g.long); unpress(g); }
     const touch = e.pointerType !== 'mouse';
+    const rw = revealed === row ? revealWidth(row) : 0;
     g = { row, id: row.dataset.id, x0: e.clientX, y0: e.clientY, x: 0, mode: null, pid: e.pointerId, touch,
-      base: revealed === row ? -revealWidth(row) : 0, long: 0 };
+      base: -rw, rw, w: 0, pts: [], long: 0, lit: 0 };
+    sample(g.pts, g.base); // a flick that arrives as one move still has a speed
     pressed = g.id; // the list waits until this finger lifts
-    if (touch) {
-      g.long = setTimeout(() => {
-        if (!g || g.mode) return;
-        if (!g.row.isConnected) return dropGesture();
-        g.mode = 'long';
-        swallow(1500);
-        openMenu(g.row);
-      }, 500);
-    }
+    if (!touch) return;
+    const gs = g;
+    gs.lit = setTimeout(() => { if (g === gs && !gs.mode) row.classList.add('pressing'); }, 90);
+    // A finger that stops a fling is not a long press.
+    if (performance.now() - scrolledAt < 150) return;
+    gs.long = setTimeout(() => {
+      if (g !== gs || gs.mode) return;
+      if (!gs.row.isConnected) return dropGesture();
+      gs.mode = 'long';
+      unpress(gs);
+      swallow(1500);
+      openMenu(gs.row);
+    }, 500);
   });
 
   list.addEventListener('pointermove', (e) => {
@@ -852,8 +1005,17 @@
     if (!g.mode) {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       clearTimeout(g.long);
+      unpress(g);
       if (g.touch && Math.abs(dx) > Math.abs(dy)) {
         g.mode = 'h';
+        // Measured once here, so the moves that follow never force a layout. The buttons
+        // only have a size while they show.
+        g.w = g.row.offsetWidth;
+        if (!g.rw) {
+          g.row.classList.add('swipe-l');
+          g.rw = revealWidth(g.row);
+          g.row.classList.remove('swipe-l'); // setX puts it back when the row goes left
+        }
         try { g.row.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       } else {
         return dropGesture(); // a scroll
@@ -861,12 +1023,13 @@
     }
     if (g.mode !== 'h') return;
     e.preventDefault();
+    const w = g.w;
+    const rw = g.rw;
     let x = g.base + dx;
-    const w = g.row.offsetWidth;
-    const rw = revealWidth(g.row);
     if (x < -rw) x = -rw - (-rw - x) * 0.25; // resist past the buttons
     if (x > w) x = w;
     g.x = x;
+    sample(g.pts, x);
     setX(g.row, x, false);
     const armed = x > w * 0.4;
     if (armed !== g.row.classList.contains('armed')) {
@@ -880,30 +1043,35 @@
     const cur = g;
     g = null;
     clearTimeout(cur.long);
+    unpress(cur);
     if (cur.mode !== 'h') {
       if (cur.mode === 'long') swallow(400);
       return release();
     }
     swallow(300);
     const row = cur.row;
-    const w = row.offsetWidth;
-    const rw = revealWidth(row);
-    if (!cancelled && cur.x > w * 0.4) {
+    const { w, rw, x } = cur;
+    // A flick counts as well as distance: past 20% moving right fast, or 24px moving left fast.
+    const v = speed(cur.pts);
+    if (!cancelled && (x > w * 0.4 || (x > w * 0.2 && v > 0.6))) {
       revealed = null;
       const unlock = lock(cur.id);
+      row.classList.add('armed');
+      row.querySelector('.circle').classList.add('checked');
       markDone(cur.id); // written at release, before the exit plays
       // The collapse waits for the slide to land (it used to start 40ms before).
-      setX(row, w, true).then(() => collapse(row)).finally(unlock);
+      setX(row, w, true, settleMs(w - x, w)).then(() => collapse(row)).finally(unlock);
       return release();
     }
     row.classList.remove('armed');
     row.querySelector('.circle').classList.remove('checked');
-    if (!cancelled && cur.x < -rw / 2) {
-      setX(row, -rw, true);
+    if (!cancelled && (x < -rw / 2 || (x < -24 && v < -0.4))) {
+      setX(row, -rw, true, settleMs(rw + x, w));
       revealed = row;
+      revealY = scrollY;
     } else {
       if (revealed === row) revealed = null;
-      setX(row, 0, true); // the swipe classes go when it lands
+      setX(row, 0, true, settleMs(x, w)); // the swipe classes go when it lands
     }
     release();
   }
@@ -915,7 +1083,7 @@
     if (Date.now() < swallowUntil) return;
     if (view === 'done') {
       const d = e.target.closest('.drow');
-      if (d) reopen(d.dataset.id);
+      if (d) reopenRow(d);
       return;
     }
     const row = e.target.closest('.row');
@@ -1085,6 +1253,7 @@
     rest(sheet); // a sheet caught leaving comes back
     rest(wrap.querySelector('.scrim'));
     sheet.style.transform = '';
+    wrap.querySelector('.scrim').style.opacity = '';
     closingSheets.delete(sheet);
     setKb(sheet, kb === undefined ? keyboard() : kb);
     wrap.hidden = false;
@@ -1107,11 +1276,13 @@
       const kb = parseFloat(sheet.style.getPropertyValue('--kb')) || 0;
       frames = [{ transform: sheet.style.transform || 'none' }, { transform: 'translateY(' + (sheet.offsetHeight - kb) + 'px)' }];
     }
-    leave(scrim, [{ opacity: 1 }, { opacity: 0 }]);
+    // The scrim goes on from where a drag left it.
+    leave(scrim, [{ opacity: getComputedStyle(scrim).opacity }, { opacity: 0 }]);
     leave(sheet, frames).then(() => {
       if (closingSheets.delete(sheet)) {
         wrap.hidden = true;
         sheet.style.transform = '';
+        scrim.style.opacity = '';
         rest(sheet);
         rest(scrim);
       }
@@ -1150,39 +1321,44 @@
     visualViewport.addEventListener('scroll', () => placeSheet(true));
   }
 
-  // Swipe a sheet down to close it.
+  // Swipe a sheet down to close it. The scrim lightens with the drag, and a flick closes it.
   for (const wrap of [$('capture'), $('edit')]) {
     const sheet = wrap.querySelector('.sheet');
+    const scrim = wrap.querySelector('.scrim');
     let s = null;
-    let back = null; // the snap-back glide
+    let back = [];   // the snap-back glides
     sheet.addEventListener('pointerdown', (e) => {
       if (desk.matches || closingSheets.has(sheet) || e.target.closest('textarea, input, button')) return;
-      if (back) { back.cancel(); back = null; }
-      s = { y0: e.clientY, dy: 0, pid: e.pointerId };
+      for (const a of back) a.cancel();
+      back = [];
+      s = { y0: e.clientY, dy: 0, pid: e.pointerId, h: sheet.offsetHeight, pts: [] };
+      sample(s.pts, 0);
+      // The entry is over; ended here it can not replay when the drag lets go.
+      for (const a of sheet.getAnimations()) if (a.animationName) a.finish();
       try { sheet.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       sheet.classList.add('dragging');
     });
     sheet.addEventListener('pointermove', (e) => {
       if (!s || e.pointerId !== s.pid) return;
       s.dy = Math.max(0, e.clientY - s.y0);
+      sample(s.pts, s.dy);
       sheet.style.transform = 'translateY(' + s.dy + 'px)';
+      scrim.style.opacity = String(Math.max(0, 1 - s.dy / Math.max(1, s.h)));
     });
     const end = () => {
       if (!s) return;
       sheet.classList.remove('dragging');
-      const far = s.dy > 70;
+      const close = s.dy > 70 || (s.dy > 16 && speed(s.pts) > 0.5);
       s = null;
-      if (far) (wrap.id === 'edit' ? closeEdit : closeCapture)();
-      else {
-        const from = sheet.style.transform;
-        sheet.style.transform = '';
-        // A glide on its own, so no transition is left behind for the next drag.
-        if (from && !M.reduced) {
-          const p = play(sheet, [{ transform: from }, { transform: 'none' }]);
-          back = p.anim;
-          p.then(() => { if (back === p.anim) back = null; });
-        }
-      }
+      // Closing goes on from where the finger left it (closeSheet starts from the current transform).
+      if (close) { (wrap.id === 'edit' ? closeEdit : closeCapture)(); return; }
+      const from = sheet.style.transform;
+      const op = scrim.style.opacity;
+      sheet.style.transform = '';
+      scrim.style.opacity = '';
+      // Glides on their own, so no transition is left behind for the next drag.
+      if (from && !M.reduced) back.push(play(sheet, [{ transform: from }, { transform: 'none' }]).anim);
+      if (op) back.push(play(scrim, [{ opacity: op }, { opacity: 1 }], { easing: 'ease' }).anim);
     };
     sheet.addEventListener('pointerup', end);
     sheet.addEventListener('pointercancel', end);
@@ -1193,10 +1369,12 @@
   const capInput = $('capInput');
   function openAdd() {
     if (view !== 'list') setSection(ui.section);
+    closeReveal();
     if (desk.matches) return showInline();
     capInput.value = '';
     capAdded = [];
-    showCapAdded();
+    $('capAdded').textContent = '';
+    capLabel();
     // Start where the keyboard will be, so the sheet does not land and then jump.
     const kb = Number(ui.kb) || 0;
     openSheet($('capture'), kb > 0 && kb < innerHeight ? kb : 0);
@@ -1207,12 +1385,40 @@
   let kbTimer = 0;
   // What Return just saved stays in the sheet, ticked, so a cleared field reads as saved.
   let capAdded = [];
-  function showCapAdded() {
-    $('capAdded').innerHTML = capAdded.slice(-3).map((t) =>
-      '<li><span class="ok"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span><span class="t">' + esc(t) + '</span></li>').join('');
-    $('capLabel').textContent = capAdded.length
-      ? 'Added to ' + LABEL[ui.section]
-      : 'Adds to ' + LABEL[ui.section];
+  // Only the new line is added, growing from nothing. Past three lines the first closes at the
+  // same pace, so the sheet keeps its height. Reduced motion: the line fades in, the first goes at once.
+  function addCapLine(t) {
+    const ul = $('capAdded');
+    const first = !ul.firstElementChild;
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="ok"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span><span class="t"></span>';
+    li.querySelector('.t').textContent = t;
+    ul.append(li);
+    const lines = ul.querySelectorAll('li:not(.leaving)');
+    const old = lines.length > 3 ? lines[0] : null;
+    if (M.reduced) {
+      if (old) old.remove();
+      play(li, [{ opacity: 0 }, { opacity: 1 }], { easing: 'ease' });
+    } else {
+      const h = li.offsetHeight + 'px';
+      const shut = { height: '0px', minHeight: '0px', opacity: 0 };
+      const open = { height: h, minHeight: h, opacity: 1 };
+      play(li, [shut, open]);
+      if (first) play(ul, [{ marginTop: '-10px' }, { marginTop: '0px' }]); // the sheet's 10px gap comes with the first line
+      if (old) {
+        old.classList.add('leaving');
+        play(old, [open, shut], { fill: 'forwards' }).then(() => old.remove());
+      }
+    }
+    capLabel();
+  }
+  // The label crossfades only when its words change.
+  function capLabel() {
+    const l = $('capLabel');
+    const t = (capAdded.length ? 'Added to ' : 'Adds to ') + LABEL[ui.section];
+    if (l.textContent === t) return;
+    l.textContent = t;
+    if (!$('capture').hidden) play(l, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
   }
   let capClosing = false;
   function closeCapture() {
@@ -1231,7 +1437,7 @@
       if (!v) return closeCapture(); // Return on an empty field means finished
       addTask(v);
       capAdded.push(v);
-      showCapAdded();
+      addCapLine(v);
       capInput.value = '';
     } else if (e.key === 'Escape') {
       e.stopPropagation();
@@ -1240,17 +1446,33 @@
   });
   $('fab').addEventListener('click', openAdd);
   $('capDone').addEventListener('click', closeCapture);
-  $('addDesk').addEventListener('click', () => ($('inlineAdd').hidden ? showInline() : hideInline()));
+  $('addDesk').addEventListener('click', () => (inlineOn ? hideInline() : showInline()));
 
+  // The desktop add field opens in a grid slot (0fr to 1fr), so the rows below make room
+  // smoothly, and closes the same way. Reduced motion: it fades.
   const inlineInput = $('inlineInput');
+  const inlineSlot = $('inlineSlot');
+  let inlineOn = false;
   function showInline() {
+    const shut = $('inlineAdd').hidden;
+    rest(inlineSlot); // one on its way out comes back
     $('inlineAdd').hidden = false;
-    inlineInput.focus();
+    inlineOn = true;
+    if (shut) play(inlineSlot, M.reduced ? [{ opacity: 0 }, { opacity: 1 }] : [{ gridTemplateRows: '0fr' }, { gridTemplateRows: '1fr' }]);
+    inlineInput.focus({ preventScroll: true }); // no scroll, or the closed slot would scroll its field into view
   }
-  function hideInline() {
+  // now: gone at once, as on a section switch.
+  function hideInline(now) {
     if (document.activeElement === inlineInput) inlineInput.blur();
-    $('inlineAdd').hidden = true;
     inlineInput.value = '';
+    if (!inlineOn) return;
+    inlineOn = false;
+    if (now) { rest(inlineSlot); $('inlineAdd').hidden = true; return; }
+    leave(inlineSlot, M.reduced ? [{ opacity: 1 }, { opacity: 0 }] : [{ gridTemplateRows: '1fr' }, { gridTemplateRows: '0fr' }]).then((ok) => {
+      if (!ok) return;
+      $('inlineAdd').hidden = true;
+      rest(inlineSlot);
+    });
   }
   inlineInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
@@ -1267,12 +1489,14 @@
   /* ---------- Edit ---------- */
   const editText = $('editText');
   let editId = null;
+  let editFrom = null; // { id, section, pos } when the sheet opened
   let editTimer = 0;
   function openEdit(id) {
     const it = items[id];
     const row = list.querySelector('.row[data-id="' + id + '"]');
     if (!it || leaving.has(id) || (row && gone(row))) return; // a task about to leave does not open
     editId = id;
+    editFrom = { id, section: it.section, pos: it.pos };
     editText.value = it.text;
     paintEditSeg(it.section);
     const a = document.activeElement;
@@ -1294,7 +1518,18 @@
     saveEditText();
     editText.blur();
     editId = null;
-    closeSheet($('edit')); // focus goes back to the row it opened from
+    const from = editFrom;
+    editFrom = null;
+    // Focus goes back to the row it opened from. A task that ended up in another section says
+    // where it went, once, however many times the section was changed.
+    closeSheet($('edit'), () => {
+      const it = from && items[from.id];
+      if (!it || it.done || it.section === from.section) return;
+      toast('Moved to ' + LABEL[it.section] + '.', () => {
+        const cur = items[from.id];
+        if (cur) upsert(Object.assign({}, cur, { section: from.section, pos: from.pos }));
+      }, from.id);
+    });
   }
   editText.addEventListener('input', () => {
     clearTimeout(editTimer);
@@ -1354,6 +1589,7 @@
     const id = editId;
     clearTimeout(editTimer);
     editId = null;
+    editFrom = null;
     remove(id); // written at the tap; the row collapses behind the leaving sheet
     closeSheet($('edit'));
   });
@@ -1397,7 +1633,7 @@
     }
     const focused = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.row, .drow') : null;
     if (!focused) return;
-    if (view === 'done' && (k === 'Enter' || k === ' ')) { e.preventDefault(); reopen(focused.dataset.id); return; }
+    if (view === 'done' && (k === 'Enter' || k === ' ')) { e.preventDefault(); reopenRow(focused); return; }
     if (k === 'Enter' && e.target === focused) { e.preventDefault(); openEdit(focused.dataset.id); return; }
     if (k === ' ' && e.target === focused) {
       e.preventDefault();
@@ -1412,6 +1648,7 @@
     pollTimer = setInterval(poll, POLL);
   }
   document.addEventListener('visibilitychange', () => {
+    closeReveal();
     if (document.hidden) {
       // A finger or the menu can not hold the list while the app is away.
       endGesture(null, true);
@@ -1426,7 +1663,7 @@
   window.addEventListener('online', () => { flush(); poll(); });
   window.addEventListener('offline', () => setNet('offline'));
   $('retry').addEventListener('click', () => { rejectNote = false; flush(); poll(); });
-  desk.addEventListener('change', () => { hideInline(); render(); });
+  desk.addEventListener('change', () => { hideInline(true); render(); });
 
   computeView();
   render();
