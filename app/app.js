@@ -343,14 +343,18 @@
   const DONE_PAGE = 300;
   let doneShown = DONE_PAGE;
 
+  // The chrome (title, counts, controls) always updates at once. The list waits while a
+  // row animates out, a finger is on a row, the move menu is open or a row shows its
+  // move buttons, so nothing is rebuilt under a gesture.
   let renderQueued = false;
   function render() {
-    if (busy || revealed) { renderQueued = true; return; }
+    renderChrome();
+    if (leaving.size || pressed || menuRow || revealed) { renderQueued = true; return; }
     renderQueued = false;
-    const list = $('list');
-    const focusedId = document.activeElement && document.activeElement.closest && document.activeElement.closest('.row, .drow')
-      ? document.activeElement.closest('.row, .drow').dataset.id : null;
+    renderList();
+  }
 
+  function renderChrome() {
     document.body.classList.toggle('view-done', view === 'done');
     document.body.classList.toggle('view-list', view === 'list');
     $('title').textContent = view === 'done' ? 'Done' : LABEL[ui.section];
@@ -364,7 +368,14 @@
       if (c) { const n = openIn(b.dataset.section).length; c.textContent = n ? String(n) : ''; }
     }
     if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
+    $('install').hidden = !(view === 'list' && showInstall());
+  }
 
+  let focusNext = null; // the row that takes focus when the focused one leaves (Space)
+  function renderList() {
+    const list = $('list');
+    const focusedId = document.activeElement && document.activeElement.closest && document.activeElement.closest('.row, .drow')
+      ? document.activeElement.closest('.row, .drow').dataset.id : null;
     const all = Object.values(items);
     const empty = $('empty');
     let html = '';
@@ -399,12 +410,11 @@
     empty.hidden = !emptyText;
     empty.querySelector('p').textContent = emptyText;
 
-    $('install').hidden = !(view === 'list' && showInstall());
-
     if (focusedId) {
-      const el = list.querySelector('[data-id="' + focusedId + '"]');
+      const el = list.querySelector('[data-id="' + focusedId + '"]') || (focusNext && list.querySelector('[data-id="' + focusNext + '"]'));
       if (el) el.focus({ preventScroll: true });
     }
+    focusNext = null;
     const more = list.querySelector('.dmore');
     if (more) moreObserver.observe(more);
     maybeNudge();
@@ -439,6 +449,10 @@
   function setSection(s) {
     closeMenu();
     closeReveal();
+    dropGesture();
+    // Rows still leaving are cut short: their ops are already written.
+    for (const t of leaving.values()) clearTimeout(t);
+    leaving.clear();
     if (s === 'done') { view = 'done'; doneShown = DONE_PAGE; }
     else { view = 'list'; ui.section = s; saveUi(); }
     hideInline();
@@ -468,43 +482,74 @@
   $('toastUndo').addEventListener('click', () => { const f = undoFn; hideToast(); if (f) f(); });
 
   /* ---------- Row animations ---------- */
-  let busy = false; // true while a row animates or a finger is on a row; renders wait
-  function unbusy() {
-    busy = false;
+  // The op is written at the tap. A leaving lock then keeps the old row on screen while
+  // it plays its exit, and the list is redrawn once no row is leaving.
+  const leaving = new Map(); // id -> failsafe timer
+  let pressed = null;        // id of the row under a finger
+  function leave(id) {
+    clearTimeout(leaving.get(id));
+    // Failsafe: a lost timer or a page frozen by iOS never blocks the list for good.
+    const t = setTimeout(() => unleave(id, t), 1000);
+    leaving.set(id, t);
+    return () => unleave(id, t);
+  }
+  function unleave(id, t) {
+    if (leaving.get(id) !== t) return; // already dropped, or taken again since
+    clearTimeout(t);
+    leaving.delete(id);
     if (renderQueued) render();
+  }
+  // A row on its way out takes no more taps.
+  function gone(row) {
+    return !row.isConnected || leaving.has(row.dataset.id) || row.classList.contains('collapsing') || !!row.querySelector('.circle.checked');
+  }
+  // A finger or the menu let go of the list. Draw what waited a moment later, so the
+  // click that follows a pointerup still finds its row.
+  let wakeTimer = 0;
+  function wake() {
+    clearTimeout(wakeTimer);
+    wakeTimer = setTimeout(() => { if (renderQueued) render(); }, 100);
+  }
+  function release() {
+    if (!pressed) return;
+    pressed = null;
+    wake();
   }
 
   function collapse(row, then) {
-    busy = true;
-    const done = () => { unbusy(); then(); };
+    if (!row.isConnected) return then();
     if (reduced.matches) {
       row.style.transition = 'opacity 160ms ease';
       row.style.opacity = '0';
-      return setTimeout(done, 170);
+      return setTimeout(then, 170);
     }
     row.style.height = row.offsetHeight + 'px';
     row.classList.add('collapsing');
     void row.offsetHeight;
     row.style.height = '0px';
     row.style.opacity = '0';
-    setTimeout(done, 210);
+    setTimeout(then, 210);
   }
 
   function completeRow(row) {
+    if (gone(row)) return false; // a double tap or Space twice runs once
     const id = row.dataset.id;
-    const circle = row.querySelector('.circle');
-    circle.classList.add('checked');
-    busy = true;
-    setTimeout(() => collapse(row, () => markDone(id)), reduced.matches ? 120 : 200);
+    const lift = leave(id);
+    row.querySelector('.circle').classList.add('checked');
+    markDone(id);
+    setTimeout(() => collapse(row, lift), reduced.matches ? 120 : 200);
+    return true;
   }
 
-  function slideOut(row, dir, then) {
+  function slideOut(row, dir) {
+    if (gone(row)) return false;
+    const lift = leave(row.dataset.id);
     const inner = row.querySelector('.row-inner');
-    busy = true;
     row.classList.add('sliding');
     if (reduced.matches) inner.style.opacity = '0';
     else inner.style.transform = 'translateX(' + (dir > 0 ? '100%' : '-100%') + ')';
-    setTimeout(() => collapse(row, then), reduced.matches ? 120 : 200);
+    setTimeout(() => collapse(row, lift), reduced.matches ? 120 : 200);
+    return true;
   }
 
   /* ---------- Swipe, long press, taps ---------- */
@@ -531,27 +576,40 @@
     setX(r, 0, true);
     setTimeout(() => {
       if (revealed !== r) r.classList.remove('swipe-l', 'sliding');
-      if (renderQueued && !busy && !revealed) render();
+      if (renderQueued) render();
     }, 240);
+  }
+  // The gesture ends without a swipe or a tap (a scroll, a view change, a lost row).
+  function dropGesture() {
+    if (g) clearTimeout(g.long);
+    g = null;
+    release();
   }
 
   list.addEventListener('pointerdown', (e) => {
     const row = e.target.closest('.row');
     if (!row || row.classList.contains('skeleton') || e.button !== 0) return;
     if (revealed && revealed !== row) { closeReveal(); swallow(); return; }
-    if (e.target.closest('.swipe-move button')) return;
+    if (e.target.closest('.swipe-move button') || gone(row)) return;
+    if (g) clearTimeout(g.long);
     const touch = e.pointerType !== 'mouse';
     g = { row, id: row.dataset.id, x0: e.clientX, y0: e.clientY, x: 0, mode: null, pid: e.pointerId, touch,
       base: revealed === row ? -revealWidth(row) : 0, long: 0 };
+    pressed = g.id; // the list waits until this finger lifts
     if (touch) {
       g.long = setTimeout(() => {
-        if (g && !g.mode) { g.mode = 'long'; swallow(1500); openMenu(row); }
+        if (!g || g.mode) return;
+        if (!g.row.isConnected) return dropGesture();
+        g.mode = 'long';
+        swallow(1500);
+        openMenu(g.row);
       }, 500);
     }
   });
 
   list.addEventListener('pointermove', (e) => {
     if (!g || e.pointerId !== g.pid) return;
+    if (!g.row.isConnected) return dropGesture();
     const dx = e.clientX - g.x0;
     const dy = e.clientY - g.y0;
     if (!g.mode) {
@@ -559,11 +617,9 @@
       clearTimeout(g.long);
       if (g.touch && Math.abs(dx) > Math.abs(dy)) {
         g.mode = 'h';
-        busy = true;
         try { g.row.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       } else {
-        g = null;
-        return;
+        return dropGesture(); // a scroll
       }
     }
     if (g.mode !== 'h') return;
@@ -587,17 +643,21 @@
     const cur = g;
     g = null;
     clearTimeout(cur.long);
-    if (cur.mode === 'long') { swallow(400); return; }
-    if (cur.mode !== 'h') return;
+    if (cur.mode !== 'h') {
+      if (cur.mode === 'long') swallow(400);
+      return release();
+    }
     swallow(300);
     const row = cur.row;
     const w = row.offsetWidth;
     const rw = revealWidth(row);
     if (!cancelled && cur.x > w * 0.4) {
       revealed = null;
+      const lift = leave(cur.id);
+      markDone(cur.id); // written at release, before the exit plays
       setX(row, w, true);
-      setTimeout(() => collapse(row, () => markDone(cur.id)), 180);
-      return;
+      setTimeout(() => collapse(row, lift), 180);
+      return release();
     }
     row.classList.remove('armed');
     row.querySelector('.circle').classList.remove('checked');
@@ -609,10 +669,11 @@
       if (revealed === row) revealed = null;
       setTimeout(() => row.classList.remove('swipe-r', 'swipe-l', 'sliding'), 240);
     }
-    unbusy();
+    release();
   }
-  list.addEventListener('pointerup', (e) => endGesture(e, false));
-  list.addEventListener('pointercancel', (e) => endGesture(e, true));
+  // On the document, so a mouse let go just off the list still ends the press.
+  document.addEventListener('pointerup', (e) => endGesture(e, false));
+  document.addEventListener('pointercancel', (e) => endGesture(e, true));
 
   list.addEventListener('click', (e) => {
     if (Date.now() < swallowUntil) return;
@@ -626,8 +687,9 @@
     const mv = e.target.closest('.swipe-move button');
     if (mv) {
       if (mv.hasAttribute('aria-current')) { closeReveal(); return; }
+      if (gone(row)) return;
       revealed = null;
-      slideOut(row, -1, () => moveTo(row.dataset.id, mv.dataset.move));
+      if (slideOut(row, -1)) moveTo(row.dataset.id, mv.dataset.move);
       return;
     }
     if (revealed === row) { closeReveal(); return; }
@@ -648,6 +710,7 @@
   list.addEventListener('dragstart', (e) => {
     const row = e.target.closest('.row');
     if (!row) return;
+    dropGesture(); // Safari sends no pointerup after a drag, so the press ends here
     e.dataTransfer.setData('application/x-todo-id', row.dataset.id);
     e.dataTransfer.effectAllowed = 'move';
   });
@@ -669,6 +732,7 @@
   const menu = $('menu');
   let menuRow = null;
   function openMenu(row, anchor, x, y) {
+    if (gone(row)) return; // a detached row would put the menu in the corner
     closeReveal();
     const it = items[row.dataset.id];
     if (!it) return;
@@ -687,22 +751,21 @@
     menu.style.top = Math.max(12, top) + 'px';
     const first = menu.querySelector('button.sec:not([aria-current])');
     if (first && !(g && g.touch)) first.focus({ preventScroll: true });
-    busy = true;
   }
   function closeMenu() {
     if (menu.hidden) return;
     menu.hidden = true;
     if (menuRow) menuRow.classList.remove('menu-open');
     menuRow = null;
-    unbusy();
+    wake();
   }
   menu.addEventListener('click', (e) => {
     const b = e.target.closest('button.sec');
     if (!b) return;
     const row = menuRow;
+    // The leaving lock goes on before closeMenu lets go, so the slide plays on the row on screen.
+    if (row && !b.hasAttribute('aria-current') && slideOut(row, -1)) moveTo(row.dataset.id, b.dataset.move);
     closeMenu();
-    if (!row || b.hasAttribute('aria-current')) return;
-    slideOut(row, -1, () => moveTo(row.dataset.id, b.dataset.move));
   });
   document.addEventListener('pointerdown', (e) => {
     if (!menu.hidden && !menu.contains(e.target)) {
@@ -712,41 +775,72 @@
   }, true);
 
   /* ---------- Sheets ---------- */
-  function openSheet(wrap) {
-    wrap.hidden = false;
+  const closingSheets = new Set();
+  function openSheet(wrap, kb) {
     const sheet = wrap.querySelector('.sheet');
     sheet.style.transform = '';
     sheet.classList.remove('closing');
-    placeSheet();
+    closingSheets.delete(sheet);
+    setKb(sheet, kb === undefined ? keyboard() : kb);
+    wrap.hidden = false;
   }
   function closeSheet(wrap, after) {
     if (wrap.hidden) return;
     const sheet = wrap.querySelector('.sheet');
     if (desk.matches || reduced.matches) { wrap.hidden = true; if (after) after(); return; }
+    closingSheets.add(sheet); // the keyboard dropping now does not move it
     sheet.classList.add('closing');
-    sheet.style.transform = 'translateY(100%)';
-    setTimeout(() => { wrap.hidden = true; sheet.classList.remove('closing'); sheet.style.transform = ''; if (after) after(); }, 180);
+    // Its height plus the keyboard offset (--kb is negative), so it ends below the screen.
+    sheet.style.transform = 'translateY(calc(100% - var(--kb, 0px)))';
+    setTimeout(() => {
+      closingSheets.delete(sheet);
+      wrap.hidden = true;
+      sheet.classList.remove('closing');
+      sheet.style.transform = '';
+      if (after) after();
+    }, 180);
   }
 
-  // Keep the open sheet above the iPhone keyboard.
-  function placeSheet() {
+  // Keep the open sheet above the iPhone keyboard. The offset rides on the CSS translate
+  // property (--kb), so the sheet glides with the keyboard. Desktop never offsets.
+  function keyboard() {
     const vv = window.visualViewport;
-    const off = vv && !desk.matches ? Math.max(0, innerHeight - vv.height - vv.offsetTop) : 0;
-    for (const s of document.querySelectorAll('.sheet')) s.style.bottom = desk.matches ? '' : off + 'px';
+    return vv && !desk.matches ? Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) : 0;
+  }
+  function setKb(sheet, off) {
+    const vv = window.visualViewport;
+    sheet.style.setProperty('--kb', -off + 'px');
+    sheet.style.setProperty('--vvh', (vv ? vv.height : innerHeight) + 'px');
+    sheet.classList.toggle('kb', off > 0);
+  }
+  // snap: the page panned under the keyboard, so the sheet follows at once, with no glide.
+  function placeSheet(snap) {
+    const off = keyboard();
+    const typing = document.activeElement === capInput || document.activeElement === editText;
+    if (off && typing && off !== ui.kb) { ui.kb = off; saveUi(); } // the next capture sheet starts there
+    for (const s of document.querySelectorAll('.sheet')) {
+      if (s.closest('.sheet-wrap').hidden || closingSheets.has(s)) continue;
+      if (!snap) { setKb(s, off); continue; }
+      s.classList.add('kb-snap');
+      setKb(s, off);
+      void s.offsetHeight;
+      s.classList.remove('kb-snap');
+    }
   }
   if (window.visualViewport) {
-    visualViewport.addEventListener('resize', placeSheet);
-    visualViewport.addEventListener('scroll', placeSheet);
+    visualViewport.addEventListener('resize', () => placeSheet(false));
+    visualViewport.addEventListener('scroll', () => placeSheet(true));
   }
 
   // Swipe a sheet down to close it.
   for (const wrap of [$('capture'), $('edit')]) {
     const sheet = wrap.querySelector('.sheet');
     let s = null;
+    let snapTimer = 0;
     sheet.addEventListener('pointerdown', (e) => {
       if (desk.matches || e.target.closest('textarea, input, button')) return;
       s = { y0: e.clientY, dy: 0, pid: e.pointerId };
-      sheet.setPointerCapture(e.pointerId);
+      try { sheet.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       sheet.classList.add('dragging');
     });
     sheet.addEventListener('pointermove', (e) => {
@@ -760,7 +854,13 @@
       const far = s.dy > 70;
       s = null;
       if (far) (wrap.id === 'edit' ? closeEdit : closeCapture)();
-      else { sheet.classList.add('closing'); sheet.style.transform = ''; }
+      else {
+        sheet.classList.add('closing');
+        sheet.style.transform = '';
+        // Off again once the snap-back ends, so the next drag follows the finger.
+        clearTimeout(snapTimer);
+        snapTimer = setTimeout(() => { if (!closingSheets.has(sheet)) sheet.classList.remove('closing'); }, 180);
+      }
     };
     sheet.addEventListener('pointerup', end);
     sheet.addEventListener('pointercancel', end);
@@ -775,9 +875,14 @@
     capInput.value = '';
     capAdded = [];
     showCapAdded();
-    openSheet($('capture'));
+    // Start where the keyboard will be, so the sheet does not land and then jump.
+    const kb = Number(ui.kb) || 0;
+    openSheet($('capture'), kb > 0 && kb < innerHeight ? kb : 0);
     capInput.focus(); // inside the tap, so iOS brings the keyboard up
+    clearTimeout(kbTimer);
+    kbTimer = setTimeout(() => { if (!keyboard()) placeSheet(); }, 600); // no keyboard came
   }
+  let kbTimer = 0;
   // What Return just saved stays in the sheet, ticked, so a cleared field reads as saved.
   let capAdded = [];
   function showCapAdded() {
@@ -842,7 +947,8 @@
   let editTimer = 0;
   function openEdit(id) {
     const it = items[id];
-    if (!it) return;
+    const row = list.querySelector('.row[data-id="' + id + '"]');
+    if (!it || leaving.has(id) || (row && gone(row))) return; // a task about to leave does not open
     editId = id;
     editText.value = it.text;
     paintEditSeg(it.section);
@@ -943,9 +1049,14 @@
     if (k === 'Enter' && e.target === focused) { e.preventDefault(); openEdit(focused.dataset.id); return; }
     if (k === ' ' && e.target === focused) {
       e.preventDefault();
-      const next = focused.nextElementSibling || focused.previousElementSibling;
-      completeRow(focused);
-      if (next) setTimeout(() => { const n = list.querySelector('[data-id="' + next.dataset.id + '"]'); if (n) n.focus({ preventScroll: true }); }, 450);
+      // The next row that stays (rows still leaving are skipped), else the one above.
+      let next = focused.nextElementSibling;
+      while (next && gone(next)) next = next.nextElementSibling;
+      if (!next) {
+        next = focused.previousElementSibling;
+        while (next && gone(next)) next = next.previousElementSibling;
+      }
+      if (completeRow(focused) && next) focusNext = next.dataset.id; // focused in the render that removes this row
     }
   });
 
@@ -957,6 +1068,9 @@
   }
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      // A finger or the menu can not hold the list while the app is away.
+      endGesture(null, true);
+      closeMenu();
       clearInterval(pollTimer);
       if (st.queue.length) flush(true); // send before iOS freezes the page
     } else {

@@ -122,7 +122,6 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .row.swipe-r .swipe-done, .row.swipe-l .swipe-move { display: flex; }
 .swipe-move { justify-content: flex-end; padding-right: 12px; background: var(--bg); }
 .move-group { display: flex; gap: 6px; }
-.row.swipe-l .text, .row.swipe-r .text { white-space: nowrap; display: block; text-overflow: ellipsis; }
 .swipe-move button {
   height: 36px; padding: 0 12px; border-radius: 9px; background: var(--accent); color: var(--on-accent);
   font-size: 14px; font-weight: 600;
@@ -175,12 +174,12 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
   background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center;
 }
 .toast {
-  position: fixed; left: 16px; right: 84px; bottom: calc(var(--bottom) + 60px); z-index: 12; height: 52px; padding: 0 8px 0 16px;
+  position: fixed; left: 16px; right: 84px; bottom: calc(var(--bottom) + 60px); z-index: 12; height: 56px; padding: 0 8px 0 16px;
   border-radius: 14px; background: var(--toast); color: var(--toast-text); display: flex; align-items: center; justify-content: space-between;
   font-size: 15px; animation: toast-in 200ms var(--ease);
 }
 .toast button { height: 44px; padding: 0 12px; color: var(--toast-accent); font-size: 15px; font-weight: 600; }
-body.view-done .toast { bottom: var(--bottom); }
+body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button in Done */
 @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } }
 
 /* ---------- Sheets and dialogs ---------- */
@@ -190,9 +189,12 @@ body.view-done .toast { bottom: var(--bottom); }
   position: absolute; left: 0; right: 0; bottom: 0; background: var(--sheet); border-radius: 16px 16px 0 0;
   padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px;
   animation: sheet-in var(--t) var(--ease); touch-action: none;
+  translate: 0 var(--kb, 0px); transition: translate 240ms var(--ease); /* rides above the keyboard */
 }
+.sheet.closing { transition: transform 180ms var(--ease), translate 240ms var(--ease); }
 .sheet.dragging { animation: none; transition: none; }
-.sheet.closing { transition: transform 180ms var(--ease); }
+/* The page panned under the keyboard: the offset follows at once, a snap-back keeps its glide. */
+.sheet.kb-snap { transition-property: transform; }
 .grabber { align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--ring); }
 .cap-row { display: flex; align-items: center; gap: 14px; min-height: 52px; }
 .cap-row input, .inline-add input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 17px; padding: 0; caret-color: var(--accent-text); }
@@ -204,6 +206,8 @@ body.view-done .toast { bottom: var(--bottom); }
 .cap-added .ok { width: 24px; display: flex; justify-content: center; color: var(--accent-text); }
 .cap-added .t { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-sheet { gap: 16px; min-height: min(460px, 70vh); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+/* Keyboard up: the sheet fits in what is left of the screen, so Close stays on it. */
+.edit-sheet.kb { min-height: 0; max-height: calc(var(--vvh) - env(safe-area-inset-top) - 12px); padding-bottom: 16px; }
 .edit-head { display: flex; justify-content: flex-end; margin: -6px 0 -10px; }
 .edit-sheet .meta { margin-bottom: -8px; }
 textarea#editText {
@@ -223,7 +227,8 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 .dialog-actions button { flex: 1; height: 48px; font-size: 17px; color: var(--accent-text); }
 .dialog-actions button + button { border-left: 0.5px solid var(--sep); }
 .dialog-actions .danger { color: var(--danger); font-weight: 600; }
-@keyframes sheet-in { from { transform: translateY(100%); } }
+/* From below the screen, whatever keyboard offset is already on the sheet. */
+@keyframes sheet-in { from { transform: translateY(calc(100% - var(--kb, 0px))); } }
 @keyframes fade-in { from { opacity: 0; } }
 
 .menu {
@@ -283,11 +288,11 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .empty { margin-top: 120px; }
   .install { display: none !important; }
 
-  .toast { left: calc(240px + 50%); right: auto; bottom: 24px; transform: translateX(-50%); width: 360px; }
-  body.view-done .toast { bottom: 24px; }
+  .toast { left: calc(50% + 120px); right: auto; bottom: 24px; transform: translateX(-50%); width: 360px; }
+  body.view-done .toast { bottom: 24px; right: auto; }
   @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 12px); } }
 
-  .sheet { left: 50%; right: auto; bottom: auto; top: 50%; width: 440px; transform: translate(-50%, -50%); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 20px 16px; animation: fade-in 160ms ease; }
+  .sheet { left: 50%; right: auto; bottom: auto; top: 50%; width: 440px; transform: translate(-50%, -50%); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 20px 16px; animation: fade-in 160ms ease; translate: none; }
   .grabber { display: none; }
   .edit-sheet { min-height: 0; }
   .edit-sheet .grow { flex: 0 0 8px; }
@@ -297,6 +302,9 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 @media (prefers-reduced-motion: reduce) {
   :root { --t: 1ms; }
   .sheet, .toast { animation: fade-in 160ms ease !important; }
+  .sheet { transition: none; }
+  .sheet.closing { transition: transform 180ms var(--ease); }
+  .sheet.dragging { transition: none; }
   .row.enter, .cap-added li { animation: fade-in 160ms ease; }
   .row.nudge .row-inner { animation: none; }
   .row.sliding .row-inner { transition: opacity 160ms ease; }

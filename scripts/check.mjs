@@ -1,21 +1,29 @@
 // End to end check against the local Worker (wrangler dev on :8787) and the local app (npm run serve on :8080).
-// Drives the real app in Chromium, asserts each flow, and saves screenshots to screenshots/.
-//   npm run check
-// Uses the dev values in worker/.dev.vars. Never the real code.
-import { chromium } from 'playwright';
+// Drives the real app in Chromium (or WebKit), asserts each flow, and saves screenshots to screenshots/.
+//   npm run check           Chromium
+//   npm run check:webkit    WebKit, screenshots in screenshots/webkit/
+// APP_URL and API_URL point it at other servers. Uses the dev values in worker/.dev.vars. Never the real code.
+import { chromium, webkit } from 'playwright';
 import { readFileSync, mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { touch as finger } from './touch.mjs';
 
 const vars = Object.fromEntries(readFileSync(new URL('../worker/.dev.vars', import.meta.url), 'utf8')
   .split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
-const API = 'http://localhost:8787';
-const APP = 'http://localhost:8080/';
+const ENGINE = process.env.ENGINE || (process.argv.includes('--webkit') ? 'webkit' : 'chromium');
+if (!['chromium', 'webkit'].includes(ENGINE)) throw new Error('ENGINE must be chromium or webkit');
+const API = (process.env.API_URL || 'http://localhost:8787').replace(/\/+$/, '');
+const APP = process.env.APP_URL || 'http://localhost:8080/';
+// The app finds a Worker on another port through ?api=.
+const Q = process.env.API_URL ? '&api=' + encodeURIComponent(API) : '';
 const CODE = vars.TODO_CODE;
-const SHOTS = new URL('../screenshots/', import.meta.url);
+const SHOTS = new URL(ENGINE === 'chromium' ? '../screenshots/' : '../screenshots/webkit/', import.meta.url);
 mkdirSync(SHOTS, { recursive: true });
 
 const results = [];
+// A step this engine cannot run says so, with the reason.
+function skip(name, why) { results.push(['skip', name, why]); console.log('skip', name, '\n     ', why); }
 async function step(name, fn) {
   try { await fn(); results.push(['ok', name]); console.log('ok  ', name); }
   catch (e) { results.push(['FAIL', name, e.message]); console.log('FAIL', name, '\n     ', e.message.split('\n')[0]); }
@@ -38,7 +46,8 @@ function task(text, section = 'today', over = {}) {
   return { op: 'upsert', item: { id: nid(), text, section, done: false, doneAt: null, updatedAt: t, pos: t, ...over } };
 }
 const DAY = 86400000;
-function at(daysAgo, h, m) { const d = new Date(Date.now() - daysAgo * DAY); d.setHours(h, m, 0, 0); return d.getTime(); }
+// Never in the future, so a run before 09:10 still has the task ticked in the test as the newest.
+function at(daysAgo, h, m) { const d = new Date(Date.now() - daysAgo * DAY); d.setHours(h, m, 0, 0); return Math.min(d.getTime(), Date.now() - 600000); }
 async function until(fn, ms = 6000, msg = 'condition') {
   const end = Date.now() + ms;
   for (;;) {
@@ -51,34 +60,10 @@ async function until(fn, ms = 6000, msg = 'condition') {
 const serverHas = (pred, msg) => until(async () => (await getList()).find(pred), 8000, msg);
 
 /* ---------- Browser helpers ---------- */
-const browser = await chromium.launch();
+const browser = await (ENGINE === 'webkit' ? webkit : chromium).launch();
 const phone = (scheme) => browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: scheme });
 const shot = (page, name) => page.screenshot({ path: fileURLToPath(new URL(name + '.png', SHOTS)) });
-async function touch(page) {
-  const cdp = await page.context().newCDPSession(page);
-  const send = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-  let x0 = 0, y0 = 0, cur = 0;
-  return {
-    async drag(el, dx, { end = true, steps = 12 } = {}) {
-      const b = await el.boundingBox();
-      x0 = b.x + b.width / 2; y0 = b.y + b.height / 2; cur = 0;
-      await send('touchStart', x0, y0);
-      await this.to(dx, steps);
-      if (end) await send('touchEnd');
-    },
-    async to(dx, steps = 6) {
-      const from = cur;
-      for (let i = 1; i <= steps; i++) { cur = from + ((dx - from) * i) / steps; await send('touchMove', x0 + cur, y0); await page.waitForTimeout(12); }
-    },
-    async release() { await send('touchEnd'); },
-    async longPress(el) {
-      const b = await el.boundingBox();
-      await send('touchStart', b.x + b.width / 2, b.y + b.height / 2);
-      await page.waitForTimeout(650);
-      await send('touchEnd');
-    },
-  };
-}
+const touch = (page) => finger(page, ENGINE);
 const row = (page, text) => page.locator('.row', { hasText: text });
 const openTexts = (page) => page.locator('#list .row .text').allTextContents();
 
@@ -97,7 +82,7 @@ await step('missing code shows the full screen message', async () => {
 });
 
 await step('first open: empty Today with first open copy', async () => {
-  await page.goto(APP + '?c=' + CODE);
+  await page.goto(APP + '?c=' + CODE + Q);
   await page.waitForSelector('#empty:not([hidden])');
   assert.equal((await page.textContent('#empty p')).trim(), 'Nothing here yet. Tap plus to add a task.');
   await shot(page, 'phone-empty-light');
@@ -328,7 +313,7 @@ await step('offline: changes queue with the pill, then sync on reconnect', async
   await shot(page, 'phone-offline-light');
   await page.reload().catch(() => {}); // no network: the page cannot reload, the queue must survive in storage anyway
   await ctx.setOffline(false);
-  await page.goto(APP + '?c=' + CODE);
+  await page.goto(APP + '?c=' + CODE + Q);
   await serverHas((i) => i.text === 'Offline task two', 'offline task on server');
   await serverHas((i) => i.text === 'Water the plants' && i.done, 'offline done on server');
 });
@@ -365,7 +350,7 @@ await step('sync error banner with Retry', async () => {
 
 await step('two devices editing different tasks both keep their change', async () => {
   const other = await (await phone('light')).newPage();
-  await other.goto(APP + '?c=' + CODE);
+  await other.goto(APP + '?c=' + CODE + Q);
   await other.waitForSelector('#list .row');
   await row(other, 'Book the bike in for a service').locator('.text').click();
   await other.fill('#editText', 'Book the bike in for a service on Friday');
@@ -386,7 +371,7 @@ await ctx.close();
   const dctx = await phone('dark');
   const p = await dctx.newPage();
   await step('dark: Today, Done history, empty section', async () => {
-    await p.goto(APP + '?c=' + CODE);
+    await p.goto(APP + '?c=' + CODE + Q);
     await p.waitForSelector('#list .row:not(.skeleton)');
     await p.waitForTimeout(500);
     await shot(p, 'phone-today-dark');
@@ -411,7 +396,7 @@ for (const scheme of ['light', 'dark']) {
   const p = await dctx.newPage();
   p.on('pageerror', (e) => results.push(['FAIL', 'page error desktop', e.message]));
   await step(`desktop ${scheme}: sidebar, keyboard, inline add`, async () => {
-    await p.goto(APP + '?c=' + CODE);
+    await p.goto(APP + '?c=' + CODE + Q);
     await p.waitForSelector('#list .row:not(.skeleton)');
     assert.ok(await p.isVisible('.sidebar'));
     assert.ok(await p.isHidden('#fab'));
@@ -452,10 +437,24 @@ for (const scheme of ['light', 'dark']) {
 }
 
 /* ================= Service worker: opens with no signal ================= */
-await step('service worker caches the shell; app opens offline with the local list', async () => {
+if (ENGINE === 'webkit') {
+  await step('service worker takes control and caches the shell', async () => {
+    const sctx = await phone('light');
+    const p = await sctx.newPage();
+    await p.goto(APP + '?sw=1&c=' + CODE + Q);
+    await p.waitForSelector('#list .row:not(.skeleton)');
+    await p.evaluate(() => navigator.serviceWorker.ready);
+    await p.reload();
+    await until(() => p.evaluate(() => !!navigator.serviceWorker.controller), 5000, 'controller');
+    const cached = await p.evaluate(async () => Promise.all(['./app.js', './app.css', './index.html?todo-dev'].map(async (f) => !!(await caches.match(f)))));
+    assert.deepEqual(cached, [true, true, true]);
+    await sctx.close();
+  });
+  skip('app opens offline with the local list', 'Playwright WebKit on Windows fails every navigation while the context is offline, even one the service worker controls ("WebKit encountered an internal error")');
+} else await step('service worker caches the shell; app opens offline with the local list', async () => {
   const sctx = await phone('light');
   const p = await sctx.newPage();
-  await p.goto(APP + '?sw=1&c=' + CODE);
+  await p.goto(APP + '?sw=1&c=' + CODE + Q);
   await p.waitForSelector('#list .row:not(.skeleton)');
   await p.evaluate(() => navigator.serviceWorker.ready);
   await p.reload();
@@ -483,6 +482,8 @@ await step('read route: 401 without token, open tasks only with token', async ()
 
 await browser.close();
 const fails = results.filter((r) => r[0] === 'FAIL');
-console.log(`\n${results.length - fails.length} passed, ${fails.length} failed`);
+const skips = results.filter((r) => r[0] === 'skip');
+console.log(`\n${ENGINE}: ${results.length - fails.length - skips.length} passed, ${fails.length} failed, ${skips.length} skipped`);
+for (const k of skips) console.log('  skip', k[1], ':', k[2]);
 for (const f of fails) console.log(' ', f[1], ':', f[2]);
 process.exit(fails.length ? 1 : 0);

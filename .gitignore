@@ -15,3 +15,6 @@ verify-shots/
 live-shots/
 .secrets.tmp.json
 *.local.*
+
+# WebKit screenshots from npm run check:webkit
+screenshots/webkit/
