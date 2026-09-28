@@ -18,9 +18,13 @@
   --toast-accent: #7DBF98;
   --scrim: rgba(0, 0, 0, 0.28);
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  --hover: rgba(127, 127, 127, 0.08); /* desktop hover wash */
 
   --top: max(24px, calc(env(safe-area-inset-top) + 15px));
   --bottom: max(16px, env(safe-area-inset-bottom));
+  /* Side gutters clear the notch and the rounded corners in landscape. */
+  --gut-l: max(16px, env(safe-area-inset-left));
+  --gut-r: max(16px, env(safe-area-inset-right));
   /* Motion: app.js reads these into M. Calm first: nothing bounces, moves ease out. */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-press: 140ms;  /* colour and state changes */
@@ -69,6 +73,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 input, textarea { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+::placeholder { color: var(--secondary); opacity: 1; }
 .ic { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 .ic-2 { stroke-width: 2; }
 .meta { font-size: var(--fs-meta); color: var(--secondary); }
@@ -80,7 +85,7 @@ input, textarea { font: inherit; color: inherit; }
 body.view-done .list-only, body.view-list .done-only { display: none !important; }
 
 /* ---------- Header ---------- */
-.top { padding: var(--top) 16px 8px; display: flex; flex-direction: column; }
+.top { padding: var(--top) var(--gut-r) 8px var(--gut-l); display: flex; flex-direction: column; }
 .title-row { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.3px; }
 .icon-btn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--secondary); margin-right: -10px; }
@@ -108,10 +113,10 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 .list:empty { padding-bottom: 0; }
 .row { position: relative; overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 /* Hairlines start at the text, and stay there while a row swipes. */
-.row + .row::before { content: ""; position: absolute; z-index: 2; left: 54px; right: 16px; top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
+.row + .row::before { content: ""; position: absolute; z-index: 2; left: calc(var(--gut-l) + 38px); right: var(--gut-r); top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
 .row-inner {
   position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 14px;
-  min-height: 52px; padding: 14px 16px; background: var(--bg); touch-action: pan-y;
+  min-height: 52px; padding: 14px var(--gut-r) 14px var(--gut-l); background: var(--bg); touch-action: pan-y;
 }
 /* The plain iOS cell highlight: on after a still press, and on while the move menu is open. */
 .row.pressing .row-inner, .row.menu-open .row-inner { background: var(--surface); }
@@ -138,34 +143,39 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 /* A tap draws the tick (path about 19.8 long, dashed at 20) instead of growing it. */
 .row.ticked .circle .ic { opacity: 1; transform: none; transition: none; }
 .circle-static { flex-shrink: 0; width: 24px; height: 24px; border-radius: 12px; border: 1.5px solid var(--ring); }
-.move-btn { display: none; }
+/* On the phone the move button is there for VoiceOver only; a finger swipes left instead. */
+@media (max-width: 899px) {
+  .move-btn { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 
 /* Swipe backgrounds sit under the row and show as it slides. */
 .swipe-done, .swipe-move { position: absolute; inset: 0; display: none; align-items: center; }
 /* Soft until the swipe would finish the task, then solid with the check popping (approved). */
 .swipe-done {
-  background: var(--accent-soft); color: var(--accent-text); padding-left: 20px;
+  background: var(--accent-soft); color: var(--accent-text); padding-left: calc(var(--gut-l) + 4px);
   transition: background-color var(--dur-press) ease, color var(--dur-press) ease;
 }
 .row.armed .swipe-done { background: var(--accent); color: var(--on-accent); }
 .swipe-done .ic { transition: transform var(--dur-press) var(--ease); }
 .row.armed .swipe-done .ic { transform: scale(1.25); }
 .row.swipe-r .swipe-done, .row.swipe-l .swipe-move { display: flex; }
-.swipe-move { justify-content: flex-end; padding-right: 12px; background: var(--bg); }
+.swipe-move { justify-content: flex-end; padding-right: calc(var(--gut-r) - 4px); background: var(--bg); }
 .move-group { display: flex; gap: 6px; }
 /* Where a task can go is neutral; where it is now is dimmed, as in the menu. 13px semibold (the
    meta size) leaves about 150px of task text at 390px; 17px would leave about 110px. */
 .swipe-move button {
-  height: 36px; padding: 0 12px; border-radius: 9px; background: var(--surface); color: var(--text);
+  position: relative; height: 36px; padding: 0 12px; border-radius: 9px; background: var(--surface); color: var(--text);
   font-size: var(--fs-meta); font-weight: 600;
 }
 .swipe-move button[aria-current] { color: var(--secondary); cursor: default; }
+.swipe-move button::before { content: ""; position: absolute; inset: -8px -3px; } /* the whole row height, and the gaps */
 /* .sliding and .collapsing mark rows on their way out; app.js animates them. */
 .row.dragging { opacity: 0.4; }
 
 .row.enter { animation: row-in var(--dur-move) var(--ease); }
 @keyframes row-in { from { opacity: 0; transform: translateY(calc(-8px * var(--dist))); } }
 .row.nudge .row-inner { animation: nudge 900ms var(--ease) 400ms; }
+.row.nudge .swipe-done { display: flex; } /* the soft fill a real swipe shows first */
 @keyframes nudge { 0%, 100% { transform: none; } 35%, 55% { transform: translateX(24px); } }
 
 .skeleton .row-inner { align-items: center; }
@@ -174,8 +184,9 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 .skeleton:nth-child(3) .bar { width: 62%; }
 
 /* ---------- Done history ---------- */
-.dhead { padding: 18px 16px 6px; font-size: var(--fs-meta); font-weight: 600; color: var(--secondary); }
-.drow { position: relative; display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; margin: 0 16px; cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 68px; }
+.dhead { padding: 18px var(--gut-r) 6px var(--gut-l); font-size: var(--fs-meta); font-weight: 600; color: var(--secondary); }
+.drow { position: relative; margin: 0 var(--gut-r) 0 var(--gut-l); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 68px; }
+.dbtn { display: flex; align-items: flex-start; gap: 14px; width: 100%; padding: 12px 0; text-align: left; }
 /* No line under a day header; the line starts at the text. */
 .drow + .drow::before { content: ""; position: absolute; left: 38px; right: 0; top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
 .dcheck {
@@ -185,6 +196,7 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 }
 .dcheck .ic { transition: opacity var(--dur-press) ease; }
 .dbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dbody > .meta, .dtime { display: block; }
 .dtext {
   font-size: var(--fs-body); line-height: 1.35; color: var(--secondary); text-decoration: line-through; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -201,12 +213,15 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 /* ---------- Empty, install, no code ---------- */
 .empty { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--secondary); padding: 0 32px; margin-top: max(40px, calc(238px - var(--top))); }
 .ic-glyph { stroke-width: 1.25; }
+.empty.all-done .ic-glyph { color: var(--accent-text); } /* Today cleared: the one green, Paul's call */
 .empty p { margin: 0; font-size: var(--fs-body); text-align: center; }
-.install { margin: 40px 16px 0; padding: 16px; border-radius: 14px; background: var(--surface); display: flex; gap: 12px; align-items: flex-start; }
+.install { margin: 40px var(--gut-r) 0 var(--gut-l); padding: 16px; border-radius: 14px; background: var(--surface); display: flex; gap: 12px; align-items: flex-start; }
 .install-body { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .install-title { font-size: var(--fs-body); font-weight: 600; }
-.install-text { font-size: var(--fs-body); line-height: 1.4; color: var(--secondary); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.install-text .glyph { color: var(--accent-text); display: inline-flex; }
+/* Running text: each glyph keeps its comma or full stop on its line. */
+.install-text { font-size: var(--fs-body); line-height: 1.4; color: var(--secondary); }
+.install-text .glyph { color: var(--accent-text); display: inline-flex; vertical-align: -3px; }
+.nowrap { white-space: nowrap; }
 .install-close { width: 44px; height: 44px; margin: -10px -10px 0 0; }
 .empty:not([hidden]) + .install { margin-top: 144px; }
 .list:not(:empty) ~ .install { margin-top: 8px; margin-bottom: 200px; }
@@ -225,14 +240,15 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
   background: var(--accent); transform: translateX(calc(var(--i) * (100% + 4px)));
 }
 .seg button { position: relative; flex: 1; height: 36px; border-radius: 9px; font-size: var(--fs-body); color: var(--text); }
+.seg button::after { content: ""; position: absolute; inset: -4px -2px; } /* the full bar height, and the gaps */
 .seg button:is([aria-selected="true"], [aria-checked="true"], [aria-current="page"]) { color: var(--on-accent); font-weight: 600; }
 /* The label turns with the thumb, on the same curve, so it never shows white on grey. */
 body.ready .seg::before { transition: transform var(--dur-move) var(--ease); }
 body.ready .seg button { transition: opacity var(--dur-press) ease, color var(--dur-move) var(--ease); }
 body.ready .seg.instant::before, body.ready .seg.instant button { transition: none; }
-.switcher { position: fixed; left: 16px; right: 16px; bottom: var(--bottom); z-index: 10; }
+.switcher { position: fixed; left: var(--gut-l); right: var(--gut-r); bottom: var(--bottom); z-index: 10; }
 .fab {
-  position: fixed; right: 16px; bottom: calc(var(--bottom) + 60px); z-index: 11; width: 56px; height: 56px; border-radius: 28px;
+  position: fixed; right: var(--gut-r); bottom: calc(var(--bottom) + 60px); z-index: 11; width: 56px; height: 56px; border-radius: 28px;
   background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center;
   transition: transform var(--dur-press) ease;
 }
@@ -244,12 +260,12 @@ body.ready .seg.instant::before, body.ready .seg.instant button { transition: no
 /* Done closing: a still copy of it sinks away over the list. */
 .col-ghost { position: fixed; z-index: 5; margin: 0; overflow: hidden; background: var(--bg); pointer-events: none; }
 .toast {
-  position: fixed; left: 16px; right: 84px; bottom: calc(var(--bottom) + 60px); z-index: 12; height: 56px; padding: 0 8px 0 16px;
+  position: fixed; left: var(--gut-l); right: calc(var(--gut-r) + 68px); bottom: calc(var(--bottom) + 60px); z-index: 12; height: 56px; padding: 0 8px 0 16px;
   border-radius: 14px; background: var(--toast); color: var(--toast-text); display: flex; align-items: center; justify-content: space-between;
   font-size: var(--fs-body); animation: toast-in var(--dur-move) var(--ease);
 }
 .toast button { height: 44px; padding: 0 12px; color: var(--toast-accent); font-size: var(--fs-body); font-weight: 600; }
-body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button in Done */
+body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add button in Done */
 /* On translate, so the desktop centring (transform) is never touched. */
 @keyframes toast-in { from { opacity: 0; translate: 0 calc(12px * var(--dist)); } }
 .toast.leaving, .menu.leaving { pointer-events: none; }
@@ -259,7 +275,7 @@ body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button i
 .scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade-in var(--dur-move) ease; touch-action: none; }
 .sheet {
   position: absolute; left: 0; right: 0; bottom: 0; background: var(--sheet); border-radius: 16px 16px 0 0;
-  padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px;
+  padding: 10px var(--gut-r) calc(16px + env(safe-area-inset-bottom)) var(--gut-l); display: flex; flex-direction: column; gap: 10px;
   animation: sheet-in var(--dur-move) var(--ease); touch-action: none;
   translate: 0 var(--kb, 0px); transition: translate 240ms var(--ease); /* rides above the keyboard */
 }
@@ -329,7 +345,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
     display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border-radius: 10px;
     font-size: var(--fs-body); text-align: left;
   }
-  .nav-item:hover { background: rgba(127, 127, 127, 0.08); }
+  .nav-item:hover { background: var(--hover); }
   .nav-item[aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
   .nav-item.drop { outline: 2px solid var(--accent-text); outline-offset: -2px; }
   .nav-item .count { font-size: var(--fs-meta); color: var(--secondary); font-weight: 400; }
@@ -352,16 +368,25 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   body.view-done .list { padding: 0 12px 48px; }
   .row { border-radius: 10px; }
   .row + .row::before { display: none; }
-  .drow { margin: 0; }
+  /* The hover card reaches 12px past the check, like a list row's. */
+  .drow { margin: 0 -12px; border-radius: 10px; }
+  .dbtn { padding: 12px; }
+  .drow + .drow::before { left: 48px; right: 12px; transition: opacity var(--dur-press) ease; }
+  .drow:hover { background: var(--surface); }
+  .drow:hover::before, .drow:hover + .drow::before { opacity: 0; transition-duration: 0ms; }
   .dhead { padding-left: 0; }
   .row-inner { align-items: center; padding: 0 12px; border-radius: 10px; min-height: 52px; }
   .row .text { padding: 14px 0; cursor: pointer; }
-  .circle, .circle-static { width: 22px; height: 22px; border-radius: 11px; }
+  .circle, .circle-static, .dcheck { width: 22px; height: 22px; border-radius: 11px; }
+  .dcheck .ic { width: 14px; height: 14px; }
   .row:hover .row-inner, .row:focus-visible .row-inner { background: var(--surface); }
   .row:hover .circle:not(.checked) { border-color: var(--accent-text); }
   .row:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
   .move-btn { display: flex; visibility: hidden; width: 36px; height: 36px; align-items: center; justify-content: center; color: var(--secondary); border-radius: 8px; }
-  .row:hover .move-btn, .row:focus-visible .move-btn, .row.menu-open .move-btn { visibility: visible; }
+  .row:hover .move-btn, .row:focus-within .move-btn, .row.menu-open .move-btn { visibility: visible; }
+  /* Calm hovers: in at once, out softly. */
+  .row-inner, .nav-item, .drow { transition: background-color var(--dur-press) ease; }
+  .row:hover .row-inner, .nav-item:hover, .drow:hover { transition-duration: 0ms; }
   .inline-slot { display: grid; grid-template-rows: 1fr; }
   .inline-clip { min-height: 0; overflow: hidden; }
   .inline-add { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 12px; margin-bottom: 8px; border-radius: 10px; border: 1.5px solid var(--accent-text); }
@@ -377,6 +402,19 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .edit-sheet { min-height: 0; }
   .edit-sheet .grow { flex: 0 0 8px; }
   .edit-sheet .sheet-head { margin-top: -6px; }
+}
+
+/* Increase Contrast (iOS and macOS): darker rings, secondary text and lines. The default look is unchanged. */
+@media (prefers-contrast: more) {
+  :root { --ring: #6E6E73; --secondary: #545458; --sep: #C6C6C8; }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root { --ring: #6E6E73; --secondary: #AEAEB2; --sep: #48484A; }
+}
+/* Forced colours drop backgrounds, so the selected section and the check use system colours. */
+@media (forced-colors: active) {
+  .seg button:is([aria-selected="true"], [aria-checked="true"], [aria-current="page"]), .nav-item[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .circle.checked { forced-color-adjust: none; background: Highlight; border-color: Highlight; color: HighlightText; }
 }
 
 /* Reduced motion: slides become fades, nothing bounces. --dist only reaches keyframes written

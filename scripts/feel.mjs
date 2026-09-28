@@ -5,6 +5,10 @@
 // lines (A10), the Done layer (A12), hand-offs (A13), press feedback (I1), edit sheet move (I2), reveal (I3).
 // Release 3 checks: the seg thumb (A1), hairlines and the desktop hop (C3), the pill and banner slots (B4),
 // one sheet header (C5), and no focus ring after a sheet a finger opened.
+// Release 4 checks: the live region (X3), names (X4), hit areas (X5), switcher and edit seg keys (X6),
+// contrast and forced colours (X7), Done buttons (X8), Ctrl Z (I4), keyboard move (I5), all done (I7),
+// the nudge (B6), the day turning (B7), Done paging (B10), hovers (C6), sizes (C7), the install card (C8),
+// landscape gutters (C9) and N right after Escape.
 // Every check runs twice, with reduced motion off and on, in Chromium or WebKit.
 //   npm run feel           Chromium
 //   npm run feel:webkit    WebKit
@@ -40,7 +44,8 @@ async function postOps(ops) {
 }
 async function resetServer() {
   const items = await getList();
-  if (items.length) await postOps(items.map((i) => ({ op: 'delete', item: { id: i.id, updatedAt: Date.now() + 1000 } })));
+  // The Worker takes at most 200 ops a batch (B10 seeds 350).
+  for (let i = 0; i < items.length; i += 200) await postOps(items.slice(i, i + 200).map((i) => ({ op: 'delete', item: { id: i.id, updatedAt: Date.now() + 1000 } })));
 }
 let n = 0;
 const nid = () => 'feel' + String(++n).padStart(4, '0') + Math.random().toString(36).slice(2, 10);
@@ -267,6 +272,23 @@ function kit() {
     return () => { on = false; for (const u of undo) u(); return n; };
   };
 
+  /* Release 4 helpers */
+  // The most targets any IntersectionObserver held at once (B10: one sentinel, never a pile).
+  window.__ioMax = 0;
+  const IO = window.IntersectionObserver;
+  if (IO) {
+    const ob = IO.prototype.observe, dc = IO.prototype.disconnect, un = IO.prototype.unobserve;
+    IO.prototype.observe = function (t) { (this.__t || (this.__t = new Set())).add(t); __ioMax = Math.max(__ioMax, this.__t.size); return ob.call(this, t); };
+    IO.prototype.disconnect = function () { if (this.__t) this.__t.clear(); return dc.call(this); };
+    IO.prototype.unobserve = function (t) { if (this.__t) this.__t.delete(t); return un.call(this, t); };
+  }
+  // Everything the live region says, in order (it empties first, so only non-empty text counts).
+  window.__said = [];
+  document.addEventListener('DOMContentLoaded', () => {
+    const say = document.getElementById('say');
+    if (say) new MutationObserver(() => { if (say.textContent) __said.push(say.textContent); }).observe(say, { childList: true, characterData: true, subtree: true });
+  });
+
   // Rows that are half gone: squashed, faded, or still carrying exit styles.
   window.__ghosts = () => [...document.querySelectorAll('#list .row:not(.skeleton)')]
     .filter((r) => r.offsetHeight < 30 || r.style.height || r.style.opacity || r.classList.contains('collapsing') || r.classList.contains('sliding')
@@ -285,7 +307,7 @@ async function test(name, motion, fn) {
   const label = name + ' [' + motion + ']';
   const contexts = [];
   const errors = [];
-  const open = async ({ desktop = false, size = { width: 390, height: 844 } } = {}) => {
+  const open = async ({ desktop = false, size = { width: 390, height: 844 }, ready = '#list .row:not(.skeleton)' } = {}) => {
     const ctx = await browser.newContext(desktop
       ? { viewport: { width: 1440, height: 900 }, reducedMotion: motion }
       : { viewport: size, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: motion });
@@ -294,7 +316,7 @@ async function test(name, motion, fn) {
     const page = await ctx.newPage();
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(OPEN);
-    await page.waitForSelector('#list .row:not(.skeleton)');
+    await page.waitForSelector(ready);
     await page.waitForTimeout(300);
     return page;
   };
@@ -1286,7 +1308,7 @@ for (const motion of ['no-preference', 'reduce']) {
     const desk = await open({ desktop: true });
     await desk.click('.nav-item[data-section="done"]');
     await desk.waitForSelector(`.drow[data-id="${ids[1]}"]`);
-    await desk.evaluate((id) => document.querySelector(`.drow[data-id="${id}"]`).focus(), ids[1]);
+    await desk.evaluate((id) => document.querySelector(`.drow[data-id="${id}"] .dbtn`).focus(), ids[1]);
     await desk.keyboard.press('Enter');
     await until(async () => !(await desk.$(`.drow[data-id="${ids[1]}"]`)), 3000, 'the reopened row to leave Done');
     await desk.waitForTimeout(300);
@@ -2352,6 +2374,663 @@ for (const motion of ['no-preference', 'reduce']) {
     await page.waitForTimeout(250);
     r = await ring();
     assert.equal(r.active, 'fab', 'a capture opened from the keyboard did not give focus back to the add button');
+  });
+
+  /* ================= Release 4 ================= */
+  await test('X3 one quiet live region: the toast, Undo, capture Return, 1 2 3, and only offline and error of the sync pill', motion, async (open) => {
+    const ids = await seed([['Say one'], ['Say two']]);
+    const page = await open();
+    const a = await page.evaluate(() => {
+      const say = document.getElementById('say');
+      const attr = (id) => { const el = document.getElementById(id); return [el.getAttribute('role'), el.getAttribute('aria-live')].join('|'); };
+      const b = say.getBoundingClientRect();
+      return { role: say.getAttribute('role'), sr: say.classList.contains('sr-only') && b.width <= 1 && b.height <= 1, toast: attr('toast'), pill: attr('pill'), cap: attr('capAdded'),
+        live: document.querySelectorAll('[aria-live]').length, status: [...document.querySelectorAll('[role="status"], [role="alert"], [role="log"]')].map((el) => el.id) };
+    });
+    assert.equal(a.role, 'status');
+    assert.ok(a.sr, '#say is not visually hidden');
+    assert.deepEqual([a.toast, a.pill, a.cap], ['|', '|', '|'], 'live attributes left on the toast, pill or capture lines');
+    assert.equal(a.live, 0, 'an aria-live attribute is left');
+    assert.deepEqual(a.status, ['say'], 'more than one live region');
+    const said = () => page.evaluate(() => __said.slice());
+    const saidNext = async (text, msg) => {
+      await until(async () => (await said()).includes(text), 3000, msg + ': "' + text + '" in ' + JSON.stringify(await said()));
+      await page.evaluate(() => { __said.length = 0; });
+    };
+    await page.evaluate(() => { __said.length = 0; });
+
+    await page.evaluate((id) => __tap(id), ids[0]);
+    await saidNext('Done.', 'the toast');
+    await page.click('#toastUndo');
+    await saidNext('Undone.', 'Undo');
+
+    await page.tap('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.keyboard.type('Said from capture');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => document.getElementById('say').closest('[inert]')), null, 'the live region went inert under the sheet');
+    await saidNext('Added to Today.', 'capture Return');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#capture', { state: 'hidden' });
+    await page.waitForTimeout(300);
+
+    // Offline is said once; the routine recovery (Syncing, Synced) never is.
+    await until(() => page.evaluate(() => !__queue().length), 5000, 'the queue to send');
+    await page.evaluate(() => { __said.length = 0; window.dispatchEvent(new Event('offline')); window.dispatchEvent(new Event('offline')); });
+    await page.waitForTimeout(400);
+    assert.deepEqual(await said(), ['Offline'], 'offline');
+    await page.evaluate(() => { __said.length = 0; window.dispatchEvent(new Event('online')); });
+    await until(() => page.evaluate(() => document.getElementById('pill').hidden), 5000, 'the pill to leave');
+    assert.deepEqual(await said(), [], 'a routine sync was said');
+
+    // An error is said once, however many polls fail.
+    await page.route('**/api/todo/**', (r) => r.abort());
+    await page.evaluate(() => __poll());
+    await until(() => page.evaluate(() => !document.getElementById('banner').hidden), 4000, 'the banner');
+    await page.evaluate(() => __poll());
+    await page.waitForTimeout(600);
+    assert.deepEqual(await said(), ['Could not sync. Your changes are saved on this device.'], 'error');
+    await page.unroute('**/api/todo/**');
+    await page.click('#retry');
+    await until(() => page.evaluate(() => document.getElementById('banner').hidden), 5000, 'the banner to leave');
+
+    const desk = await open({ desktop: true });
+    await desk.evaluate(() => { __said.length = 0; });
+    await desk.keyboard.press('2');
+    await until(async () => (await desk.evaluate(() => __said.slice())).includes('Soon'), 2000, 'the 2 key');
+    await desk.keyboard.press('1');
+    await until(async () => (await desk.evaluate(() => __said.slice())).includes('Today'), 2000, 'the 1 key');
+  });
+
+  await test('X4 the task text names the row: role button, the circle and the move button point at it; VoiceOver can move a task on the phone', motion, async (open) => {
+    const [id] = await seed([['Name me'], ['Other row']]);
+    const page = await open();
+    const r = await page.evaluate((id) => {
+      const row = __row(id), t = row.querySelector('.text'), c = row.querySelector('.circle'), m = row.querySelector('.move-btn');
+      const cs = getComputedStyle(m), mb = m.getBoundingClientRect(), tb = t.getBoundingClientRect();
+      return { tid: t.id, role: t.getAttribute('role'), desc: c.getAttribute('aria-describedby'), mdesc: m.getAttribute('aria-describedby'), label: c.getAttribute('aria-label'),
+        inTree: cs.display !== 'none' && cs.visibility !== 'hidden', w: mb.width, h: mb.height, textRight: tb.right, width: innerWidth, rowH: row.offsetHeight,
+        hit: document.elementFromPoint(mb.left + 0.5, mb.top + 0.5) === m };
+    }, id);
+    assert.equal(r.tid, 't-' + id);
+    assert.equal(r.role, 'button');
+    assert.equal(r.desc, 't-' + id);
+    assert.equal(r.mdesc, 't-' + id);
+    assert.equal(r.label, 'Mark done');
+    assert.ok(r.inTree, 'the phone move button is display none or hidden, so VoiceOver can not reach it');
+    assert.ok(r.w <= 1 && r.h <= 1, 'the phone move button shows: ' + r.w + 'x' + r.h);
+    assert.ok(!r.hit, 'the phone move button takes taps');
+    assert.ok(Math.abs(r.textRight - (r.width - 16)) < 0.5, 'the text lost width to the move button: ends at ' + r.textRight);
+    assert.equal(r.rowH, 52, 'row height');
+    // What VoiceOver does: a click on the move button opens the menu, and a pick moves the task.
+    await page.evaluate((id) => __row(id).querySelector('.move-btn').click(), id);
+    await page.waitForSelector('#menu:not([hidden])');
+    const mb = await box(page, '#menu');
+    assert.ok(mb.left >= 0 && mb.right <= 390 && mb.top >= 0, 'the menu is off screen: ' + JSON.stringify(mb));
+    await page.evaluate(() => document.querySelector('#menu button[data-move="soon"]').click());
+    await gone(page, [id]);
+    await serverHas((i) => i.id === id && i.section === 'soon', 'moved on server');
+  });
+
+  await test('X5 bigger hit areas: reveal chips reach the row edges and their gaps, seg buttons the bar edges and gaps; same look', motion, async (open) => {
+    const ids = await seed([['Reveal me'], ['Row two']]);
+    const page = await open();
+    const seg = await page.evaluate(() => {
+      const bs = [...document.querySelectorAll('#switcher button')], b = bs.map((x) => x.getBoundingClientRect());
+      const s = document.getElementById('switcher').getBoundingClientRect();
+      const hit = (x, y) => { const el = document.elementFromPoint(x, y); const btn = el && el.closest('#switcher button'); return btn ? btn.dataset.section : null; };
+      const mid = b[1].left + b[1].width / 2, cy = s.top + s.height / 2;
+      return { h: b.map((x) => x.height), top: hit(mid, s.top + 1.5), bottom: hit(mid, s.bottom - 1.5), gap1: hit((b[0].right + b[1].left) / 2, cy), gap2: hit((b[1].right + b[2].left) / 2, cy),
+        radius: getComputedStyle(bs[1]).borderRadius };
+    });
+    assert.deepEqual(seg.h, [36, 36, 36], 'seg button height');
+    assert.equal(seg.radius, '9px');
+    assert.equal(seg.top, 'soon', 'the bar top edge is dead');
+    assert.equal(seg.bottom, 'soon', 'the bar bottom edge is dead');
+    assert.ok(seg.gap1 && seg.gap2, 'a gap between seg buttons is dead: ' + JSON.stringify(seg));
+
+    const t = await touch(page, ENGINE);
+    await t.drag(page.locator(`.row[data-id="${ids[0]}"]`), -200);
+    await page.waitForTimeout(450);
+    const chips = await page.evaluate((id) => {
+      const row = __row(id), r = row.getBoundingClientRect();
+      const bs = [...row.querySelectorAll('.swipe-move button')], b = bs.map((x) => x.getBoundingClientRect());
+      const hit = (x, y) => { const el = document.elementFromPoint(x, y); const btn = el && el.closest('.swipe-move button'); return btn ? btn.dataset.move : null; };
+      const cs = getComputedStyle(bs[1]);
+      return { l: row.classList.contains('swipe-l'), h: b.map((x) => x.height), top: hit(b[1].left + b[1].width / 2, r.top + 1.5), bottom: hit(b[1].left + b[1].width / 2, r.bottom - 1.5),
+        gap: hit((b[0].right + b[1].left) / 2, r.top + r.height / 2), gap2: hit((b[1].right + b[2].left) / 2, r.top + r.height / 2),
+        size: cs.fontSize, bg: cs.backgroundColor, surface: __color('var(--surface)'), x: b[1].left + b[1].width / 2, y: r.top + 2 };
+    }, ids[0]);
+    assert.ok(chips.l, 'the row did not reveal');
+    assert.deepEqual(chips.h, [36, 36, 36], 'chip height');
+    assert.equal(chips.size, '13px');
+    assert.equal(chips.bg, chips.surface);
+    assert.equal(chips.top, 'soon', 'the row top edge above a chip is dead');
+    assert.equal(chips.bottom, 'soon', 'the row bottom edge under a chip is dead');
+    assert.ok(chips.gap && chips.gap2, 'a gap between chips is dead: ' + JSON.stringify(chips));
+    // A tap 2px from the row top moves the task.
+    await page.evaluate(([x, y]) => __tapAt(x, y), [chips.x, chips.y]);
+    await gone(page, [ids[0]]);
+    await serverHas((i) => i.id === ids[0] && i.section === 'soon', 'moved on server');
+  });
+
+  await test('X6 the switcher is a nav with aria-current (the thumb follows); the edit section control has one tab stop and arrow keys', motion, async (open) => {
+    const ids = await seed([['Arrow me'], ['Second']]);
+    const page = await open();
+    const sw = () => page.evaluate(() => {
+      const s = document.getElementById('switcher');
+      return { tag: s.tagName, role: s.getAttribute('role'), label: s.getAttribute('aria-label'), roles: [...s.querySelectorAll('button')].map((b) => b.getAttribute('role')),
+        current: [...s.querySelectorAll('[aria-current]')].map((b) => b.dataset.section + '=' + b.getAttribute('aria-current')), selected: s.querySelectorAll('[aria-selected]').length,
+        i: getComputedStyle(s).getPropertyValue('--i').trim() };
+    });
+    let s = await sw();
+    assert.deepEqual({ tag: s.tag, role: s.role, label: s.label, roles: s.roles, selected: s.selected }, { tag: 'NAV', role: null, label: 'Sections', roles: [null, null, null], selected: 0 });
+    assert.deepEqual(s.current, ['today=page']);
+    assert.equal(s.i, '0');
+    await page.click('#switcher button[data-section="someday"]');
+    await page.waitForTimeout(300);
+    s = await sw();
+    assert.deepEqual(s.current, ['someday=page']);
+    assert.equal(s.i, '2', 'the thumb did not follow aria-current');
+    await page.click('#switcher button[data-section="today"]');
+    await page.waitForTimeout(300);
+
+    const desk = await open({ desktop: true });
+    await desk.evaluate((id) => __row(id).focus(), ids[0]);
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(300);
+    const seg = () => desk.evaluate(() => [...document.querySelectorAll('#editSeg button')].map((b) => b.dataset.section + ':' + b.getAttribute('aria-checked') + ':' + b.tabIndex
+      + (document.activeElement === b ? ':focus' : '')));
+    assert.deepEqual(await seg(), ['today:true:0', 'soon:false:-1', 'someday:false:-1']);
+    await desk.focus('#editSeg button[data-section="today"]');
+    await desk.keyboard.press('ArrowRight');
+    assert.deepEqual(await seg(), ['today:false:-1', 'soon:true:0:focus', 'someday:false:-1']);
+    await desk.keyboard.press('ArrowLeft');
+    await desk.keyboard.press('ArrowLeft'); // wraps round
+    assert.deepEqual(await seg(), ['today:false:-1', 'soon:false:-1', 'someday:true:0:focus']);
+    await desk.keyboard.press('Escape');
+    await desk.waitForSelector('#edit', { state: 'hidden' });
+    await until(async () => (await desk.textContent('#toastText')) === 'Moved to Someday.', 2000, 'the move toast');
+    await serverHas((i) => i.id === ids[0] && i.section === 'someday', 'moved on server');
+  });
+
+  await test('X7 Increase Contrast darkens ring, secondary and lines; forced colours outline the selected section and fill the check with Highlight; placeholder colour', motion, async (open, motion, part) => {
+    await seed([['Contrast row'], ['Second']]);
+    const page = await open();
+    const vals = () => page.evaluate(() => { const cs = getComputedStyle(document.documentElement); return ['--ring', '--secondary', '--sep'].map((k) => cs.getPropertyValue(k).trim().toUpperCase()); });
+    assert.deepEqual(await vals(), ['#A1A1A6', '#6E6E73', '#E5E5EA'], 'the default light look changed');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    assert.deepEqual(await vals(), ['#48484A', '#8E8E93', '#2C2C2E'], 'the default dark look changed');
+    await page.emulateMedia({ colorScheme: 'light', contrast: 'more' });
+    if (!(await page.evaluate(() => matchMedia('(prefers-contrast: more)').matches))) part(ENGINE + ' can not emulate prefers-contrast');
+    else {
+      assert.deepEqual(await vals(), ['#6E6E73', '#545458', '#C6C6C8'], 'light, more contrast');
+      await page.waitForTimeout(300); // the ring colour changes over --dur-press
+      const ring = await page.evaluate(() => getComputedStyle(document.querySelector('#list .circle')).borderTopColor === __color('#6E6E73'));
+      assert.ok(ring, 'the circle ring did not darken');
+      await page.emulateMedia({ colorScheme: 'dark', contrast: 'more' });
+      assert.deepEqual(await vals(), ['#6E6E73', '#AEAEB2', '#48484A'], 'dark, more contrast');
+    }
+    await page.emulateMedia({ colorScheme: 'light', contrast: null });
+
+    // The placeholder is the secondary colour at full opacity.
+    const ph = await page.evaluate(() => {
+      const rule = [...document.styleSheets[0].cssRules].find((r) => r.selectorText === '::placeholder');
+      const input = document.getElementById('capInput');
+      const cs = getComputedStyle(input, '::placeholder');
+      return { rule: rule ? rule.style.color + '|' + rule.style.opacity : null, color: cs.color, opacity: cs.opacity, own: getComputedStyle(input).color, secondary: __color('var(--secondary)') };
+    });
+    assert.equal(ph.rule, 'var(--secondary)|1', 'no ::placeholder rule');
+    if (ph.color === ph.own && ph.own !== ph.secondary) part(ENGINE + ' does not compute ::placeholder styles');
+    else assert.deepEqual([ph.color, ph.opacity], [ph.secondary, '1'], 'placeholder');
+
+    await page.emulateMedia({ forcedColors: 'active' });
+    if (!(await page.evaluate(() => matchMedia('(forced-colors: active)').matches))) { part(ENGINE + ' can not emulate forced-colors'); return; }
+    const fc = await page.evaluate(async () => {
+      const hl = __color('Highlight');
+      const b = document.querySelector('#switcher [aria-current="page"]'), cb = getComputedStyle(b);
+      const c = document.querySelector('#list .circle');
+      c.classList.add('checked');
+      await new Promise((r) => setTimeout(r, 300)); // the fill changes over --dur-press
+      const cc = getComputedStyle(c);
+      const r = { outline: cb.outlineStyle + ' ' + cb.outlineWidth, outlineHl: cb.outlineColor === hl, other: getComputedStyle(document.querySelector('#switcher button:not([aria-current])')).outlineStyle,
+        fill: cc.backgroundColor === hl, border: cc.borderTopColor === hl };
+      c.classList.remove('checked');
+      return r;
+    });
+    assert.deepEqual(fc, { outline: 'solid 2px', outlineHl: true, other: 'none', fill: true, border: true }, 'forced colours, phone');
+    const desk = await open({ desktop: true });
+    await desk.emulateMedia({ forcedColors: 'active' });
+    const nav = await desk.evaluate(() => { const cs = getComputedStyle(document.querySelector('.nav-item[aria-current="page"]')); return { outline: cs.outlineStyle, hl: cs.outlineColor === __color('Highlight') }; });
+    assert.deepEqual(nav, { outline: 'solid', hl: true }, 'forced colours, the current nav item');
+  });
+
+  await test('X8 Done rows are real buttons, described by their section and time; day headers are read; keys reach and reopen them', motion, async (open) => {
+    const t0 = Date.now();
+    const ids = await seed([['Open task'], ['Done in Soon', 'soon', { done: true, doneAt: t0 - 60000 }], ['Done in Today', 'today', { done: true, doneAt: t0 - 120000 }],
+      ['Done long ago', 'someday', { done: true, doneAt: t0 - 3 * 86400000 }]]);
+    const desk = await open({ desktop: true });
+    await desk.click('.nav-item[data-section="done"]');
+    await desk.waitForSelector('.drow');
+    await desk.waitForTimeout(300);
+    const info = await desk.evaluate(() => ({
+      heads: [...document.querySelectorAll('.dhead')].map((h) => h.getAttribute('aria-hidden')),
+      rows: [...document.querySelectorAll('.drow')].map((li) => {
+        const b = li.querySelector('button.dbtn');
+        return { li: [li.getAttribute('role'), li.getAttribute('tabindex'), li.getAttribute('aria-label')].join('|'), btn: !!b, label: b && b.getAttribute('aria-label'),
+          desc: b ? b.getAttribute('aria-describedby').split(' ').map((id) => document.getElementById(id).textContent) : null,
+          meta: [li.querySelector('.dbody .meta').textContent, li.querySelector('.dtime').textContent], check: li.querySelector('.dcheck').getAttribute('aria-hidden') };
+      }),
+    }));
+    assert.deepEqual(info.heads, [null, null], 'a day header is hidden from screen readers');
+    assert.equal(info.rows.length, 3);
+    for (const r of info.rows) {
+      assert.equal(r.li, '||', 'the li still carries the button role');
+      assert.ok(r.btn, 'no button in a done row');
+      assert.deepEqual(r.desc, r.meta, 'the button is not described by its visible section and time');
+      assert.match(r.desc[1], /^\d\d:\d\d$/);
+      assert.equal(r.check, 'true');
+    }
+    assert.equal(info.rows[0].label, 'Reopen Done in Soon');
+    assert.equal(info.rows[0].desc[0], 'Soon');
+    // The arrow keys and Tab land on the buttons; Enter reopens.
+    await desk.evaluate(() => document.activeElement.blur());
+    await desk.keyboard.press('ArrowDown');
+    const f = () => desk.evaluate(() => (document.activeElement.classList.contains('dbtn') ? document.activeElement.querySelector('.dtext').textContent : document.activeElement.tagName));
+    assert.equal(await f(), 'Done in Soon');
+    await desk.keyboard.press('Tab');
+    assert.equal(await f(), 'Done in Today');
+    await desk.keyboard.press('Enter');
+    await until(async () => !(await desk.$(`.drow[data-id="${ids[2]}"]`)), 3000, 'the reopened row to leave Done');
+    assert.equal(await desk.textContent('#toastText'), 'Reopened in Today.');
+    await serverHas((i) => i.id === ids[2] && !i.done, 'reopened on server');
+  });
+
+  await test('I4 Ctrl Z runs Undo only while the toast shows, never in a field; the hint is one line with Ctrl Z and M', motion, async (open) => {
+    const ids = await seed([['Undo me'], ['Too late'], ['Typed over'], ['Stays']]);
+    const desk = await open({ desktop: true });
+    const done = async (id) => { const q = await desk.evaluate(() => __queue()); const o = q.filter((o) => o.item.id === id).pop(); return o ? o.item.done : (await getList()).find((i) => i.id === id).done; };
+    const hint = await desk.evaluate(() => { const p = document.querySelector('.kbd-hint'); const cs = getComputedStyle(p); return { text: p.textContent, h: p.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom), lh: parseFloat(cs.fontSize) * 1.35, w: p.clientWidth }; });
+    assert.ok(/ · Ctrl Z undo/.test(hint.text) && / · M move/.test(hint.text), 'hint: ' + hint.text);
+    assert.ok(hint.h < hint.lh * 1.5, 'the hint wraps at ' + hint.w + 'px: ' + hint.h + 'px tall');
+    assert.ok(!/—/.test(hint.text), 'an em dash in the hint');
+
+    await desk.evaluate((id) => __row(id).focus(), ids[0]);
+    await desk.keyboard.press(' ');
+    await desk.waitForSelector('#toast:not([hidden])');
+    await gone(desk, [ids[0]]);
+    await desk.keyboard.press('Control+z');
+    await until(() => inList(desk, ids[0]), 2000, 'Ctrl Z to bring the row back');
+    assert.equal(await done(ids[0]), false);
+    assert.ok(await desk.evaluate(() => document.getElementById('toast').classList.contains('leaving') || document.getElementById('toast').hidden), 'the toast stayed after Ctrl Z');
+
+    // After the toast has gone, Ctrl Z does nothing.
+    await desk.evaluate((id) => __row(id).focus(), ids[1]);
+    await desk.keyboard.press(' ');
+    await gone(desk, [ids[1]]);
+    await until(() => desk.evaluate(() => document.getElementById('toast').hidden), 7000, 'the toast to go');
+    await desk.keyboard.press('Control+z');
+    await desk.waitForTimeout(500);
+    assert.ok(!(await inList(desk, ids[1])), 'Ctrl Z undid after the toast had gone');
+    assert.equal(await done(ids[1]), true);
+
+    // In a field, Ctrl Z belongs to the field.
+    await desk.evaluate((id) => __row(id).focus(), ids[2]);
+    await desk.keyboard.press(' ');
+    await gone(desk, [ids[2]]);
+    await desk.keyboard.press('n');
+    await desk.waitForSelector('#inlineAdd:not([hidden])');
+    assert.equal(await desk.evaluate(() => document.activeElement.id), 'inlineInput');
+    await desk.keyboard.press('Control+z');
+    await desk.waitForTimeout(400);
+    assert.ok(!(await inList(desk, ids[2])), 'Ctrl Z in the add field ran Undo');
+    assert.equal(await done(ids[2]), true);
+    assert.ok(await desk.evaluate(() => !document.getElementById('toast').hidden), 'the toast went');
+  });
+
+  await test('I5 move by keyboard: Tab reaches the move button, the menu keys (arrows, Home, End, 1 2 3), Tab and focus leaving close it, M opens it', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Row B'], ['Row C'], ['Row D']]);
+    const desk = await open({ desktop: true });
+    const where = () => desk.evaluate(() => { const a = document.activeElement; return a.dataset.move ? 'menu:' + a.dataset.move : a.classList.contains('move-btn') ? 'move-btn:' + a.closest('.row').querySelector('.text').textContent : a.closest && a.closest('.row') ? a.closest('.row').querySelector('.text').textContent + (a.classList.contains('circle') ? ' circle' : '') : a.id || a.tagName; });
+    const btn = (id) => desk.evaluate((id) => { const b = __row(id).querySelector('.move-btn'); return { vis: getComputedStyle(b).visibility, popup: b.getAttribute('aria-haspopup'), expanded: b.getAttribute('aria-expanded') }; }, id);
+    const menuState = () => desk.evaluate(() => { const m = document.getElementById('menu'); return { on: !m.hidden && !m.classList.contains('leaving'), label: m.getAttribute('aria-label'), role: m.getAttribute('role'),
+      items: [...m.querySelectorAll('button.sec')].map((b) => b.dataset.move + (b.getAttribute('aria-disabled') === 'true' ? ':disabled' : '')) }; });
+    await desk.mouse.move(1400, 880);
+    assert.equal((await btn(ids[0])).vis, 'hidden', 'the move button shows with no focus or hover');
+    await desk.evaluate((id) => __row(id).querySelector('.circle').focus(), ids[0]);
+    assert.deepEqual(await btn(ids[0]), { vis: 'visible', popup: 'menu', expanded: 'false' });
+    await desk.keyboard.press('Tab');
+    assert.equal(await where(), 'move-btn:Row A', 'Tab from the circle');
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#menu:not([hidden])');
+    assert.deepEqual(await menuState(), { on: true, label: 'Move to', role: 'menu', items: ['today:disabled', 'soon', 'someday'] });
+    assert.equal((await btn(ids[0])).expanded, 'true');
+    assert.equal(await where(), 'menu:soon');
+    await desk.keyboard.press('End');
+    assert.equal(await where(), 'menu:someday');
+    await desk.keyboard.press('Home');
+    assert.equal(await where(), 'menu:today');
+    await desk.keyboard.press('1'); // the current section: nothing happens
+    await desk.waitForTimeout(250);
+    assert.ok((await menuState()).on && await inList(desk, ids[0]), '1 on the current section closed the menu or moved the task');
+    await desk.keyboard.press('3');
+    await gone(desk, [ids[0]]);
+    await serverHas((i) => i.id === ids[0] && i.section === 'someday', 'moved on server');
+    await desk.waitForTimeout(300);
+    assert.equal(await where(), 'Row B', 'focus after the pick');
+
+    // M opens it from the row; Escape goes back to the row; Tab closes it and moves on.
+    await desk.keyboard.press('m');
+    await desk.waitForSelector('#menu:not([hidden])');
+    assert.equal(await where(), 'menu:soon');
+    assert.equal((await btn(ids[1])).expanded, 'true');
+    await desk.keyboard.press('Escape');
+    await desk.waitForSelector('#menu', { state: 'hidden' });
+    assert.equal(await where(), 'Row B');
+    assert.equal((await btn(ids[1])).expanded, 'false');
+    await desk.keyboard.press('m');
+    await desk.waitForSelector('#menu:not([hidden])');
+    await desk.keyboard.press('Tab');
+    await desk.waitForTimeout(50);
+    assert.ok(!(await menuState()).on, 'Tab did not close the menu');
+    assert.ok(!/^menu:/.test(await where()), 'focus stayed in the menu');
+    await desk.waitForSelector('#menu', { state: 'hidden' });
+    // Focus going elsewhere closes it too.
+    await desk.evaluate((id) => __row(id).focus(), ids[2]);
+    await desk.keyboard.press('m');
+    await desk.waitForSelector('#menu:not([hidden])');
+    await desk.evaluate(() => document.getElementById('addDesk').focus());
+    await desk.waitForTimeout(50);
+    assert.ok(!(await menuState()).on, 'focus leaving did not close the menu');
+    assert.equal(await where(), 'addDesk');
+    assert.ok(await inList(desk, ids[2]), 'closing the menu moved the task');
+  });
+
+  await test('I7 Today cleared: "All done for today." with the green glyph, faded in; a task done in Soon or yesterday does not count', motion, async (open) => {
+    const t0 = Date.now();
+    const y = new Date(); y.setDate(y.getDate() - 1); y.setHours(12, 0, 0, 0);
+    const ids = await seed([['Last one today'], ['Someday task', 'someday'], ['Done in Soon today', 'soon', { done: true, doneAt: t0 - 1000 }], ['Done yesterday', 'today', { done: true, doneAt: y.getTime() }]]);
+    const page = await open();
+    const r = await page.evaluate(async (id) => {
+      const empty = document.getElementById('empty');
+      const stop = __frames(() => ({ shown: !empty.hidden, op: +getComputedStyle(empty).opacity, text: empty.querySelector('p').textContent }));
+      __tap(id);
+      await new Promise((r) => setTimeout(r, 1500));
+      const glyph = getComputedStyle(empty.querySelector('.ic-glyph')).color;
+      return { fr: stop(), glyph, p: getComputedStyle(empty.querySelector('p')).color, green: __color('var(--accent-text)'), secondary: __color('var(--secondary)') };
+    }, ids[0]);
+    const last = r.fr[r.fr.length - 1];
+    assert.equal(last.text, 'All done for today.');
+    assert.equal(r.glyph, r.green, 'the glyph is not green');
+    assert.equal(r.p, r.secondary, 'the words should stay secondary');
+    assert.ok(r.fr.some((f) => f.shown && f.op > 0.02 && f.op < 0.95), 'the empty state did not fade in');
+    assert.ok(!r.fr.some((f) => f.shown && f.text === 'Nothing for today.'), 'the plain empty text showed first');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#empty .ic-glyph')).color), 'rgb(125, 191, 152)', 'dark glyph');
+    await page.emulateMedia({ colorScheme: 'light' });
+    // The same task finished yesterday instead: the plain empty state, in grey.
+    const q = await serverHas((i) => i.id === ids[0] && i.done, 'done on server');
+    await postOps([{ op: 'upsert', item: { id: q.id, text: q.text, section: q.section, done: true, doneAt: y.getTime() + 1000, pos: q.pos, updatedAt: Date.now() } }]); // not ahead, so the next reset still wins
+    await page.evaluate(() => __poll());
+    await until(async () => (await page.textContent('#empty p')) === 'Nothing for today.', 4000, 'the plain empty text');
+    const g = await page.evaluate(() => getComputedStyle(document.querySelector('#empty .ic-glyph')).color === __color('var(--secondary)'));
+    assert.ok(g, 'the glyph stayed green');
+    assert.equal((await getList()).filter((i) => i.done).length, 3, 'done count');
+  });
+
+  await test('B7 past midnight the Today empty state and the Done day labels are drawn again, on return and on the poll; nothing moves', motion, async (open) => {
+    const t0 = Date.now();
+    await seed([['Open in Soon', 'soon'], ['Finished today', 'today', { done: true, doneAt: t0 - 1000 }]]);
+    const before = JSON.stringify((await getList()).map((i) => [i.id, i.section, i.done]).sort());
+    const tomorrow = () => { const Real = Date; class Shifted extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + 86400000); } static now() { return Real.now() + 86400000; } } window.Date = Shifted; };
+    const page = await open({ ready: '#empty:not([hidden])' });
+    await page.waitForTimeout(200);
+    assert.equal(await page.textContent('#empty p'), 'All done for today.');
+    await page.evaluate(tomorrow);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await until(async () => (await page.textContent('#empty p')) === 'Nothing for today.', 3000, 'the empty state to turn over on return');
+    assert.ok(!(await page.evaluate(() => document.getElementById('empty').classList.contains('all-done'))), 'the glyph stayed green');
+
+    // Done open across midnight with nothing touched: the poll draws it again.
+    const done = await open({ ready: '#empty:not([hidden])' });
+    await done.click('#historyBtn');
+    await done.waitForSelector('.dhead');
+    assert.deepEqual(await done.locator('.dhead').allTextContents(), ['Today']);
+    await done.evaluate(tomorrow);
+    await until(async () => (await done.locator('.dhead').allTextContents()).join() === 'Yesterday', 12000, 'the day header to turn over on the poll');
+    assert.deepEqual(await done.evaluate(() => __queue()), [], 'an op was written');
+    assert.deepEqual(await page.evaluate(() => __queue()), [], 'an op was written');
+    assert.equal(JSON.stringify((await getList()).map((i) => [i.id, i.section, i.done]).sort()), before, 'a task moved');
+  });
+
+  await test('B6 first-use nudge: the soft done fill shows under the top row, only with both sheets down, saved once it has played', motion, async (open, motion) => {
+    const ids = await seed([['Nudge me'], ['Second row']]);
+    const page = await open();
+    const fresh = (keepList) => page.evaluate((keepList) => {
+      localStorage.setItem('todo.ui', JSON.stringify({ section: 'today', nudged: false, installOff: false }));
+      if (!keepList) for (const k of Object.keys(localStorage)) if (k.startsWith('todo.v1.')) localStorage.removeItem(k);
+    }, keepList);
+    await fresh(true);
+    await page.reload();
+    await page.waitForSelector('#list .row:not(.skeleton)');
+    const fr = await page.evaluate(async (id) => {
+      const soft = __color('var(--accent-soft)');
+      const stop = __frames(() => {
+        const r = __row(id);
+        if (!r) return { gone: true };
+        const sd = getComputedStyle(r.querySelector('.swipe-done'));
+        return { nudge: r.classList.contains('nudge'), fill: sd.display !== 'none' && sd.backgroundColor === soft, x: __tr(r.querySelector('.row-inner')).x,
+          saved: JSON.parse(localStorage.getItem('todo.ui')).nudged };
+      });
+      setTimeout(__poll, 300); // a quiet poll in the middle does not cut it
+      await new Promise((r) => setTimeout(r, 1900));
+      return stop();
+    }, ids[0]);
+    const end = fr[fr.length - 1];
+    if (motion === 'reduce') {
+      assert.ok(fr.every((f) => !f.nudge && Math.abs(f.x) < 0.5), 'a nudge with reduced motion');
+      return;
+    }
+    const moving = fr.filter((f) => f.x > 1);
+    assert.ok(moving.length >= 3, 'the top row did not nudge');
+    assert.ok(moving.every((f) => f.fill), 'blank under the nudging row');
+    assert.ok(moving.every((f) => !f.saved), 'saved before it had played');
+    assert.ok(end.saved && !end.nudge && Math.abs(end.x) < 0.5, 'not saved, or still nudging, after it played: ' + JSON.stringify(end));
+    await page.reload();
+    await page.waitForSelector('#list .row:not(.skeleton)');
+    await page.waitForTimeout(1500);
+    assert.equal(await page.locator('.row.nudge').count(), 0, 'it nudged a second time');
+
+    // First task from the capture sheet: no nudge behind the sheet, then one once it is down.
+    await resetServer();
+    await fresh(false);
+    await page.reload();
+    await page.waitForSelector('#empty:not([hidden])');
+    await page.tap('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.keyboard.type('My first task');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#list .row:not(.skeleton)');
+    await page.waitForTimeout(900);
+    assert.equal(await page.locator('.row.nudge').count(), 0, 'it nudged behind the sheet');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#capture', { state: 'hidden' });
+    await until(async () => (await page.locator('.row.nudge').count()) === 1, 1500, 'the nudge once the sheet is down');
+    await until(() => page.evaluate(() => JSON.parse(localStorage.getItem('todo.ui')).nudged), 2500, 'the nudge to be saved');
+  });
+
+  await test('B10 Done paging: the next page goes in at the sentinel, the rows there stay, one header per day, one observed sentinel', motion, async (open) => {
+    await seed([['An open task']]);
+    const t0 = Date.now();
+    const ops = Array.from({ length: 350 }, (_, i) => ({ op: 'upsert', item: { id: nid(), text: 'Done number ' + (i + 1), section: 'today', done: true, doneAt: t0 - 1000 - i * 4000, updatedAt: t0 - 1000 - i * 4000, pos: t0 - i } }));
+    for (let i = 0; i < ops.length; i += 150) await postOps(ops.slice(i, i + 150));
+    const page = await open();
+    await page.click('#historyBtn');
+    await page.waitForSelector('.drow');
+    await page.waitForTimeout(400);
+    const s0 = await page.evaluate(() => {
+      window.__firstDone = document.querySelector('.drow');
+      window.__lastDone = [...document.querySelectorAll('.drow')].pop();
+      return { rows: document.querySelectorAll('.drow').length, more: !!document.querySelector('.dmore') };
+    });
+    assert.deepEqual(s0, { rows: 300, more: true });
+    await until(async () => (await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); return document.querySelectorAll('.drow').length; })) === 350, 8000, 'the second page');
+    await page.waitForTimeout(300);
+    const s = await page.evaluate(() => {
+      const heads = [...document.querySelectorAll('.dhead')].map((h) => h.textContent);
+      const rows = [...document.querySelectorAll('.drow')];
+      return { kept: __firstDone.isConnected && __lastDone.isConnected, heads, rows: rows.length, ids: new Set(rows.map((r) => r.dataset.id)).size,
+        order: rows.every((r, i) => r.querySelector('.dtext').textContent === 'Done number ' + (i + 1)), more: !!document.querySelector('.dmore'), io: __ioMax };
+    });
+    assert.ok(s.kept, 'the first page was drawn again');
+    assert.equal(new Set(s.heads).size, s.heads.length, 'a day header twice: ' + s.heads.join(', '));
+    assert.deepEqual([s.rows, s.ids, s.order, s.more], [350, 350, true, false]);
+    // A poll with nothing new leaves the rows alone, and the observer never holds more than one sentinel.
+    await page.evaluate(() => __poll());
+    await page.waitForTimeout(800);
+    assert.ok(await page.evaluate(() => __firstDone.isConnected), 'a quiet poll drew Done again');
+    await page.click('#closeDone');
+    await page.waitForTimeout(300);
+    await page.click('#historyBtn');
+    await page.waitForSelector('.dmore', { state: 'attached' });
+    await page.evaluate(() => __poll());
+    await page.waitForTimeout(600);
+    assert.ok((await page.evaluate(() => __ioMax)) <= 1, 'the observer held several sentinels');
+  });
+
+  await test('C6 calm desktop hovers: in at once, out over --dur-press; Done rows get the surface card; --hover token', motion, async (open) => {
+    const t0 = Date.now();
+    const ids = await seed([['Hover row'], ['Done one', 'today', { done: true, doneAt: t0 - 60000 }], ['Done two', 'today', { done: true, doneAt: t0 - 120000 }]]);
+    const desk = await open({ desktop: true });
+    assert.equal(await desk.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--hover').trim()), 'rgba(127, 127, 127, 0.08)');
+    // Hover in: the colour is there at once. Out: it fades.
+    const hoverFade = async (sel, want) => {
+      await desk.hover(sel);
+      const inNow = await desk.evaluate(([sel, want]) => { const el = document.querySelector(sel); const cs = getComputedStyle(el); return { bg: cs.backgroundColor === __color(want), dur: cs.transitionDuration, prop: cs.transitionProperty }; }, [sel, want]);
+      assert.ok(inNow.bg, sel + ' hover colour not there at once');
+      assert.ok(/(^|, )0s/.test(inNow.dur), sel + ' hover-in duration ' + inNow.dur);
+      await desk.evaluate((sel) => { const el = document.querySelector(sel); window.__stopBg = __frames(() => ({ bg: getComputedStyle(el).backgroundColor })); }, sel);
+      await desk.mouse.move(1400, 880);
+      await desk.waitForTimeout(300);
+      const fr = await desk.evaluate(() => __stopBg());
+      const from = fr[0].bg, to = fr[fr.length - 1].bg;
+      assert.notEqual(from, to, sel + ' kept its hover colour');
+      assert.ok(fr.filter((f) => f.bg !== from && f.bg !== to).length >= 2, sel + ' hover-out snapped: ' + fr.map((f) => f.bg).join(' '));
+      const out = await desk.evaluate((sel) => getComputedStyle(document.querySelector(sel)).transitionDuration, sel);
+      assert.ok(/0\.14s/.test(out), sel + ' rest duration ' + out);
+    };
+    await hoverFade('.nav-item[data-section="soon"]', 'var(--hover)');
+    await hoverFade(`.row[data-id="${ids[0]}"] .row-inner`, 'var(--surface)');
+    await desk.click('.nav-item[data-section="done"]');
+    await desk.waitForSelector('.drow');
+    await desk.waitForTimeout(400);
+    const d = await desk.evaluate((id) => {
+      const li = document.querySelector(`.drow[data-id="${id}"]`), head = document.querySelector('.dhead');
+      const range = document.createRange(); range.selectNodeContents(head);
+      return { radius: getComputedStyle(li).borderRadius, check: li.querySelector('.dcheck').getBoundingClientRect().left, head: range.getBoundingClientRect().left,
+        card: li.getBoundingClientRect().left, col: document.querySelector('.col').getBoundingClientRect().left, cursor: getComputedStyle(li).cursor };
+    }, ids[1]);
+    assert.equal(d.radius, '10px');
+    assert.equal(d.cursor, 'pointer');
+    assert.ok(Math.abs(d.check - d.head) < 0.5, 'the done check moved off the header line: ' + JSON.stringify(d));
+    assert.ok(Math.abs(d.check - d.card - 12) < 0.5 && Math.abs(d.card - d.col) < 0.5, 'the hover card is not 12px round the check: ' + JSON.stringify(d));
+    await hoverFade(`.drow[data-id="${ids[1]}"]`, 'var(--surface)');
+  });
+
+  await test('C7 the Done check is the desktop circle size (22px, 14px tick); the phone keeps 24px', motion, async (open) => {
+    const t0 = Date.now();
+    await seed([['Open row'], ['Done row', 'today', { done: true, doneAt: t0 - 60000 }]]);
+    const size = (p, sel) => p.evaluate((sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return [r.width, r.height]; }, sel);
+    const desk = await open({ desktop: true });
+    assert.deepEqual(await size(desk, '#list .circle'), [22, 22]);
+    await desk.click('.nav-item[data-section="done"]');
+    await desk.waitForSelector('.drow');
+    await desk.waitForTimeout(400);
+    assert.deepEqual(await size(desk, '.dcheck'), [22, 22], 'desktop done check');
+    assert.deepEqual(await size(desk, '.dcheck .ic'), [14, 14], 'desktop done tick');
+    const page = await open();
+    await page.click('#historyBtn');
+    await page.waitForSelector('.drow');
+    await page.waitForTimeout(400);
+    assert.deepEqual(await size(page, '.dcheck'), [24, 24], 'phone done check');
+  });
+
+  await test('C8 install card: running text; each glyph keeps its comma or full stop, with no space before it', motion, async (open) => {
+    await seed([['A task']]);
+    for (const width of [390, 320]) {
+      const page = await open({ size: { width, height: 700 } });
+      const r = await page.evaluate(() => {
+        const card = document.getElementById('install');
+        card.hidden = false;
+        const text = card.querySelector('.install-text');
+        const out = { display: getComputedStyle(text).display, words: text.textContent.replace(/\s+/g, ' ').trim(), pairs: [] };
+        for (const nw of text.querySelectorAll('.nowrap')) {
+          const g = nw.querySelector('.glyph'), gb = g.getBoundingClientRect();
+          const node = [...nw.childNodes].find((n) => n.nodeType === 3);
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const p = range.getBoundingClientRect();
+          out.pairs.push({ punct: node.textContent, gap: Math.round((p.left - gb.right) * 10) / 10, line: Math.abs(p.bottom - gb.bottom) < 10, va: getComputedStyle(g).verticalAlign, ws: getComputedStyle(nw).whiteSpace });
+        }
+        card.hidden = true;
+        return out;
+      });
+      assert.equal(r.display, 'block');
+      assert.equal(r.words, 'Tap Share , then Add to Home Screen .', 'words (the space sits before each glyph, not after it)');
+      assert.deepEqual(r.pairs.map((p) => p.punct), [',', '.']);
+      for (const p of r.pairs) {
+        assert.ok(p.gap > -0.6 && p.gap < 1.5, width + 'px: space before "' + p.punct + '": ' + p.gap);
+        assert.ok(p.line, width + 'px: "' + p.punct + '" left its glyph');
+        assert.equal(p.va, '-3px');
+        assert.equal(p.ws, 'nowrap');
+      }
+    }
+  });
+
+  await test('C9 landscape: side gutters come from the safe areas (16px at least) on the header, rows, switcher, add button and toast', motion, async (open) => {
+    const [id] = await seed([['Landscape row'], ['Second row']]);
+    const page = await open({ size: { width: 844, height: 390 } });
+    await page.evaluate((id) => __tap(id), id);
+    await page.waitForSelector('#toast:not([hidden])');
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => {
+      const b = (sel) => document.querySelector(sel).getBoundingClientRect();
+      const cs = (sel) => getComputedStyle(document.querySelector(sel));
+      const rules = [...document.styleSheets[0].cssRules].filter((x) => x.selectorText);
+      const rule = (sel) => rules.find((x) => x.selectorText === sel);
+      const root = rules.find((x) => x.selectorText === ':root');
+      return {
+        top: [cs('.top').paddingLeft, cs('.top').paddingRight], row: [cs('#list .row-inner').paddingLeft, cs('#list .row-inner').paddingRight],
+        switcher: [b('#switcher').left, innerWidth - b('#switcher').right], fab: innerWidth - b('#fab').right, toast: [b('#toast').left, innerWidth - b('#toast').right],
+        gut: [root.style.getPropertyValue('--gut-l').trim(), root.style.getPropertyValue('--gut-r').trim()],
+        css: [rule('.switcher').style.left, rule('.switcher').style.right, rule('.fab').style.right, rule('.toast').style.left, rule('.toast').style.right],
+      };
+    });
+    assert.deepEqual(r.gut, ['max(16px, env(safe-area-inset-left))', 'max(16px, env(safe-area-inset-right))']);
+    assert.deepEqual(r.css, ['var(--gut-l)', 'var(--gut-r)', 'var(--gut-r)', 'var(--gut-l)', 'calc(var(--gut-r) + 68px)']);
+    assert.deepEqual(r.top, ['16px', '16px']);
+    assert.deepEqual(r.row, ['16px', '16px']);
+    assert.deepEqual(r.switcher, [16, 16]);
+    assert.equal(r.fab, 16);
+    assert.deepEqual(r.toast, [16, 84]);
+  });
+
+  await test('Keys: N right after Escape closes the edit sheet opens the add field while the sheet is still leaving', motion, async (open) => {
+    const [id] = await seed([['Edit then add'], ['Second']]);
+    const desk = await open({ desktop: true });
+    await desk.evaluate((id) => __row(id).focus(), id);
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(300);
+    await desk.keyboard.press('Escape');
+    await desk.keyboard.press('n');
+    const r = await desk.evaluate(() => ({ leaving: !document.getElementById('edit').hidden, inline: !document.getElementById('inlineAdd').hidden, focus: document.activeElement.id, value: document.getElementById('inlineInput').value }));
+    assert.ok(r.leaving, 'the sheet had already gone, so this did not test a leaving sheet');
+    assert.deepEqual([r.inline, r.focus, r.value], [true, 'inlineInput', ''], 'N was ignored');
+    await desk.keyboard.type('Added after Escape');
+    await desk.keyboard.press('Enter');
+    await serverHas((i) => i.text === 'Added after Escape' && i.section === 'today', 'added on server');
   });
 }
 

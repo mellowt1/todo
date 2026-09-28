@@ -82,6 +82,17 @@
     while (pts.length && t - pts[0].t > 100) pts.shift();
   }
 
+  /* ---------- One quiet live region ---------- */
+  // #say is the only thing a screen reader hears by itself. Emptied first and filled a frame
+  // later, so the same words twice are read twice.
+  let sayFrame = 0;
+  function say(text) {
+    const el = $('say');
+    cancelAnimationFrame(sayFrame);
+    el.textContent = '';
+    sayFrame = requestAnimationFrame(() => { el.textContent = text; });
+  }
+
   /* ---------- Storage (every access guarded; private mode can throw) ---------- */
   const store = {
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
@@ -328,18 +339,21 @@
 
   let pillTimer = 0;
   function setNet(s) {
+    const was = net;
     net = s;
     const pill = $('pill');
     const span = pill.querySelector('span');
     const use = pill.querySelector('use');
     clearTimeout(pillTimer);
     if (s === 'error') slotIn($('banner')); else slotOut($('banner'));
+    if (s === 'error' && was !== 'error') say($('banner').querySelector('span').textContent);
     if (s === 'offline' || s === 'error') trouble = true;
     if (s === 'offline') {
       const n = st.queue.length;
       span.textContent = n ? 'Offline. ' + n + (n === 1 ? ' change' : ' changes') + ' waiting' : 'Offline';
       use.setAttribute('href', '#i-offline');
       slotIn(pill);
+      if (was !== 'offline') say(span.textContent); // routine sync is never announced, only trouble
     } else if (s === 'syncing') {
       span.textContent = 'Syncing';
       use.setAttribute('href', '#i-sync');
@@ -420,14 +434,39 @@
       '<div class="swipe-done" aria-hidden="true"><svg class="ic ic-2" width="24" height="24"><use href="#i-check"/></svg></div>' +
       '<div class="swipe-move"><span class="move-group">' + moves + '</span></div>' +
       '<div class="row-inner">' +
-      '<button class="circle" aria-label="Mark done"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></button>' +
-      '<div class="text">' + esc(it.text) + '</div>' +
-      '<button class="move-btn" aria-label="Move task"><svg class="ic" width="20" height="20"><use href="#i-move"/></svg></button>' +
+      '<button class="circle" aria-label="Mark done" aria-describedby="t-' + it.id + '"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></button>' +
+      '<div class="text" id="t-' + it.id + '" role="button">' + esc(it.text) + '</div>' +
+      '<button class="move-btn" aria-label="Move task" aria-describedby="t-' + it.id + '" aria-haspopup="menu" aria-expanded="false"><svg class="ic" width="20" height="20"><use href="#i-move"/></svg></button>' +
       '</div></li>';
   }
 
   const DONE_PAGE = 300;
   let doneShown = DONE_PAGE;
+  const MORE = '<li class="dmore" aria-hidden="true" style="height:1px"></li>';
+  const doneList = () => Object.values(items).filter((i) => i.done).sort((a, b) => b.doneAt - a.doneAt);
+  // Done rows from..to, with a day header wherever the day changes from last. Each row is a
+  // real button, described by its section and time as they show.
+  function doneRows(done, from, to, last) {
+    let html = '';
+    for (const it of done.slice(from, to)) {
+      const label = dayLabel(it.doneAt);
+      if (label !== last) { html += '<li class="dhead">' + label + '</li>'; last = label; }
+      const t = new Date(it.doneAt);
+      html += '<li class="drow" data-id="' + it.id + '">' +
+        '<button class="dbtn" aria-label="Reopen ' + esc(it.text) + '" aria-describedby="ds-' + it.id + ' dt-' + it.id + '">' +
+        '<span class="dcheck" aria-hidden="true"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span>' +
+        '<span class="dbody"><span class="dtext">' + esc(it.text) + '</span><span class="meta" id="ds-' + it.id + '">' + LABEL[it.section] + '</span></span>' +
+        '<span class="meta dtime" id="dt-' + it.id + '">' + pad(t.getHours()) + ':' + pad(t.getMinutes()) + '</span></button></li>';
+    }
+    return html;
+  }
+  // I7: a task from Today finished since local midnight.
+  const ALL_DONE = 'All done for today.';
+  function doneToday(all) {
+    const d = new Date();
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    return all.some((i) => i.done && i.section === 'today' && i.doneAt >= midnight);
+  }
 
   // The chrome (title, counts, controls) always updates at once. The list waits while a
   // row animates out, a finger is on a row, the move menu is open or a row shows its
@@ -451,7 +490,9 @@
     $('title').textContent = view === 'done' ? 'Done' : LABEL[ui.section];
     document.title = view === 'done' ? 'Done' : 'To-do';
 
-    for (const b of document.querySelectorAll('#switcher button')) b.setAttribute('aria-selected', String(b.dataset.section === ui.section));
+    for (const b of document.querySelectorAll('#switcher button')) {
+      if (b.dataset.section === ui.section) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    }
     for (const b of document.querySelectorAll('.nav-item')) {
       const on = view === 'done' ? b.dataset.section === 'done' : b.dataset.section === ui.section;
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -466,6 +507,7 @@
   let shownKey = '';       // what the list shows: 'skeleton', 'done' or a section
   let pendingFocus = null; // a row id that takes focus in the next write (Undo pressed from the keyboard)
   const byId = (id) => $('list').querySelector('[data-id="' + CSS.escape(id) + '"]');
+  const focusRow = (el) => (el.querySelector('.dbtn') || el).focus({ preventScroll: true });
   // The next row that stays, else the one above: where focus goes when a row leaves.
   function neighbour(el) {
     const stays = (n) => n.dataset.id && !gone(n);
@@ -495,22 +537,13 @@
       ids = new Set(rows.map((it) => it.id));
       html = rows.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
       if (!rows.length) {
-        emptyText = all.length ? EMPTY[ui.section]
-          : desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.';
+        emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
+          : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];
       }
     } else {
-      const done = all.filter((i) => i.done).sort((a, b) => b.doneAt - a.doneAt);
-      let last = '';
-      for (const it of done.slice(0, doneShown)) {
-        const label = dayLabel(it.doneAt);
-        if (label !== last) { html += '<li class="dhead" aria-hidden="true">' + label + '</li>'; last = label; }
-        const t = new Date(it.doneAt);
-        html += '<li class="drow" data-id="' + it.id + '" tabindex="-1" role="button" aria-label="Reopen ' + esc(it.text) + '">' +
-          '<span class="dcheck"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span>' +
-          '<div class="dbody"><div class="dtext">' + esc(it.text) + '</div><div class="meta">' + LABEL[it.section] + '</div></div>' +
-          '<div class="meta dtime">' + pad(t.getHours()) + ':' + pad(t.getMinutes()) + '</div></li>';
-      }
-      if (done.length > doneShown) html += '<li class="dmore" aria-hidden="true" style="height:1px"></li>';
+      const done = doneList();
+      html = doneRows(done, 0, doneShown, '');
+      if (done.length > doneShown) html += MORE;
       if (!done.length) emptyText = 'Done tasks will show up here.';
     }
 
@@ -532,6 +565,7 @@
     const emptyWas = !empty.hidden;
     empty.hidden = !emptyText;
     empty.querySelector('p').textContent = emptyText;
+    empty.classList.toggle('all-done', emptyText === ALL_DONE);
     // The empty state arrives a moment after the last row has gone, rising 4px.
     if (same && emptyText && !emptyWas) {
       play(empty, [{ opacity: 0, transform: 'translateY(' + 4 * M.dist + 'px)' }, { opacity: 1, transform: 'none' }], { delay: 60, fill: 'backwards' });
@@ -581,12 +615,14 @@
       for (let j = i + 1; !target && j < order.length; j++) target = byId(order[j]);
       for (let j = i - 1; !target && j >= 0; j--) target = byId(order[j]);
     }
-    if (target) target.focus({ preventScroll: true });
+    if (target) focusRow(target);
     pendingFocus = null;
 
     const more = list.querySelector('.dmore');
+    moreObserver.disconnect();
     if (more) moreObserver.observe(more);
-    maybeNudge();
+    // B6: the first list with rows after load.
+    if (!nudgeSeen && ids && ids.size) { nudgeSeen = true; maybeNudge(); }
   }
 
   // The list's content changed wholesale. A section switch fades it in with no slide and no
@@ -601,17 +637,42 @@
   }
 
   const moreObserver = new IntersectionObserver((entries) => {
-    if (entries.some((e) => e.isIntersecting)) { doneShown += DONE_PAGE; render(); }
+    if (entries.some((e) => e.isIntersecting)) moreDone();
   });
+  // The next page of Done goes in at the sentinel, and the rows already there stay as they are.
+  // A day split across the pages keeps its one header. When the list is behind the model
+  // (a change waits to be drawn), the whole list is drawn instead.
+  function moreDone() {
+    const list = $('list');
+    const more = list.querySelector('.dmore');
+    if (!more || view !== 'done' || shownKey !== 'done') return;
+    const done = doneList();
+    const next = doneShown + DONE_PAGE;
+    if (lastHtml !== doneRows(done, 0, doneShown, '') + MORE) { doneShown = next; render(); return; }
+    const heads = list.querySelectorAll('.dhead');
+    moreObserver.disconnect();
+    more.insertAdjacentHTML('beforebegin', doneRows(done, doneShown, next, heads.length ? heads[heads.length - 1].textContent : ''));
+    doneShown = next;
+    const again = done.length > doneShown;
+    if (again) moreObserver.observe(more); else more.remove();
+    lastHtml = doneRows(done, 0, doneShown, '') + (again ? MORE : '');
+  }
 
+  // First use: the top row slides a little way right over the soft done fill, once. Only with
+  // both sheets down, so it is seen; it counts as shown once it has played to the end.
+  let nudgeSeen = false;
   function maybeNudge() {
-    if (ui.nudged || view !== 'list' || desk.matches || matchMedia('(hover: hover)').matches) return;
+    if (ui.nudged || M.reduced || view !== 'list' || desk.matches || matchMedia('(hover: hover)').matches) return;
+    if (!$('capture').hidden || !$('edit').hidden) return;
     const first = $('list').querySelector('.row:not(.skeleton)');
-    if (!first) return;
-    ui.nudged = true;
-    saveUi();
-    lastHtml = null;
+    if (!first || first.classList.contains('nudge')) return;
     first.classList.add('nudge');
+    first.addEventListener('animationend', (e) => {
+      if (e.animationName !== 'nudge') return;
+      first.classList.remove('nudge');
+      ui.nudged = true;
+      saveUi();
+    });
   }
 
   /* ---------- Install card (Safari on iPhone only, before install) ---------- */
@@ -710,6 +771,7 @@
   const toastHeld = { pointer: false, focus: false }; // the timer waits while either is true
   function toast(text, undo, id) {
     const tx = $('toastText');
+    say(text);
     undoFn = undo;
     undoId = id || null;
     if (toastOn && !toastEl.hidden) {
@@ -764,7 +826,8 @@
   toastEl.addEventListener('pointerleave', () => holdToast('pointer', false));
   toastEl.addEventListener('focusin', () => holdToast('focus', true));
   toastEl.addEventListener('focusout', (e) => { if (!toastEl.contains(e.relatedTarget)) holdToast('focus', false); });
-  $('toastUndo').addEventListener('click', () => {
+  // The toast's Undo, from its button or Ctrl/Cmd+Z. Only while the toast is up.
+  function undo() {
     const f = undoFn;
     const id = undoId;
     if (!f) return;
@@ -775,7 +838,9 @@
     }
     hideToast();
     f();
-  });
+    say('Undone.');
+  }
+  $('toastUndo').addEventListener('click', undo);
 
   /* ---------- Row animations ---------- */
   // The op is written at the tap. A leaving lock then keeps the old row on screen while
@@ -1183,13 +1248,13 @@
     closeReveal();
     const it = items[row.dataset.id];
     if (!it) return;
-    if (menuRow && menuRow !== row) menuRow.classList.remove('menu-open');
+    if (menuRow && menuRow !== row) expand(menuRow, false);
     menuRow = row;
     menuOn = true;
     menuOpener = anchor || row;
-    row.classList.add('menu-open');
+    expand(row, true);
     menu.innerHTML = '<div class="meta menu-title">Move to</div>' + SECTIONS.map((s) =>
-      '<button class="sec" role="menuitem" data-move="' + s + '"' + (s === it.section ? ' aria-current="true"' : '') + '>' + LABEL[s] + '</button>').join('');
+      '<button class="sec" role="menuitem" data-move="' + s + '"' + (s === it.section ? ' aria-current="true" aria-disabled="true"' : '') + '>' + LABEL[s] + '</button>').join('');
     rest(menu); // a menu still leaving comes back
     menu.classList.remove('leaving');
     menu.hidden = false;
@@ -1208,13 +1273,20 @@
     const first = menu.querySelector('button.sec:not([aria-current])');
     if (first && !(g && g.touch)) first.focus({ preventScroll: true });
   }
-  function closeMenu() {
+  // The row lights up and its move button says the menu is open.
+  function expand(row, on) {
+    row.classList.toggle('menu-open', on);
+    const b = row.querySelector('.move-btn');
+    if (b) b.setAttribute('aria-expanded', String(on));
+  }
+  // refocus false: focus has already gone somewhere else and stays there.
+  function closeMenu(refocus = true) {
     if (!menuOn) return;
     menuOn = false;
-    const back = menu.contains(document.activeElement) ? menuOpener : null;
+    const back = refocus && menu.contains(document.activeElement) ? menuOpener : null;
     const row = menuRow;
     menuOpener = null;
-    if (menuRow) menuRow.classList.remove('menu-open');
+    if (menuRow) expand(menuRow, false);
     menuRow = null;
     menu.classList.add('leaving');
     leave(menu, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: menuScale() }]).then((ok) => {
@@ -1247,6 +1319,10 @@
       swallow(400);
     }
   }, true);
+  // Focus moving out of the menu closes it (Tab is handled with the keys).
+  menu.addEventListener('focusout', (e) => {
+    if (menuOn && e.relatedTarget && !menu.contains(e.relatedTarget)) closeMenu(false);
+  });
 
   /* ---------- Sheets ---------- */
   // The sheets and the confirm are modal: what is behind them goes inert, and focus goes
@@ -1323,6 +1399,7 @@
         rest(scrim);
       }
       if (after) after();
+      maybeNudge();
     });
   }
 
@@ -1475,6 +1552,7 @@
       capAdded.push(v);
       addCapLine(v);
       capInput.value = '';
+      say('Added to ' + LABEL[ui.section] + '.');
     } else if (e.key === 'Escape') {
       e.stopPropagation();
       closeCapture();
@@ -1513,6 +1591,7 @@
   inlineInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
+      if (cleanText(inlineInput.value)) say('Added to ' + LABEL[ui.section] + '.');
       addTask(inlineInput.value);
       inlineInput.value = '';
     } else if (e.key === 'Escape') {
@@ -1546,8 +1625,22 @@
     else $('editClose').focus({ preventScroll: true }); // on the phone the keyboard waits for a tap in the text
   }
   function paintEditSeg(section) {
-    for (const b of document.querySelectorAll('#editSeg button')) b.setAttribute('aria-checked', String(b.dataset.section === section));
+    for (const b of document.querySelectorAll('#editSeg button')) {
+      const on = b.dataset.section === section;
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1; // one tab stop; the arrows move inside
+    }
   }
+  $('editSeg').addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const bs = Array.from($('editSeg').querySelectorAll('button'));
+    const i = Math.max(0, bs.indexOf(document.activeElement));
+    const b = bs[(i + step + bs.length) % bs.length];
+    b.focus();
+    b.click(); // a radio group: the arrow picks as it moves
+  });
   function saveEditText() {
     clearTimeout(editTimer);
     const it = items[editId];
@@ -1637,7 +1730,15 @@
 
   /* ---------- Keyboard (desktop) ---------- */
   function rows() { return Array.from(list.querySelectorAll(view === 'done' ? '.drow' : '.row:not(.skeleton)')); }
+  const isField = (el) => !!el && (/^(input|textarea|select)$/i.test(el.tagName || '') || el.isContentEditable);
+  // A sheet or the confirm on its way out takes no more keys, so N works right after Escape.
+  const shown = (wrap) => !wrap.hidden && !closingSheets.has(wrap.querySelector('.sheet'));
   document.addEventListener('keydown', (e) => {
+    // Ctrl/Cmd+Z is the toast's Undo, only while the toast shows and never in a field.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key || '').toLowerCase() === 'z') {
+      if (!isField(e.target) && toastOn && undoFn && !modals.size) { e.preventDefault(); undo(); }
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') {
       if (!confirmWrap.hidden) { closeConfirm(); return; }
@@ -1648,19 +1749,28 @@
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || !$('edit').hidden || !$('capture').hidden || !$('confirm').hidden) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
+      const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        const bs = Array.from(menu.querySelectorAll('button.sec'));
         const i = bs.indexOf(document.activeElement);
         bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length].focus();
         e.preventDefault();
+      } else if (e.key === 'Home' || e.key === 'End') {
+        bs[e.key === 'Home' ? 0 : bs.length - 1].focus();
+        e.preventDefault();
+      } else if (e.key === '1' || e.key === '2' || e.key === '3') {
+        e.preventDefault();
+        const b = bs[Number(e.key) - 1];
+        if (b && !b.hasAttribute('aria-current')) b.click();
+      } else if (e.key === 'Tab') {
+        closeMenu(); // focus goes back to the opener, and Tab moves on from there
       }
       return;
     }
     const k = e.key;
     if (k === 'n' || k === 'N') { e.preventDefault(); openAdd(); return; }
-    if (k === '1' || k === '2' || k === '3') { setSection(SECTIONS[Number(k) - 1]); return; }
+    if (k === '1' || k === '2' || k === '3') { setSection(SECTIONS[Number(k) - 1]); say(LABEL[SECTIONS[Number(k) - 1]]); return; }
     if (k === 'ArrowDown' || k === 'ArrowUp') {
       const rs = rows();
       if (!rs.length) return;
@@ -1668,13 +1778,19 @@
       const cur = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.row, .drow') : null;
       let i = rs.indexOf(cur);
       i = i < 0 ? (k === 'ArrowDown' ? 0 : rs.length - 1) : Math.max(0, Math.min(rs.length - 1, i + (k === 'ArrowDown' ? 1 : -1)));
-      rs[i].focus();
+      focusRow(rs[i]);
       rs[i].scrollIntoView({ block: 'nearest' });
       return;
     }
     const focused = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.row, .drow') : null;
     if (!focused) return;
     if (view === 'done' && (k === 'Enter' || k === ' ')) { e.preventDefault(); reopenRow(focused); return; }
+    if ((k === 'm' || k === 'M') && view === 'list') {
+      e.preventDefault();
+      openMenu(focused, desk.matches ? focused.querySelector('.move-btn') : null);
+      if (menuOn) menuOpener = e.target; // Escape goes back to where M was pressed
+      return;
+    }
     if (k === 'Enter' && e.target === focused) { e.preventDefault(); openEdit(focused.dataset.id); return; }
     if (k === ' ' && e.target === focused) {
       e.preventDefault();
@@ -1686,7 +1802,15 @@
   let pollTimer = 0;
   function startPolling() {
     clearInterval(pollTimer);
-    pollTimer = setInterval(poll, POLL);
+    pollTimer = setInterval(() => { newDay(); poll(); }, POLL);
+  }
+  // Past midnight the day labels and the Today empty state are drawn again. No task moves.
+  let lastDay = new Date().toDateString();
+  function newDay() {
+    const d = new Date().toDateString();
+    if (d === lastDay) return;
+    lastDay = d;
+    render();
   }
   document.addEventListener('visibilitychange', () => {
     closeReveal();
@@ -1697,6 +1821,7 @@
       clearInterval(pollTimer);
       if (st.queue.length) flush(true); // send before iOS freezes the page
     } else {
+      newDay();
       poll();
       startPolling();
     }

@@ -24,3 +24,6 @@ screenshots/motion/
 
 # Before and after look set for sign-off (npm run lookset)
 screenshots/lookset/
+
+# Release 4 AFTER screenshots for Paul
+screenshots/r4/
