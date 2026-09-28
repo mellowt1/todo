@@ -21,3 +21,6 @@ screenshots/webkit/
 
 # Motion videos recorded for review before a push
 screenshots/motion/
+
+# Before and after look set for sign-off (npm run lookset)
+screenshots/lookset/

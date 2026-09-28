@@ -49,14 +49,18 @@
       <div class="title-row">
         <h1 id="title">Today</h1>
         <button id="historyBtn" class="icon-btn phone-only list-only" aria-label="Done history"><svg class="ic" width="24" height="24"><use href="#i-clock"/></svg></button>
-        <button id="closeDone" class="text-btn big phone-only done-only">Close</button>
+        <button id="closeDone" class="text-btn phone-only done-only">Close</button>
         <button id="addDesk" class="add-desk desk-only list-only" aria-label="Add task"><svg class="ic ic-2" width="20" height="20"><use href="#i-plus"/></svg></button>
       </div>
-      <div id="pill" class="pill" role="status" hidden><svg class="ic" width="16" height="16"><use href="#i-offline"/></svg><span></span></div>
-      <div id="banner" class="banner" hidden>
-        <span>Could not sync. Your changes are saved on this device.</span>
-        <button id="retry" class="text-btn">Retry</button>
-      </div>
+      <div id="pillSlot" class="slot"><div class="slot-clip">
+        <div id="pill" class="pill" role="status" hidden><svg class="ic" width="16" height="16"><use href="#i-offline"/></svg><span></span></div>
+      </div></div>
+      <div id="bannerSlot" class="slot"><div class="slot-clip">
+        <div id="banner" class="banner" hidden>
+          <span>Could not sync. Your changes are saved on this device.</span>
+          <button id="retry" class="text-btn">Retry</button>
+        </div>
+      </div></div>
     </header>
 
     <div id="inlineSlot" class="inline-slot"><div class="inline-clip">
@@ -106,9 +110,9 @@
   <div class="scrim" data-close></div>
   <div class="sheet capture-sheet" role="dialog" aria-label="New task">
     <div class="grabber"></div>
-    <div class="cap-head">
+    <div class="sheet-head">
       <label for="capInput" id="capLabel" class="meta">Adds to Today</label>
-      <button id="capDone" class="text-btn">Done</button>
+      <button id="capDone" class="text-btn">Close</button>
     </div>
     <ul id="capAdded" class="cap-added" aria-live="polite"></ul>
     <div class="cap-row">
@@ -122,8 +126,10 @@
   <div class="scrim" data-close></div>
   <div class="sheet edit-sheet" role="dialog" aria-label="Edit task">
     <div class="grabber"></div>
-    <div class="edit-head"><button id="editClose" class="text-btn big">Close</button></div>
-    <label for="editText" class="meta">Task</label>
+    <div class="sheet-head">
+      <label for="editText" class="meta">Task</label>
+      <button id="editClose" class="text-btn">Close</button>
+    </div>
     <textarea id="editText" rows="3" maxlength="500" autocapitalize="sentences"></textarea>
     <div class="meta">Section</div>
     <div id="editSeg" class="seg" role="radiogroup" aria-label="Section">

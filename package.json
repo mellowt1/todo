@@ -10,7 +10,8 @@
     "check": "node scripts/check.mjs",
     "check:webkit": "node scripts/check.mjs --webkit",
     "feel": "node scripts/feel.mjs",
-    "feel:webkit": "node scripts/feel.mjs --webkit"
+    "feel:webkit": "node scripts/feel.mjs --webkit",
+    "lookset": "node scripts/lookset.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

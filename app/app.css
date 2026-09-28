@@ -7,7 +7,7 @@
   --text: #1C1C1E;
   --secondary: #6E6E73;
   --sep: #E5E5EA;
-  --ring: #C7C7CC;
+  --ring: #A1A1A6;          /* darker than the canvas #C7C7CC so the circle shows in sunlight (C10b) */
   --accent: #3F7D5C;        /* fills: add button, active segment, swipe, done check */
   --accent-text: #3F7D5C;   /* text, focus rings, caret */
   --accent-soft: rgba(63, 125, 92, 0.14);
@@ -27,6 +27,10 @@
   --dur-move: 220ms;   /* rows, sheets, entrances */
   --dur-exit: 180ms;   /* things leaving */
   --dist: 1;           /* 0 under reduced motion: slides become fades */
+  /* Three type sizes per screen; weight and colour carry the rest. */
+  --fs-title: 28px;
+  --fs-body: 17px;
+  --fs-meta: 13px;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -39,7 +43,9 @@
     --secondary: #8E8E93;
     --sep: #2C2C2E;
     --ring: #48484A;
+    --accent: #7DBF98;        /* one green in dark: fills match the text (C10a) */
     --accent-text: #7DBF98;
+    --on-accent: #000000;     /* white on #7DBF98 is about 2:1 */
     --accent-soft: rgba(125, 191, 152, 0.16);
     --danger: #FF6B60;
     --toast: #2C2C2E;
@@ -55,7 +61,7 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
-  font: 17px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  font: var(--fs-body)/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
 }
@@ -65,7 +71,7 @@ input, textarea { font: inherit; color: inherit; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ic { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 .ic-2 { stroke-width: 2; }
-.meta { font-size: 13px; color: var(--secondary); }
+.meta { font-size: var(--fs-meta); color: var(--secondary); }
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: 10px; }
 
@@ -74,22 +80,26 @@ input, textarea { font: inherit; color: inherit; }
 body.view-done .list-only, body.view-list .done-only { display: none !important; }
 
 /* ---------- Header ---------- */
-.top { padding: var(--top) 16px 8px; display: flex; flex-direction: column; gap: 8px; }
+.top { padding: var(--top) 16px 8px; display: flex; flex-direction: column; }
 .title-row { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
-h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
+h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.3px; }
 .icon-btn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--secondary); margin-right: -10px; }
-.text-btn { height: 44px; padding: 0 4px; color: var(--accent-text); font-size: 15px; font-weight: 600; }
-.text-btn.big, #closeDone { font-size: 17px; }
+.text-btn { height: 44px; padding: 0 4px; color: var(--accent-text); font-size: var(--fs-body); font-weight: 600; }
 /* Press feedback (a touchstart listener in app.js lets WebKit apply :active on touch). */
 .seg button, .text-btn, .icon-btn, .toast button, .danger-btn { transition: opacity var(--dur-press) ease; }
 .seg button:active, .text-btn:active, .icon-btn:active, .toast button:active, .danger-btn:active { opacity: 0.55; }
 
+/* The pill and the banner each open in a grid slot under the title (0fr to 1fr, app.js), so the
+   list makes room with a glide and never jumps. The pill does not fit beside "Someday" and the
+   clock at 390px. */
+.slot { display: grid; grid-template-rows: 1fr; }
+.slot-clip { min-height: 0; overflow: hidden; }
 .pill {
-  align-self: flex-start; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
-  border-radius: 14px; background: var(--surface); color: var(--secondary); font-size: 13px;
+  display: flex; width: fit-content; align-items: center; gap: 6px; height: 28px; margin-top: 8px; padding: 0 10px;
+  border-radius: 14px; background: var(--surface); color: var(--secondary); font-size: var(--fs-meta);
 }
-.banner { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; min-height: 44px; border-radius: 12px; background: var(--surface); }
-.banner span { flex: 1; font-size: 13px; padding: 10px 0; }
+.banner { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 0 8px 0 14px; min-height: 44px; border-radius: 12px; background: var(--surface); }
+.banner span { flex: 1; font-size: var(--fs-meta); padding: 10px 0; }
 
 /* ---------- Rows ---------- */
 .list {
@@ -97,8 +107,8 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 }
 .list:empty { padding-bottom: 0; }
 .row { position: relative; overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.row + .row::before { content: ""; position: absolute; z-index: 2; left: 16px; right: 16px; top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
-.row.swipe-r::before, .row.swipe-l::before { left: 0; right: 0; }
+/* Hairlines start at the text, and stay there while a row swipes. */
+.row + .row::before { content: ""; position: absolute; z-index: 2; left: 54px; right: 16px; top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
 .row-inner {
   position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 14px;
   min-height: 52px; padding: 14px 16px; background: var(--bg); touch-action: pan-y;
@@ -110,7 +120,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
   .row.pressing .row-inner { transition: none; }
 }
 .row .text {
-  flex: 1; min-width: 0; font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; cursor: default;
+  flex: 1; min-width: 0; font-size: var(--fs-body); line-height: 1.35; overflow-wrap: anywhere; cursor: default;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   transition: color var(--dur-press) ease;
 }
@@ -143,11 +153,13 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .row.swipe-r .swipe-done, .row.swipe-l .swipe-move { display: flex; }
 .swipe-move { justify-content: flex-end; padding-right: 12px; background: var(--bg); }
 .move-group { display: flex; gap: 6px; }
+/* Where a task can go is neutral; where it is now is dimmed, as in the menu. 13px semibold (the
+   meta size) leaves about 150px of task text at 390px; 17px would leave about 110px. */
 .swipe-move button {
-  height: 36px; padding: 0 12px; border-radius: 9px; background: var(--accent); color: var(--on-accent);
-  font-size: 14px; font-weight: 600;
+  height: 36px; padding: 0 12px; border-radius: 9px; background: var(--surface); color: var(--text);
+  font-size: var(--fs-meta); font-weight: 600;
 }
-.swipe-move button[aria-current] { background: var(--surface); color: var(--secondary); cursor: default; }
+.swipe-move button[aria-current] { color: var(--secondary); cursor: default; }
 /* .sliding and .collapsing mark rows on their way out; app.js animates them. */
 .row.dragging { opacity: 0.4; }
 
@@ -162,8 +174,10 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .skeleton:nth-child(3) .bar { width: 62%; }
 
 /* ---------- Done history ---------- */
-.dhead { padding: 18px 16px 6px; font-size: 13px; font-weight: 600; color: var(--secondary); }
-.drow { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; margin: 0 16px; border-top: 0.5px solid var(--sep); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 68px; }
+.dhead { padding: 18px 16px 6px; font-size: var(--fs-meta); font-weight: 600; color: var(--secondary); }
+.drow { position: relative; display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; margin: 0 16px; cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 68px; }
+/* No line under a day header; the line starts at the text. */
+.drow + .drow::before { content: ""; position: absolute; left: 38px; right: 0; top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
 .dcheck {
   flex-shrink: 0; width: 24px; height: 24px; border-radius: 12px; background: var(--accent); border: 1.5px solid var(--accent);
   color: var(--on-accent); display: flex; align-items: center; justify-content: center;
@@ -172,7 +186,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .dcheck .ic { transition: opacity var(--dur-press) ease; }
 .dbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dtext {
-  font-size: 17px; line-height: 1.35; color: var(--secondary); text-decoration: line-through; overflow-wrap: anywhere;
+  font-size: var(--fs-body); line-height: 1.35; color: var(--secondary); text-decoration: line-through; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   transition: color var(--dur-press) ease, text-decoration-color var(--dur-press) ease;
 }
@@ -187,11 +201,11 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 /* ---------- Empty, install, no code ---------- */
 .empty { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--secondary); padding: 0 32px; margin-top: max(40px, calc(238px - var(--top))); }
 .ic-glyph { stroke-width: 1.25; }
-.empty p { margin: 0; font-size: 17px; text-align: center; }
+.empty p { margin: 0; font-size: var(--fs-body); text-align: center; }
 .install { margin: 40px 16px 0; padding: 16px; border-radius: 14px; background: var(--surface); display: flex; gap: 12px; align-items: flex-start; }
 .install-body { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-.install-title { font-size: 15px; font-weight: 600; }
-.install-text { font-size: 15px; line-height: 1.4; color: var(--secondary); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.install-title { font-size: var(--fs-body); font-weight: 600; }
+.install-text { font-size: var(--fs-body); line-height: 1.4; color: var(--secondary); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .install-text .glyph { color: var(--accent-text); display: inline-flex; }
 .install-close { width: 44px; height: 44px; margin: -10px -10px 0 0; }
 .empty:not([hidden]) + .install { margin-top: 144px; }
@@ -200,9 +214,22 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 .nocode p { margin: 0; max-width: 320px; text-align: center; color: var(--secondary); }
 
 /* ---------- Bottom bar ---------- */
-.seg { display: flex; gap: 4px; height: 44px; padding: 4px; border-radius: 12px; background: var(--surface); }
-.seg button { flex: 1; height: 36px; border-radius: 9px; font-size: 15px; color: var(--text); }
-.seg button[aria-selected="true"], .seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+/* One thumb slides under the labels to the section that is on. --i is its place (0, 1, 2), from
+   aria-selected, aria-checked or aria-current. It only glides once the first paint is done (body.ready),
+   and .instant puts it in place for one frame (the edit sheet opening on another task). */
+.seg { position: relative; display: flex; gap: 4px; height: 44px; padding: 4px; border-radius: 12px; background: var(--surface); --i: 0; }
+.seg:has(> :nth-child(2):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 1; }
+.seg:has(> :nth-child(3):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 2; }
+.seg::before {
+  content: ""; position: absolute; top: 4px; left: 4px; height: 36px; width: calc((100% - 16px) / 3); border-radius: 9px;
+  background: var(--accent); transform: translateX(calc(var(--i) * (100% + 4px)));
+}
+.seg button { position: relative; flex: 1; height: 36px; border-radius: 9px; font-size: var(--fs-body); color: var(--text); }
+.seg button:is([aria-selected="true"], [aria-checked="true"], [aria-current="page"]) { color: var(--on-accent); font-weight: 600; }
+/* The label turns with the thumb, on the same curve, so it never shows white on grey. */
+body.ready .seg::before { transition: transform var(--dur-move) var(--ease); }
+body.ready .seg button { transition: opacity var(--dur-press) ease, color var(--dur-move) var(--ease); }
+body.ready .seg.instant::before, body.ready .seg.instant button { transition: none; }
 .switcher { position: fixed; left: 16px; right: 16px; bottom: var(--bottom); z-index: 10; }
 .fab {
   position: fixed; right: 16px; bottom: calc(var(--bottom) + 60px); z-index: 11; width: 56px; height: 56px; border-radius: 28px;
@@ -219,9 +246,9 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 .toast {
   position: fixed; left: 16px; right: 84px; bottom: calc(var(--bottom) + 60px); z-index: 12; height: 56px; padding: 0 8px 0 16px;
   border-radius: 14px; background: var(--toast); color: var(--toast-text); display: flex; align-items: center; justify-content: space-between;
-  font-size: 15px; animation: toast-in var(--dur-move) var(--ease);
+  font-size: var(--fs-body); animation: toast-in var(--dur-move) var(--ease);
 }
-.toast button { height: 44px; padding: 0 12px; color: var(--toast-accent); font-size: 15px; font-weight: 600; }
+.toast button { height: 44px; padding: 0 12px; color: var(--toast-accent); font-size: var(--fs-body); font-weight: 600; }
 body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button in Done */
 /* On translate, so the desktop centring (transform) is never touched. */
 @keyframes toast-in { from { opacity: 0; translate: 0 calc(12px * var(--dist)); } }
@@ -241,34 +268,35 @@ body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button i
 .sheet.kb-snap { transition-property: transform; }
 .grabber { align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--ring); }
 .cap-row { display: flex; align-items: center; gap: 14px; min-height: 52px; }
-.cap-row input, .inline-add input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 17px; padding: 0; caret-color: var(--accent-text); }
+.cap-row input, .inline-add input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: var(--fs-body); padding: 0; caret-color: var(--accent-text); }
 .capture-sheet { padding-bottom: 16px; }
-.cap-head { display: flex; align-items: center; justify-content: space-between; margin: -6px 0 -10px; }
+/* One header for both sheets: what it is on the left, Close on the right, at the same place. */
+.sheet-head { display: flex; align-items: center; justify-content: space-between; min-height: 44px; margin: -6px 0 -10px; }
+.edit-sheet .sheet-head { margin: -12px 0 -8px; } /* the edit sheet has a wider gap */
 .cap-added { list-style: none; margin: 0; padding: 2px 0 0; display: flex; flex-direction: column; }
 .cap-added:empty { display: none; }
 .cap-added li { display: flex; align-items: center; gap: 14px; min-height: 30px; color: var(--secondary); overflow: hidden; } /* app.js grows each new line */
 .cap-added .ok { width: 24px; display: flex; justify-content: center; color: var(--accent-text); }
-.cap-added .t { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-added .t { flex: 1; min-width: 0; font-size: var(--fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-sheet { gap: 16px; min-height: min(460px, 70vh); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 /* Keyboard up: the sheet fits in what is left of the screen, so Close stays on it. */
 .edit-sheet.kb { min-height: 0; max-height: calc(var(--vvh) - env(safe-area-inset-top) - 12px); padding-bottom: 16px; }
-.edit-head { display: flex; justify-content: flex-end; margin: -6px 0 -10px; }
-.edit-sheet .meta { margin-bottom: -8px; }
+.edit-sheet > .meta { margin-bottom: -8px; }
 textarea#editText {
-  border: 0; outline: none; resize: none; font-size: 17px; line-height: 1.35; background: var(--field); border-radius: 12px; padding: 12px 14px;
+  border: 0; outline: none; resize: none; font-size: var(--fs-body); line-height: 1.35; background: var(--field); border-radius: 12px; padding: 12px 14px;
   caret-color: var(--accent-text); touch-action: auto;
 }
 textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 0; }
 .grow { flex: 1; }
-.danger-btn { align-self: center; height: 44px; padding: 0 12px; color: var(--danger); font-size: 17px; }
+.danger-btn { align-self: center; height: 44px; padding: 0 12px; color: var(--danger); font-size: var(--fs-body); }
 .dialog {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(300px, calc(100vw - 48px));
   background: var(--sheet); border-radius: 14px; padding: 20px 16px 8px; text-align: center; box-shadow: var(--shadow);
   animation: fade-in var(--dur-move) ease;
 }
-.dialog p { margin: 0 0 12px; font-size: 17px; }
+.dialog p { margin: 0 0 12px; font-size: var(--fs-body); }
 .dialog-actions { display: flex; border-top: 0.5px solid var(--sep); margin: 0 -16px; }
-.dialog-actions button { flex: 1; height: 48px; font-size: 17px; color: var(--accent-text); }
+.dialog-actions button { flex: 1; height: 48px; font-size: var(--fs-body); color: var(--accent-text); }
 .dialog-actions button + button { border-left: 0.5px solid var(--sep); }
 .dialog-actions .danger { color: var(--danger); font-weight: 600; }
 /* From below the screen, whatever keyboard offset is already on the sheet. */
@@ -282,39 +310,44 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   box-shadow: var(--shadow); border: 0.5px solid var(--sep); display: flex; flex-direction: column; gap: 4px;
 }
 .menu .menu-title { padding: 6px 8px 2px; }
-.menu button.sec { height: 44px; text-align: left; padding: 0 12px; border-radius: 9px; font-size: 17px; color: var(--text); }
+.menu button.sec { height: 44px; text-align: left; padding: 0 12px; border-radius: 9px; font-size: var(--fs-body); color: var(--text); }
 .menu button.sec:hover, .menu button.sec:focus-visible { background: var(--surface); outline: none; }
 .menu button.sec[aria-current] { color: var(--secondary); cursor: default; }
 .menu button.sec[aria-current]:hover { background: none; }
 
 /* ---------- Desktop ---------- */
 @media (min-width: 900px) {
+  :root { --fs-title: 24px; }
   .phone-only { display: none !important; }
   .desk-only { display: flex; }
   .sidebar {
     display: flex; flex-direction: column; gap: 4px; position: fixed; left: 0; top: 0; bottom: 0; width: 240px;
     padding: 32px 16px; background: var(--surface);
   }
-  .brand { padding: 0 12px 16px; font-size: 15px; font-weight: 600; color: var(--secondary); }
+  .brand { padding: 0 12px 16px; font-size: var(--fs-meta); font-weight: 600; color: var(--secondary); }
   .nav-item {
     display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border-radius: 10px;
-    font-size: 15px; text-align: left;
+    font-size: var(--fs-body); text-align: left;
   }
   .nav-item:hover { background: rgba(127, 127, 127, 0.08); }
   .nav-item[aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
   .nav-item.drop { outline: 2px solid var(--accent-text); outline-offset: -2px; }
-  .nav-item .count { font-size: 13px; color: var(--secondary); font-weight: 400; }
+  .nav-item .count { font-size: var(--fs-meta); color: var(--secondary); font-weight: 400; }
   .nav-done { justify-content: flex-start; gap: 8px; }
   .nav-sep { height: 1px; margin: 12px; background: var(--sep); }
 
   .main { margin-left: 240px; display: flex; justify-content: center; }
   .col { width: 640px; max-width: calc(100vw - 240px - 48px); padding-top: 56px; }
   .top { padding: 0 12px 12px; }
-  h1 { font-size: 24px; letter-spacing: 0; }
+  h1 { letter-spacing: 0; }
   .add-desk { width: 36px; height: 36px; border-radius: 18px; background: var(--accent); color: var(--on-accent); align-items: center; justify-content: center; }
-  .kbd-hint { padding: 24px 12px 48px; margin: 0; font-size: 13px; color: var(--secondary); }
+  .kbd-hint { padding: 24px 12px 48px; margin: 0; font-size: var(--fs-meta); color: var(--secondary); }
 
-  .list { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  /* Cards with no hairlines. The 8px between them is the row's own margin, which a collapse
+     closes with the row, so the rows below never hop 8px when it goes. */
+  .list { margin: 0; padding: 0; display: flex; flex-direction: column; }
+  body.view-list .list:not(:empty) { margin-bottom: -8px; }
+  .row { margin-bottom: 8px; }
   body.view-done .list { display: block; }
   body.view-done .list { padding: 0 12px 48px; }
   .row { border-radius: 10px; }
@@ -343,6 +376,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .grabber { display: none; }
   .edit-sheet { min-height: 0; }
   .edit-sheet .grow { flex: 0 0 8px; }
+  .edit-sheet .sheet-head { margin-top: -6px; }
 }
 
 /* Reduced motion: slides become fades, nothing bounces. --dist only reaches keyframes written
@@ -357,4 +391,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .fab:active { transform: none; opacity: 0.55; }
   .row.nudge .row-inner { animation: none; }
   .circle .ic, .row.armed .swipe-done .ic { transition: opacity var(--dur-press) ease; transform: none !important; }
+  /* The thumb is placed at once (--dist does not reach var(--i)), and its label with it. */
+  body.ready .seg::before { transition: none; }
+  body.ready .seg button { transition: opacity var(--dur-press) ease; }
 }

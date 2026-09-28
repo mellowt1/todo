@@ -3,6 +3,8 @@
 // the toast (A4), Undo (A6), the sidebar drop (C1), focus (X1) and modals (X2).
 // Release 2b checks: section fade (A5), swipe fill and flick (A7), reopen (A8), sheet drag (A9), capture
 // lines (A10), the Done layer (A12), hand-offs (A13), press feedback (I1), edit sheet move (I2), reveal (I3).
+// Release 3 checks: the seg thumb (A1), hairlines and the desktop hop (C3), the pill and banner slots (B4),
+// one sheet header (C5), and no focus ring after a sheet a finger opened.
 // Every check runs twice, with reduced motion off and on, in Chromium or WebKit.
 //   npm run feel           Chromium
 //   npm run feel:webkit    WebKit
@@ -2038,6 +2040,318 @@ for (const motion of ['no-preference', 'reduce']) {
     await t.longPress(page.locator(`.row[data-id="${ids[5]}"]`));
     await page.waitForSelector('#menu:not([hidden])', { timeout: 1500 });
     await page.keyboard.press('Escape');
+  });
+
+  /* ================= Release 3: the look set ================= */
+  // Where the seg thumb is (x from its transform) and the colour of the label that is on, every frame.
+  const thumbFrames = async (page, sel, act, after = 450) => {
+    await page.evaluate((sel) => {
+      const seg = document.querySelector(sel);
+      window.__stopThumb = __frames(() => {
+        const t = getComputedStyle(seg, '::before').transform;
+        const on = seg.querySelector('[aria-selected="true"], [aria-checked="true"], [aria-current="page"]');
+        return { x: Math.round((t && t !== 'none' ? new DOMMatrixReadOnly(t).m41 : 0) * 10) / 10, color: on ? getComputedStyle(on).color : '' };
+      });
+    }, sel);
+    await act();
+    await page.waitForTimeout(after);
+    return page.evaluate(() => __stopThumb());
+  };
+  // Where the thumb rests under a button: its left edge less the seg's 4px padding.
+  const restX = (page, sel) => page.evaluate((sel) => document.querySelector(sel).offsetLeft - 4, sel);
+  const between = (xs, a, b) => xs.filter((x) => x > Math.min(a, b) + 1 && x < Math.max(a, b) - 1).length;
+
+  await test('A1 one thumb slides to the section in the switcher and the edit sheet, the label turns with it, nothing glides on open', motion, async (open, motion) => {
+    const ids = await seed([['Row one'], ['Row two'], ['Later one', 'someday']]);
+    const page = await open();
+    // The thumb and the label colour run on --dur-move and --ease; reduced motion places the thumb at once.
+    const tr = await page.evaluate(() => {
+      const seg = document.getElementById('switcher');
+      const pick = (s, prop) => {
+        const split = (v) => v.split(/,(?![^(]*\))/).map((x) => x.trim());
+        const ps = split(s.transitionProperty), i = ps.indexOf(prop);
+        if (i < 0) return null;
+        const d = split(s.transitionDuration), e = split(s.transitionTimingFunction);
+        return { d: d[i % d.length], e: e[i % e.length] };
+      };
+      const root = getComputedStyle(document.documentElement);
+      return { ready: document.body.classList.contains('ready'), thumb: pick(getComputedStyle(seg, '::before'), 'transform'), label: pick(getComputedStyle(seg.querySelector('button')), 'color'),
+        move: root.getPropertyValue('--dur-move').trim(), ease: root.getPropertyValue('--ease').trim() };
+    });
+    assert.ok(tr.ready, 'body.ready was never set');
+    if (motion === 'reduce') {
+      assert.ok(!tr.thumb || ms(tr.thumb.d) === 0, 'the thumb has a transform transition with reduced motion: ' + JSON.stringify(tr.thumb));
+    } else {
+      assert.ok(tr.thumb && ms(tr.thumb.d) === ms(tr.move) && tr.thumb.e.replace(/\s/g, '') === tr.ease.replace(/\s/g, ''), 'thumb transition ' + JSON.stringify(tr));
+      assert.ok(tr.label && ms(tr.label.d) === ms(tr.move) && tr.label.e.replace(/\s/g, '') === tr.ease.replace(/\s/g, ''), 'label colour transition ' + JSON.stringify(tr));
+    }
+
+    // A tap on Soon: the thumb travels from Today to Soon.
+    const soonX = await restX(page, '#switcher [data-section="soon"]');
+    const fr = await thumbFrames(page, '#switcher', () => page.evaluate(() => __tapSel('#switcher button[data-section="soon"]')));
+    const xs = fr.map((f) => f.x);
+    assert.equal(xs[0], 0, 'the thumb did not start under Today');
+    assert.ok(Math.abs(xs[xs.length - 1] - soonX) < 0.6, 'the thumb ended at ' + xs[xs.length - 1] + ', Soon is at ' + soonX);
+    const white = fr[fr.length - 1].color;
+    if (motion === 'reduce') {
+      assert.equal(between(xs, 0, soonX), 0, 'the thumb glided with reduced motion: ' + xs.join(' '));
+    } else {
+      assert.ok(between(xs, 0, soonX) >= 3, 'the thumb did not glide: ' + xs.join(' '));
+      // Half way, the label is still on its way to white (it turns with the thumb).
+      const half = fr.filter((f) => f.x > soonX * 0.25 && f.x < soonX * 0.75);
+      assert.ok(half.length && half.some((f) => f.color !== white), 'the label was white before the thumb got there: ' + JSON.stringify(half));
+    }
+
+    // The edit sheet: a section change glides; opening on a task in another section does not.
+    await page.evaluate(() => __tapSel('#switcher button[data-section="today"]'));
+    await page.waitForTimeout(400);
+    await page.evaluate((id) => __tap(id, '.text'), ids[0]);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(400);
+    const someX = await restX(page, '#editSeg [data-section="someday"]');
+    const efr = await thumbFrames(page, '#editSeg', () => page.click('#editSeg button[data-section="someday"]'));
+    const exs = efr.map((f) => f.x);
+    assert.ok(Math.abs(exs[exs.length - 1] - someX) < 0.6, 'edit thumb ended at ' + exs[exs.length - 1] + ', Someday is at ' + someX);
+    if (motion === 'reduce') assert.equal(between(exs, 0, someX), 0, 'the edit thumb glided with reduced motion');
+    else assert.ok(between(exs, 0, someX) >= 3, 'the edit thumb did not glide: ' + exs.join(' '));
+    await page.click('#editClose');
+    await page.waitForSelector('#edit', { state: 'hidden' });
+    await page.waitForTimeout(400);
+    const ofr = await thumbFrames(page, '#editSeg', async () => {
+      await page.evaluate((id) => __tap(id, '.text'), ids[1]);
+      await page.waitForSelector('#edit:not([hidden])');
+    });
+    const oxs = ofr.map((f) => f.x);
+    assert.equal(oxs[oxs.length - 1], 0, 'the edit thumb is not under Today');
+    assert.equal(between(oxs, 0, someX), 0, 'the edit thumb travelled from the last task: ' + oxs.join(' '));
+    await page.click('#editClose');
+    await page.waitForSelector('#edit', { state: 'hidden' });
+
+    // Open straight into Someday: the thumb is there from the first frame, with no glide in.
+    await page.evaluate(() => { const ui = JSON.parse(localStorage.getItem('todo.ui')); ui.section = 'someday'; localStorage.setItem('todo.ui', JSON.stringify(ui)); });
+    await page.addInitScript(() => {
+      window.__openXs = [];
+      const t0 = performance.now();
+      const tick = () => {
+        const seg = document.getElementById('switcher');
+        if (seg) { const t = getComputedStyle(seg, '::before').transform; __openXs.push(t && t !== 'none' ? Math.round(new DOMMatrixReadOnly(t).m41) : 0); }
+        if (performance.now() - t0 < 700) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await page.reload();
+    await page.waitForSelector('#list .row:not(.skeleton)');
+    await page.waitForTimeout(800);
+    const openXs = await page.evaluate(() => __openXs);
+    const end = openXs[openXs.length - 1];
+    assert.ok(end > soonX + 20, 'the thumb is not under Someday after the reload: ' + end);
+    assert.equal(between(openXs, 0, end), 0, 'the thumb glided in on open: ' + openXs.join(' '));
+  });
+
+  await test('C3 hairlines start at the text (phone, also mid swipe; none under a day header); a desktop row leaves no 8px hop', motion, async (open, motion) => {
+    const t0 = Date.now();
+    const ids = await seed([['Row one'], ['Row two'], ['Row three'], ['Row four'],
+      ['Done a', 'today', { done: true, doneAt: t0 - 60000 }], ['Done b', 'today', { done: true, doneAt: t0 - 120000 }], ['Done c', 'today', { done: true, doneAt: t0 - 2 * 86400000 }]]);
+    const page = await open();
+    const line = (id) => page.evaluate((id) => {
+      const r = __row(id), b = getComputedStyle(r, '::before');
+      return { on: !['none', 'normal', ''].includes(b.content), x: r.getBoundingClientRect().left + parseFloat(b.left) };
+    }, id);
+    const textX = await page.evaluate((id) => __row(id).querySelector('.text').getBoundingClientRect().left, ids[1]);
+    let l = await line(ids[1]);
+    assert.ok(l.on && Math.abs(l.x - 54) < 0.5 && Math.abs(l.x - textX) < 0.5, 'the hairline does not start at the text: ' + JSON.stringify(l) + ' text at ' + textX);
+    const t = await touch(page, ENGINE);
+    await t.drag(page.locator(`.row[data-id="${ids[1]}"]`), 100, { end: false });
+    await page.waitForTimeout(100);
+    assert.ok(await page.evaluate((id) => __row(id).classList.contains('swipe-r'), ids[1]), 'the row did not swipe');
+    for (const id of [ids[1], ids[2]]) {
+      l = await line(id);
+      assert.ok(l.on && Math.abs(l.x - 54) < 0.5, 'a hairline moved during the swipe: ' + JSON.stringify(l));
+    }
+    await t.release();
+    await page.waitForTimeout(400);
+
+    await page.click('#historyBtn');
+    await page.waitForSelector('.drow');
+    await page.waitForTimeout(400);
+    const d = await page.evaluate(() => [...document.querySelectorAll('#list > li')].map((el) => {
+      const b = getComputedStyle(el, '::before');
+      const tx = el.querySelector('.dtext');
+      return { head: el.classList.contains('dhead'), line: ['none', 'normal', ''].includes(b.content) ? null : el.getBoundingClientRect().left + parseFloat(b.left),
+        text: tx ? tx.getBoundingClientRect().left : null, border: parseFloat(getComputedStyle(el).borderTopWidth) || 0 };
+    }));
+    assert.deepEqual(d.map((x) => x.head), [true, false, false, true, false], 'Done layout');
+    for (let i = 0; i < d.length; i++) {
+      if (d[i].head) continue;
+      assert.equal(d[i].border, 0, 'a done row has a border line');
+      if (d[i - 1].head) assert.equal(d[i].line, null, 'a line sits under a day header (row ' + i + ')');
+      else assert.ok(d[i].line !== null && Math.abs(d[i].line - d[i].text) < 0.5, 'the line between done rows does not start at the text: ' + JSON.stringify(d[i]));
+    }
+
+    // Desktop: a finished row closes with its 8px, so the row below lands where it was and stays.
+    const desk = await open({ desktop: true });
+    const was = await desk.evaluate(([a, b]) => ({ a: __row(a).getBoundingClientRect().top, b: __row(b).getBoundingClientRect().top, lines: [...document.querySelectorAll('#list .row')].filter((r) => !['none', 'normal', ''].includes(getComputedStyle(r, '::before').content) && getComputedStyle(r, '::before').display !== 'none').length }), [ids[1], ids[2]]);
+    assert.equal(was.lines, 0, 'desktop rows have hairlines');
+    assert.ok(was.b - was.a > 52 + 7, 'the desktop cards lost their 8px: ' + JSON.stringify(was));
+    await desk.evaluate(([a, b]) => { window.__stopHop = __frames(() => { const y = __row(b); return { gone: !__row(a), top: y ? Math.round(y.getBoundingClientRect().top * 10) / 10 : null }; }); }, [ids[1], ids[2]]);
+    await desk.evaluate((id) => __row(id).querySelector('.circle').click(), ids[1]);
+    await desk.waitForTimeout(1300);
+    const fr = await desk.evaluate(() => __stopHop());
+    const after = fr.filter((f) => f.gone).map((f) => f.top);
+    assert.ok(after.length, 'the finished row never left');
+    const end = after[after.length - 1];
+    assert.ok(Math.abs(end - was.a) < 0.5, 'the row below ends at ' + end + ', the finished row was at ' + was.a);
+    if (motion !== 'reduce') {
+      const before = fr.filter((f) => !f.gone);
+      const last = before[before.length - 1].top;
+      assert.ok(Math.abs(last - end) < 0.5 && after.every((y) => Math.abs(y - end) < 0.5), 'the row below hopped after the collapse: ' + last + ' then ' + after.join(' '));
+    }
+  });
+
+  await test('B4 the pill and the banner open in slots under the title: the list glides, never jumps, and comes back', motion, async (open, motion) => {
+    const [id] = await seed([['First row'], ['Second row']]);
+    const page = await open();
+    const watch = () => page.evaluate((id) => {
+      window.__stopB4 = __frames(() => {
+        const p = document.getElementById('pill'), b = document.getElementById('banner'), r = __row(id);
+        // What shows of each: its box, cut by its slot.
+        const bottom = (el) => el.hidden ? -Infinity : Math.min(el.getBoundingClientRect().bottom, el.parentElement.getBoundingClientRect().bottom);
+        const top = r.getBoundingClientRect().top;
+        return { top: Math.round(top * 10) / 10, pop: p.hidden ? 0 : +getComputedStyle(p).opacity, bop: b.hidden ? 0 : +getComputedStyle(b).opacity,
+          over: bottom(p) > top + 0.5 || bottom(b) > top + 0.5 };
+      });
+    }, id);
+    const stop = () => page.evaluate(() => __stopB4());
+    // The list moves smoothly; with reduced motion the room opens at once and the words fade.
+    const glide = (fr, label, min) => {
+      const ys = fr.map((f) => f.top);
+      const from = ys[0], to = ys[ys.length - 1];
+      const moved = Math.abs(to - from);
+      assert.ok(moved >= min, label + ': the list did not make room (' + moved + 'px)');
+      assert.ok(!fr.some((f) => f.over), label + ': the pill or banner covered the list');
+      if (motion === 'reduce') return;
+      const steps = ys.slice(1).map((y, i) => Math.abs(y - ys[i]));
+      assert.ok(between(ys, from, to) >= 3 && Math.max(...steps) < moved * 0.6, label + ': the list jumped: ' + ys.map(Math.round).join(' '));
+    };
+    const top0 = await page.evaluate((id) => __row(id).getBoundingClientRect().top, id);
+
+    await watch();
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    await page.waitForTimeout(500);
+    let fr = await stop();
+    assert.equal(await page.textContent('#pill span'), 'Offline');
+    glide(fr, 'pill in', 30);
+    assert.ok(fr.some((f) => f.pop > 0.02 && f.pop < 0.95), 'the pill did not fade in');
+
+    // Back online: Syncing or Synced, then the words fade and the room closes.
+    await watch();
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await until(() => page.evaluate(() => document.getElementById('pill').hidden), 4000, 'the pill to leave');
+    await page.waitForTimeout(300);
+    fr = await stop();
+    assert.ok(fr.some((f) => f.pop > 0.02 && f.pop < 0.95), 'the pill did not fade out');
+    if (motion !== 'reduce') {
+      const outAt = fr.findIndex((f) => f.pop < 0.02 && f.top > top0 + 1);
+      assert.ok(outAt >= 0, 'the room closed before the pill had faded');
+      glide(fr.slice(outAt), 'pill out', 30);
+    }
+    assert.ok(Math.abs(fr[fr.length - 1].top - top0) < 0.5, 'the list did not come back to ' + top0 + ': ' + fr[fr.length - 1].top);
+
+    // The error banner opens the same way.
+    await page.route('**/api/todo/**', (r) => r.abort());
+    await watch();
+    await page.evaluate(() => __poll());
+    await until(() => page.evaluate(() => !document.getElementById('banner').hidden), 4000, 'the banner');
+    await page.waitForTimeout(450);
+    fr = await stop();
+    glide(fr, 'banner in', 45);
+    await page.unroute('**/api/todo/**');
+    await page.click('#retry');
+    await until(() => page.evaluate(() => document.getElementById('banner').hidden && document.getElementById('pill').hidden), 5000, 'the banner and pill to leave');
+    await page.waitForTimeout(300);
+    assert.ok(Math.abs((await page.evaluate((id) => __row(id).getBoundingClientRect().top, id)) - top0) < 0.5, 'the list did not come back after the banner');
+  });
+
+  await test('C5 one sheet header: capture and edit share its height, place and label style, with a 17px Close', motion, async (open) => {
+    const [id] = await seed([['Edit me']]);
+    const page = await open();
+    const head = (wrap) => page.evaluate((wrap) => {
+      const sheet = document.querySelector(wrap + ' .sheet');
+      const h = sheet.querySelector('.sheet-head');
+      if (!h) return null;
+      const l = h.firstElementChild, b = h.querySelector('button');
+      const cl = getComputedStyle(l), cb = getComputedStyle(b);
+      const hb = h.getBoundingClientRect(), sb = sheet.getBoundingClientRect();
+      return { h: hb.height, dy: Math.round(hb.top - sb.top), label: l.textContent, lsize: cl.fontSize, lcolor: cl.color, lweight: cl.fontWeight, lleft: Math.round(l.getBoundingClientRect().left),
+        btn: b.textContent, bsize: cb.fontSize, bcolor: cb.color, bright: Math.round(b.getBoundingClientRect().right), next: h.previousElementSibling.className,
+        buttons: [...sheet.querySelectorAll('button')].map((x) => x.textContent) };
+    }, wrap);
+    await page.click('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.waitForTimeout(400);
+    const c = await head('#capture');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#capture', { state: 'hidden' });
+    await page.waitForTimeout(200);
+    await page.evaluate((id) => __tap(id, '.text'), id);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(400);
+    const e = await head('#edit');
+    assert.ok(c && e, 'a sheet has no .sheet-head');
+    assert.equal(c.label, 'Adds to Today');
+    assert.equal(e.label, 'Task');
+    assert.equal(c.btn, 'Close');
+    assert.equal(e.btn, 'Close');
+    assert.ok(!c.buttons.includes('Done'), 'the capture sheet still has a Done button');
+    assert.ok(c.h >= 44, 'header height ' + c.h);
+    assert.equal(c.bsize, '17px', 'Close size');
+    assert.equal(c.lsize, '13px', 'label size');
+    for (const k of ['h', 'dy', 'lsize', 'lcolor', 'lweight', 'lleft', 'bsize', 'bcolor', 'bright', 'next']) assert.equal(e[k], c[k], 'the headers differ in ' + k);
+  });
+
+  await test('Focus: a sheet opened by a finger gives no focus back (no ring on the add button or row); from the keyboard it does', motion, async (open) => {
+    const [id] = await seed([['Tap my text'], ['Second row']]);
+    const page = await open();
+    const ring = () => page.evaluate(() => {
+      const a = document.activeElement, v = document.querySelector(':focus-visible');
+      const name = (el) => el.id || el.className || el.tagName;
+      return { active: a && a !== document.body ? name(a) : 'body', visible: v ? name(v) : null };
+    });
+    for (const how of ['Escape', 'scrim', 'Return', 'Close']) {
+      await page.tap('#fab');
+      await page.waitForSelector('#capture:not([hidden])');
+      await page.waitForTimeout(250);
+      await page.keyboard.type('Typed ' + how);
+      if (how === 'Escape') await page.keyboard.press('Escape');
+      else if (how === 'Return') { await page.keyboard.press('Enter'); await page.keyboard.press('Enter'); } // saves, then Return on the empty field closes
+      else if (how === 'scrim') await page.tap('#capture .scrim', { position: { x: 200, y: 100 } });
+      else await page.tap('#capDone');
+      await page.waitForSelector('#capture', { state: 'hidden' });
+      await page.waitForTimeout(250);
+      const r = await ring();
+      assert.ok(r.active !== 'fab' && r.visible === null, 'capture opened by a tap, closed with ' + how + ': ' + JSON.stringify(r));
+    }
+    await page.tap(`.row[data-id="${id}"] .text`);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(300);
+    await page.tap('#editText');
+    await page.keyboard.type(' again');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#edit', { state: 'hidden' });
+    await page.waitForTimeout(250);
+    let r = await ring();
+    assert.ok(r.visible === null && !/row/.test(r.active), 'edit opened by a tap, closed with Escape: ' + JSON.stringify(r));
+
+    // From the keyboard: focus goes back to the add button.
+    await page.focus('#fab');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.waitForTimeout(250);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#capture', { state: 'hidden' });
+    await page.waitForTimeout(250);
+    r = await ring();
+    assert.equal(r.active, 'fab', 'a capture opened from the keyboard did not give focus back to the add button');
   });
 }
 

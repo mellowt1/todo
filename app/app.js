@@ -333,34 +333,62 @@
     const span = pill.querySelector('span');
     const use = pill.querySelector('use');
     clearTimeout(pillTimer);
-    rest(pill); // a fade on its way out stops here
-    $('banner').hidden = s !== 'error';
+    if (s === 'error') slotIn($('banner')); else slotOut($('banner'));
     if (s === 'offline' || s === 'error') trouble = true;
     if (s === 'offline') {
       const n = st.queue.length;
       span.textContent = n ? 'Offline. ' + n + (n === 1 ? ' change' : ' changes') + ' waiting' : 'Offline';
       use.setAttribute('href', '#i-offline');
-      pill.hidden = false;
+      slotIn(pill);
     } else if (s === 'syncing') {
       span.textContent = 'Syncing';
       use.setAttribute('href', '#i-sync');
-      pill.hidden = false;
+      slotIn(pill);
     } else if (s === 'synced') {
       trouble = false;
       span.textContent = 'Synced';
       use.setAttribute('href', '#i-check');
-      pill.hidden = false;
+      slotIn(pill);
       pillTimer = setTimeout(() => {
-        leave(pill, [{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'ease' }).then((ok) => {
-          if (!ok) return;
-          pill.hidden = true;
-          rest(pill);
-          net = 'idle';
-        });
+        slotOut(pill, 400).then((ok) => { if (ok) net = 'idle'; });
       }, 1600);
     } else {
-      pill.hidden = true;
+      slotOut(pill);
     }
+  }
+
+  // The pill and the banner open in grid slots under the title (0fr to 1fr), so the list makes
+  // room with a glide and never jumps. They leave the other way round: the words fade, then the
+  // room closes. Reduced motion, or before the first paint: the room opens and closes at once.
+  const slotOf = (el) => el.closest('.slot');
+  function slotIn(el) {
+    const slot = slotOf(el);
+    const shut = el.hidden || exits.has(slot);
+    const op = exits.has(el) ? getComputedStyle(el).opacity : null; // caught fading out
+    rest(el);
+    rest(slot);
+    el.hidden = false;
+    if (shut) {
+      if (!document.body.classList.contains('ready')) return;
+      if (!M.reduced) play(slot, [{ gridTemplateRows: '0fr' }, { gridTemplateRows: '1fr' }]);
+      play(el, [{ opacity: 0 }, { opacity: 1 }], { easing: 'ease' });
+    } else if (op !== null) {
+      play(el, [{ opacity: op }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
+    }
+  }
+  // Resolves true once it is gone, false when it was already going or came back.
+  function slotOut(el, fade = M.exit) {
+    const slot = slotOf(el);
+    if (el.hidden || exits.has(el) || exits.has(slot)) return Promise.resolve(false);
+    return leave(el, [{ opacity: 1 }, { opacity: 0 }], { duration: fade, easing: 'ease' })
+      .then((ok) => ok && (M.reduced || leave(slot, [{ gridTemplateRows: '1fr' }, { gridTemplateRows: '0fr' }])))
+      .then((ok) => {
+        if (!ok) return false;
+        el.hidden = true;
+        rest(el);
+        rest(slot);
+        return true;
+      });
   }
 
   function showNoCode() {
@@ -797,8 +825,9 @@
     const cs = getComputedStyle(row);
     const from = { height: row.offsetHeight + 'px', opacity: 1 };
     const to = { height: '0px', opacity: 0 };
-    // Done rows and day headers carry padding and a hairline, which a height of 0 can not close.
-    for (const k of ['paddingTop', 'paddingBottom', 'borderTopWidth']) {
+    // Done rows and day headers carry padding, and desktop rows their 8px margin, which a height
+    // of 0 can not close.
+    for (const k of ['paddingTop', 'paddingBottom', 'borderTopWidth', 'marginBottom']) {
       if (parseFloat(cs[k])) { from[k] = cs[k]; to[k] = '0px'; }
     }
     Object.assign(row.style, to);
@@ -1222,7 +1251,11 @@
   /* ---------- Sheets ---------- */
   // The sheets and the confirm are modal: what is behind them goes inert, and focus goes
   // back to the opener when they close (pass opener false on close to skip that).
-  const modals = new Map(); // open wrap -> { el, id } of its opener
+  const modals = new Map(); // open wrap -> { el, id, key } of its opener
+  // Whether the last thing Paul did was a key press, so a sheet knows how it was opened.
+  let keyed = false;
+  document.addEventListener('keydown', () => { keyed = true; }, true);
+  document.addEventListener('pointerdown', () => { keyed = false; }, true);
   function modal(open, wrap, opener) {
     const box = wrap.querySelector('.sheet, .dialog');
     const back = open ? null : modals.get(wrap);
@@ -1230,7 +1263,7 @@
       box.setAttribute('aria-modal', 'true');
       const el = opener || document.activeElement;
       const row = el && el.closest ? el.closest('#list > [data-id]') : null;
-      modals.set(wrap, { el, id: row ? row.dataset.id : null });
+      modals.set(wrap, { el, id: row ? row.dataset.id : null, key: keyed || desk.matches });
     } else {
       box.removeAttribute('aria-modal');
       modals.delete(wrap);
@@ -1240,6 +1273,9 @@
     $('edit').inert = modals.has($('confirm'));
     if (!back || opener === false) return;
     const a = document.activeElement;
+    // A sheet a finger opened on the phone gives no focus back, or the add button or the row would
+    // light up with a focus ring. Focus only goes back when it came from the keyboard.
+    if (!back.key && wrap.classList.contains('sheet-wrap')) { if (a && wrap.contains(a)) a.blur(); return; }
     if (a && a !== document.body && !a.closest('.sheet-wrap, .dialog-wrap')) return; // focus already went somewhere
     // A row moved away from the edit sheet hands focus to the row that was next to it.
     const el = back.el && back.el !== document.body && back.el.isConnected ? back.el
@@ -1498,9 +1534,14 @@
     editId = id;
     editFrom = { id, section: it.section, pos: it.pos };
     editText.value = it.text;
+    const seg = $('editSeg');
+    seg.classList.add('instant');
     paintEditSeg(it.section);
     const a = document.activeElement;
     openSheet($('edit'), undefined, list.contains(a) ? a : desk.matches ? row : null);
+    // The thumb takes its place in this frame; it glides again from the next one.
+    void seg.offsetWidth;
+    requestAnimationFrame(() => seg.classList.remove('instant'));
     if (desk.matches) { editText.focus(); editText.setSelectionRange(editText.value.length, editText.value.length); }
     else $('editClose').focus({ preventScroll: true }); // on the phone the keyboard waits for a tap in the text
   }
@@ -1667,6 +1708,8 @@
 
   computeView();
   render();
+  // The seg thumb glides only after the first paint, so it never slides in on open.
+  requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.add('ready')));
   if (!navigator.onLine) setNet('offline');
   poll();
   if (st.queue.length) scheduleFlush(300);
