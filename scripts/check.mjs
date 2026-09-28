@@ -195,7 +195,8 @@ await step('edit sheet section control moves the task', async () => {
   await page.click('#editSeg button[data-section="soon"]');
   await page.click('#editClose');
   await page.waitForSelector('#edit', { state: 'hidden' });
-  assert.ok(!(await openTexts(page)).includes('Buy coffee beans'));
+  // The row collapses behind the sheet (--dur-move), which can end a frame after the sheet has left (--dur-exit).
+  await until(async () => !(await openTexts(page)).includes('Buy coffee beans'), 1000, 'row to leave');
   await serverHas((i) => i.text === 'Buy coffee beans' && i.section === 'soon', 'section change on server');
 });
 

@@ -30,6 +30,45 @@
   const desk = matchMedia('(min-width: 900px)');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
+  /* ---------- Motion (the tokens live in app.css) ---------- */
+  const M = {};
+  function readMotion() {
+    const cs = getComputedStyle(document.documentElement);
+    const num = (name, d) => { const v = parseFloat(cs.getPropertyValue(name)); return isNaN(v) ? d : v; };
+    M.press = num('--dur-press', 140);
+    M.move = num('--dur-move', 220);
+    M.exit = num('--dur-exit', 180);
+    M.dist = num('--dist', 1); // 0 under reduced motion, so slides become fades
+    M.ease = cs.getPropertyValue('--ease').trim() || 'ease-out';
+    M.reduced = reduced.matches;
+  }
+  readMotion();
+  reduced.addEventListener('change', readMotion);
+
+  // Resolves true when the animation ran to its end and false when it was cut short,
+  // so a cancelled animation never throws and never leaves a lock behind.
+  function play(el, frames, o) {
+    const a = el.animate(frames, Object.assign({ duration: M.move, easing: M.ease }, o));
+    const p = a.finished.then(() => true, () => false);
+    p.anim = a;
+    return p;
+  }
+  // An exit keeps its last frame until the caller hides the element and calls rest().
+  const exits = new WeakMap();
+  function leave(el, frames, o) {
+    rest(el);
+    const p = play(el, frames, Object.assign({ duration: M.exit, fill: 'forwards' }, o));
+    exits.set(el, p.anim);
+    return p.then((ok) => ok && exits.get(el) === p.anim);
+  }
+  function rest(el) {
+    const a = exits.get(el);
+    if (!a) return;
+    exits.delete(el);
+    a.cancel();
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
   /* ---------- Storage (every access guarded; private mode can throw) ---------- */
   const store = {
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
@@ -138,7 +177,7 @@
     if (!it || it.done) return;
     const prev = Object.assign({}, it);
     upsert(Object.assign({}, it, { done: true, doneAt: now() }));
-    toast('Done.', () => upsert(prev));
+    toast('Done.', () => upsert(prev), id);
   }
 
   function moveTo(id, section, withToast = true) {
@@ -146,7 +185,7 @@
     if (!it || it.section === section) return;
     const prev = Object.assign({}, it);
     upsert(Object.assign({}, it, { section, pos: now() }));
-    if (withToast) toast('Moved to ' + LABEL[section] + '.', () => upsert(prev));
+    if (withToast) toast('Moved to ' + LABEL[section] + '.', () => upsert(prev), id);
   }
 
   function reopen(id) {
@@ -154,7 +193,7 @@
     if (!it || !it.done) return;
     const prev = Object.assign({}, it);
     upsert(Object.assign({}, it, { done: false, doneAt: null, pos: now() }));
-    toast('Reopened in ' + LABEL[it.section] + '.', () => upsert(prev));
+    toast('Reopened in ' + LABEL[it.section] + '.', () => upsert(prev), id);
   }
 
   /* ---------- Sync ---------- */
@@ -199,8 +238,10 @@
       // Ops the Worker refused one by one (named by index) will never be taken. They go with
       // the rest of the batch, and the banner says something did not sync.
       const rejected = Array.isArray(d.rejected) ? d.rejected.filter((i) => sent[i]) : [];
+      // One draw for both: drawn between them, the old server copy would bring back rows the
+      // batch just changed, and the next draw would collapse them a second time.
       dropSent(sent);
-      applyServer(d);
+      if (!applyServer(d)) { computeView(); render(); }
       rejectNote = rejected.length > 0;
       if (rejectNote) setNet('error');
       else if (st.queue.length) again = true;
@@ -217,8 +258,6 @@
   function dropSent(sent) {
     st.queue = st.queue.filter((o) => !sent.some((s) => s.item.id === o.item.id && s.item.updatedAt === o.item.updatedAt));
     save();
-    computeView();
-    render();
   }
 
   // Up to MAX_BATCH ops, and well under the Worker's 200 kB body limit.
@@ -234,9 +273,10 @@
     return out;
   }
 
+  // Returns true when it took the answer (and drew it).
   function applyServer(d) {
-    if (!d || !Array.isArray(d.items)) return;
-    if (typeof d.rev === 'number' && d.rev < st.rev) return; // an older answer arriving late
+    if (!d || !Array.isArray(d.items)) return false;
+    if (typeof d.rev === 'number' && d.rev < st.rev) return false; // an older answer arriving late
     const m = {};
     for (const i of d.items) m[i.id] = i;
     st.server = m;
@@ -244,6 +284,7 @@
     save();
     computeView();
     render();
+    return true;
   }
 
   async function poll() {
@@ -279,7 +320,7 @@
     const span = pill.querySelector('span');
     const use = pill.querySelector('use');
     clearTimeout(pillTimer);
-    pill.classList.remove('fade');
+    rest(pill); // a fade on its way out stops here
     $('banner').hidden = s !== 'error';
     if (s === 'offline' || s === 'error') trouble = true;
     if (s === 'offline') {
@@ -297,8 +338,12 @@
       use.setAttribute('href', '#i-check');
       pill.hidden = false;
       pillTimer = setTimeout(() => {
-        pill.classList.add('fade');
-        pillTimer = setTimeout(() => { pill.hidden = true; pill.classList.remove('fade'); net = 'idle'; }, 450);
+        leave(pill, [{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'ease' }).then((ok) => {
+          if (!ok) return;
+          pill.hidden = true;
+          rest(pill);
+          net = 'idle';
+        });
       }, 1600);
     } else {
       pill.hidden = true;
@@ -371,20 +416,37 @@
     $('install').hidden = !(view === 'list' && showInstall());
   }
 
-  let focusNext = null; // the row that takes focus when the focused one leaves (Space)
+  let lastHtml = null;     // the list as last written, without the entrance class; null after a row got inline styles
+  let shownKey = '';       // what the list shows: 'skeleton', 'done' or a section
+  let pendingFocus = null; // a row id that takes focus in the next write (Undo pressed from the keyboard)
+  const byId = (id) => $('list').querySelector('[data-id="' + CSS.escape(id) + '"]');
+  // The next row that stays, else the one above: where focus goes when a row leaves.
+  function neighbour(el) {
+    const stays = (n) => n.dataset.id && !gone(n);
+    let n = el.nextElementSibling;
+    while (n && !stays(n)) n = n.nextElementSibling;
+    if (!n) {
+      n = el.previousElementSibling;
+      while (n && !stays(n)) n = n.previousElementSibling;
+    }
+    return n ? n.dataset.id : null;
+  }
+
   function renderList() {
     const list = $('list');
-    const focusedId = document.activeElement && document.activeElement.closest && document.activeElement.closest('.row, .drow')
-      ? document.activeElement.closest('.row, .drow').dataset.id : null;
     const all = Object.values(items);
     const empty = $('empty');
     let html = '';
     let emptyText = '';
+    let key = view === 'done' ? 'done' : ui.section;
+    let ids = null; // the open rows about to show (list view only)
 
     if (!loaded && !all.length) {
+      key = 'skeleton';
       html = [1, 2, 3].map(() => '<li class="row skeleton" aria-hidden="true"><div class="row-inner"><span class="circle-static"></span><div class="bar"></div></div></li>').join('');
     } else if (view === 'list') {
       const rows = openIn(ui.section);
+      ids = new Set(rows.map((it) => it.id));
       html = rows.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
       if (!rows.length) {
         emptyText = all.length ? EMPTY[ui.section]
@@ -405,16 +467,70 @@
       if (done.length > doneShown) html += '<li class="dmore" aria-hidden="true" style="height:1px"></li>';
       if (!done.length) emptyText = 'Done tasks will show up here.';
     }
-    list.innerHTML = html;
-    justAdded.clear();
+
+    const same = key === shownKey; // no section switch, skeleton or first paint: changes animate
+    // A row that left without an exit of its own (a poll, an Undo, a delete) collapses first.
+    // The list is written once it is gone, like every other row that leaves.
+    if (same && ids) {
+      const out = Array.from(list.querySelectorAll('.row[data-id]')).filter((r) => !ids.has(r.dataset.id) && !r.classList.contains('collapsing'));
+      if (out.length) {
+        for (const r of out) {
+          const unlock = lock(r.dataset.id);
+          collapse(r).finally(unlock);
+        }
+        renderQueued = true;
+        return;
+      }
+    }
+
     empty.hidden = !emptyText;
     empty.querySelector('p').textContent = emptyText;
+    const cmp = html.replace(/ class="row enter"/g, ' class="row"');
+    if (same && cmp === lastHtml) { justAdded.clear(); return; } // nothing changed: a running entrance plays on
 
-    if (focusedId) {
-      const el = list.querySelector('[data-id="' + focusedId + '"]') || (focusNext && list.querySelector('[data-id="' + focusNext + '"]'));
-      if (el) el.focus({ preventScroll: true });
+    const a = document.activeElement;
+    const focused = a && a.closest ? a.closest('#list > [data-id]') : null;
+    const free = !a || a === document.body || menu.contains(a) || toastEl.contains(a);
+    const order = Array.from(list.children, (el) => el.dataset.id).filter(Boolean);
+    // First: where each row stands now. A collapsed row counts as gone, so an Undo fades it back in.
+    const tops = new Map();
+    if (same && ids) {
+      for (const r of list.querySelectorAll('.row[data-id]')) {
+        if (!r.classList.contains('collapsing')) tops.set(r.dataset.id, r.getBoundingClientRect().top);
+      }
     }
-    focusNext = null;
+
+    list.innerHTML = html;
+    lastHtml = cmp;
+    shownKey = key;
+    justAdded.clear();
+
+    // Last, invert, play: rows that stay glide from where they stood, new rows fade in.
+    // Rows with .enter already have their entrance.
+    if (same && ids) {
+      for (const r of list.querySelectorAll('.row[data-id]')) {
+        if (r.classList.contains('enter')) continue;
+        const top = tops.get(r.dataset.id);
+        if (top === undefined) {
+          play(r, [{ opacity: 0, transform: 'translateY(' + -8 * M.dist + 'px)' }, { opacity: 1, transform: 'none' }]);
+        } else if (!M.reduced) {
+          const dy = top - r.getBoundingClientRect().top;
+          if (Math.abs(dy) >= 1) play(r, [{ transform: 'translateY(' + dy + 'px)' }, { transform: 'none' }]);
+        }
+      }
+    }
+
+    // Focus stays on its row, or moves to the row next to the one that left.
+    let target = pendingFocus && free ? byId(pendingFocus) : null;
+    if (!target && focused) {
+      target = byId(focused.dataset.id);
+      const i = order.indexOf(focused.dataset.id);
+      for (let j = i + 1; !target && j < order.length; j++) target = byId(order[j]);
+      for (let j = i - 1; !target && j >= 0; j--) target = byId(order[j]);
+    }
+    if (target) target.focus({ preventScroll: true });
+    pendingFocus = null;
+
     const more = list.querySelector('.dmore');
     if (more) moreObserver.observe(more);
     maybeNudge();
@@ -430,6 +546,7 @@
     if (!first) return;
     ui.nudged = true;
     saveUi();
+    lastHtml = null;
     first.classList.add('nudge');
   }
 
@@ -466,34 +583,94 @@
   $('closeDone').addEventListener('click', () => setSection(ui.section));
 
   /* ---------- Toast ---------- */
+  const toastEl = $('toast');
   let toastTimer = 0;
+  let toastOn = false;
   let undoFn = null;
-  function toast(text, undo) {
-    $('toastText').textContent = text;
+  let undoId = null;
+  const toastHeld = { pointer: false, focus: false }; // the timer waits while either is true
+  function toast(text, undo, id) {
+    const tx = $('toastText');
     undoFn = undo;
-    const t = $('toast');
-    t.hidden = true;
-    void t.offsetWidth; // restart the entrance
-    t.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(hideToast, TOAST_MS);
+    undoId = id || null;
+    if (toastOn && !toastEl.hidden) {
+      // Already up: only the words change.
+      tx.textContent = text;
+      play(tx, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
+    } else if (!toastEl.hidden) {
+      // Caught on its way out: it comes back from where it is.
+      const cs = getComputedStyle(toastEl);
+      const from = { opacity: cs.opacity, translate: cs.translate };
+      rest(toastEl);
+      tx.textContent = text;
+      play(toastEl, [from, { opacity: 1, translate: '0 0' }], { duration: M.press });
+    } else {
+      tx.textContent = text;
+      toastEl.hidden = false; // the entrance is toast-in in app.css
+    }
+    toastOn = true;
+    toastEl.classList.remove('leaving');
+    armToast(TOAST_MS);
   }
-  function hideToast() { $('toast').hidden = true; undoFn = null; }
-  $('toastUndo').addEventListener('click', () => { const f = undoFn; hideToast(); if (f) f(); });
+  function armToast(ms) {
+    clearTimeout(toastTimer);
+    if (!toastHeld.pointer && !toastHeld.focus) toastTimer = setTimeout(hideToast, ms);
+  }
+  function hideToast() {
+    clearTimeout(toastTimer);
+    undoFn = null;
+    undoId = null;
+    toastHeld.pointer = toastHeld.focus = false;
+    if (!toastOn) return;
+    toastOn = false;
+    if (toastEl.hidden) return;
+    toastEl.classList.add('leaving');
+    leave(toastEl, [{ opacity: 1, translate: '0 0' }, { opacity: 0, translate: '0 ' + 8 * M.dist + 'px' }]).then((ok) => {
+      if (!ok) return;
+      toastEl.hidden = true;
+      toastEl.classList.remove('leaving');
+      rest(toastEl);
+    });
+  }
+  // A finger, the pointer or focus on the toast holds it; letting go leaves 2 seconds.
+  function holdToast(k, on) {
+    const was = toastHeld.pointer || toastHeld.focus;
+    toastHeld[k] = on;
+    if (!toastOn) return;
+    if (on) clearTimeout(toastTimer);
+    else if (was && !toastHeld.pointer && !toastHeld.focus) armToast(2000);
+  }
+  toastEl.addEventListener('pointerenter', () => holdToast('pointer', true));
+  toastEl.addEventListener('pointerdown', () => holdToast('pointer', true));
+  toastEl.addEventListener('pointerleave', () => holdToast('pointer', false));
+  toastEl.addEventListener('focusin', () => holdToast('focus', true));
+  toastEl.addEventListener('focusout', (e) => { if (!toastEl.contains(e.relatedTarget)) holdToast('focus', false); });
+  $('toastUndo').addEventListener('click', () => {
+    const f = undoFn;
+    const id = undoId;
+    if (!f) return;
+    // Focus in the toast goes to the task the Undo brings back, or next to the one it takes away.
+    if (id && toastEl.contains(document.activeElement)) {
+      const el = byId(id);
+      pendingFocus = !el || gone(el) ? id : neighbour(el);
+    }
+    hideToast();
+    f();
+  });
 
   /* ---------- Row animations ---------- */
   // The op is written at the tap. A leaving lock then keeps the old row on screen while
   // it plays its exit, and the list is redrawn once no row is leaving.
   const leaving = new Map(); // id -> failsafe timer
   let pressed = null;        // id of the row under a finger
-  function leave(id) {
+  function lock(id) {
     clearTimeout(leaving.get(id));
-    // Failsafe: a lost timer or a page frozen by iOS never blocks the list for good.
-    const t = setTimeout(() => unleave(id, t), 1000);
+    // Failsafe: a lost animation or a page frozen by iOS never blocks the list for good.
+    const t = setTimeout(() => unlock(id, t), 1000);
     leaving.set(id, t);
-    return () => unleave(id, t);
+    return () => unlock(id, t);
   }
-  function unleave(id, t) {
+  function unlock(id, t) {
     if (leaving.get(id) !== t) return; // already dropped, or taken again since
     clearTimeout(t);
     leaving.delete(id);
@@ -516,39 +693,72 @@
     wake();
   }
 
-  function collapse(row, then) {
-    if (!row.isConnected) return then();
-    if (reduced.matches) {
-      row.style.transition = 'opacity 160ms ease';
-      row.style.opacity = '0';
-      return setTimeout(then, 170);
-    }
-    row.style.height = row.offsetHeight + 'px';
+  // The row closes to nothing (reduced motion: it fades). The end state is written inline
+  // and the animation plays from the old one, so a cut animation still leaves it closed.
+  function collapse(row) {
+    if (!row.isConnected) return Promise.resolve(false);
+    lastHtml = null;
     row.classList.add('collapsing');
-    void row.offsetHeight;
+    if (M.reduced) {
+      row.style.opacity = '0';
+      return play(row, [{ opacity: 1 }, { opacity: 0 }], { duration: M.exit, easing: 'ease' });
+    }
+    const h = row.offsetHeight;
     row.style.height = '0px';
     row.style.opacity = '0';
-    setTimeout(then, 210);
+    return play(row, [{ height: h + 'px', opacity: 1 }, { height: '0px', opacity: 0 }]);
   }
 
+  // The check: the circle fills, the tick draws, the text dims and is struck through, the row
+  // rests a moment, then collapses. Tap to collapse is HOLD at most. The op is written at the tap.
+  const HOLD = 360;
+  const DRAW = 180;
   function completeRow(row) {
     if (gone(row)) return false; // a double tap or Space twice runs once
     const id = row.dataset.id;
-    const lift = leave(id);
+    const unlock = lock(id);
+    lastHtml = null;
+    row.classList.add('ticked');
     row.querySelector('.circle').classList.add('checked');
     markDone(id);
-    setTimeout(() => collapse(row, lift), reduced.matches ? 120 : 200);
+    const ic = row.querySelector('.circle .ic');
+    const draw = M.reduced ? M.press : DRAW;
+    const drawn = M.reduced
+      ? play(ic, [{ opacity: 0 }, { opacity: 1 }], { duration: draw, easing: 'ease' })
+      : play(ic, [{ strokeDashoffset: '20' }, { strokeDashoffset: '0' }], { duration: draw });
+    play(row.querySelector('.text'), [{ textDecorationColor: 'transparent' }, { textDecorationColor: 'currentcolor' }], { duration: M.press, easing: 'ease' });
+    drawn.then(() => sleep(HOLD - draw)).then(() => {
+      const it = items[id];
+      if (it && !it.done) {
+        // Undo came during the hold: the row stays.
+        row.classList.remove('ticked');
+        row.querySelector('.circle').classList.remove('checked');
+        return;
+      }
+      return collapse(row);
+    }).finally(unlock);
     return true;
   }
 
+  // Menu, reveal and sidebar moves: the row slides out to the left, then collapses.
   function slideOut(row, dir) {
     if (gone(row)) return false;
-    const lift = leave(row.dataset.id);
+    const unlock = lock(row.dataset.id);
+    lastHtml = null;
     const inner = row.querySelector('.row-inner');
+    const from = getComputedStyle(inner).transform;
+    stopSlide(inner);
     row.classList.add('sliding');
-    if (reduced.matches) inner.style.opacity = '0';
-    else inner.style.transform = 'translateX(' + (dir > 0 ? '100%' : '-100%') + ')';
-    setTimeout(() => collapse(row, lift), reduced.matches ? 120 : 200);
+    let slid;
+    if (M.reduced) {
+      inner.style.opacity = '0';
+      slid = play(inner, [{ opacity: 1 }, { opacity: 0 }], { duration: M.exit, easing: 'ease' });
+    } else {
+      const to = 'translateX(' + (dir > 0 ? '100%' : '-100%') + ')';
+      inner.style.transform = to;
+      slid = play(inner, [{ transform: from }, { transform: to }]);
+    }
+    slid.then(() => collapse(row)).finally(unlock);
     return true;
   }
 
@@ -562,22 +772,49 @@
   function revealWidth(row) {
     return row.querySelector('.move-group').offsetWidth + 12;
   }
+  // Puts the row's content at x. Animated, it glides from where it is now and resolves
+  // true when it lands (false when a newer move took over).
+  const slides = new WeakMap(); // .row-inner -> its running glide
+  function stopSlide(inner) {
+    const a = slides.get(inner);
+    if (!a) return;
+    slides.delete(inner);
+    a.cancel();
+  }
   function setX(row, x, animate) {
+    lastHtml = null;
     const inner = row.querySelector('.row-inner');
-    row.classList.toggle('sliding', !!animate);
-    row.classList.toggle('swipe-r', x > 0);
-    row.classList.toggle('swipe-l', x < 0);
-    inner.style.transform = x ? 'translateX(' + x + 'px)' : '';
+    const from = animate ? getComputedStyle(inner).transform : 'none';
+    stopSlide(inner);
+    const to = x ? 'translateX(' + x + 'px)' : '';
+    inner.style.transform = to;
+    // Gliding home, the swipe background stays under the row until it lands.
+    const home = animate && !x;
+    if (!home) {
+      row.classList.toggle('swipe-r', x > 0);
+      row.classList.toggle('swipe-l', x < 0);
+    }
+    if (!animate || M.reduced || from === (to || 'none')) {
+      row.classList.remove('sliding');
+      if (home) row.classList.remove('swipe-r', 'swipe-l');
+      return Promise.resolve(true);
+    }
+    row.classList.add('sliding');
+    const p = play(inner, [{ transform: from }, { transform: to || 'none' }]);
+    slides.set(inner, p.anim);
+    return p.then((ok) => {
+      if (!ok || slides.get(inner) !== p.anim) return false;
+      slides.delete(inner);
+      row.classList.remove('sliding');
+      if (home && !inner.style.transform) row.classList.remove('swipe-r', 'swipe-l');
+      return true;
+    });
   }
   function closeReveal() {
     if (!revealed) return;
     const r = revealed;
     revealed = null;
-    setX(r, 0, true);
-    setTimeout(() => {
-      if (revealed !== r) r.classList.remove('swipe-l', 'sliding');
-      if (renderQueued) render();
-    }, 240);
+    setX(r, 0, true).then(() => { if (renderQueued) render(); });
   }
   // The gesture ends without a swipe or a tap (a scroll, a view change, a lost row).
   function dropGesture() {
@@ -653,10 +890,10 @@
     const rw = revealWidth(row);
     if (!cancelled && cur.x > w * 0.4) {
       revealed = null;
-      const lift = leave(cur.id);
+      const unlock = lock(cur.id);
       markDone(cur.id); // written at release, before the exit plays
-      setX(row, w, true);
-      setTimeout(() => collapse(row, lift), 180);
+      // The collapse waits for the slide to land (it used to start 40ms before).
+      setX(row, w, true).then(() => collapse(row)).finally(unlock);
       return release();
     }
     row.classList.remove('armed');
@@ -665,9 +902,8 @@
       setX(row, -rw, true);
       revealed = row;
     } else {
-      setX(row, 0, true);
       if (revealed === row) revealed = null;
-      setTimeout(() => row.classList.remove('swipe-r', 'swipe-l', 'sliding'), 240);
+      setX(row, 0, true); // the swipe classes go when it lands
     }
     release();
   }
@@ -711,8 +947,13 @@
     const row = e.target.closest('.row');
     if (!row) return;
     dropGesture(); // Safari sends no pointerup after a drag, so the press ends here
+    row.classList.add('dragging');
     e.dataTransfer.setData('application/x-todo-id', row.dataset.id);
     e.dataTransfer.effectAllowed = 'move';
+  });
+  // On the document: a render during the drag can take the row out of the list.
+  document.addEventListener('dragend', () => {
+    for (const r of list.querySelectorAll('.row.dragging')) r.classList.remove('dragging');
   });
   for (const nav of document.querySelectorAll('.nav-item')) {
     const s = nav.dataset.section;
@@ -724,81 +965,158 @@
     nav.addEventListener('drop', (e) => {
       nav.classList.remove('drop');
       const id = e.dataTransfer.getData('application/x-todo-id');
-      if (id) { e.preventDefault(); moveTo(id, s); }
+      if (!id) return;
+      e.preventDefault();
+      const it = items[id];
+      if (!it || it.done || it.section === s) return; // its own section: nothing moves, nothing slides
+      // Leaves like a menu move: the lock goes on, then the op is written at the drop.
+      const row = byId(id);
+      if (!row || slideOut(row, -1)) moveTo(id, s);
     });
   }
 
   /* ---------- Move menu (long press, right click, move icon) ---------- */
   const menu = $('menu');
   let menuRow = null;
+  let menuOn = false;     // false as soon as it starts to leave
+  let menuOpener = null;  // takes focus back when the menu closes
+  const menuScale = () => 'scale(' + (1 - 0.04 * M.dist) + ')';
   function openMenu(row, anchor, x, y) {
     if (gone(row)) return; // a detached row would put the menu in the corner
     closeReveal();
     const it = items[row.dataset.id];
     if (!it) return;
+    if (menuRow && menuRow !== row) menuRow.classList.remove('menu-open');
     menuRow = row;
+    menuOn = true;
+    menuOpener = anchor || row;
     row.classList.add('menu-open');
     menu.innerHTML = '<div class="meta menu-title">Move to</div>' + SECTIONS.map((s) =>
       '<button class="sec" role="menuitem" data-move="' + s + '"' + (s === it.section ? ' aria-current="true"' : '') + '>' + LABEL[s] + '</button>').join('');
+    rest(menu); // a menu still leaving comes back
+    menu.classList.remove('leaving');
     menu.hidden = false;
     const r = (anchor || row).getBoundingClientRect();
     const mw = menu.offsetWidth;
     const mh = menu.offsetHeight;
     let left = x !== undefined ? x : anchor ? r.right - mw : Math.min(r.left + 56, innerWidth - mw - 16);
     let top = y !== undefined ? y : r.bottom + 4;
-    if (top + mh > innerHeight - 16) top = (y !== undefined ? y : r.top) - mh - 4;
+    const above = top + mh > innerHeight - 16;
+    if (above) top = (y !== undefined ? y : r.top) - mh - 4;
     menu.style.left = Math.max(12, Math.min(left, innerWidth - mw - 12)) + 'px';
     menu.style.top = Math.max(12, top) + 'px';
+    // It grows from the corner next to what opened it.
+    menu.style.transformOrigin = (above ? 'bottom ' : 'top ') + (anchor ? 'right' : 'left');
+    play(menu, [{ opacity: 0, transform: menuScale() }, { opacity: 1, transform: 'none' }], { duration: M.exit });
     const first = menu.querySelector('button.sec:not([aria-current])');
     if (first && !(g && g.touch)) first.focus({ preventScroll: true });
   }
   function closeMenu() {
-    if (menu.hidden) return;
-    menu.hidden = true;
+    if (!menuOn) return;
+    menuOn = false;
+    const back = menu.contains(document.activeElement) ? menuOpener : null;
+    const row = menuRow;
+    menuOpener = null;
     if (menuRow) menuRow.classList.remove('menu-open');
     menuRow = null;
+    menu.classList.add('leaving');
+    leave(menu, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: menuScale() }]).then((ok) => {
+      if (!ok) return;
+      menu.hidden = true;
+      menu.classList.remove('leaving');
+      rest(menu);
+    });
+    // Focus goes back to what opened the menu. The move button hides with the menu, so then the row.
+    // A row that is leaving takes it itself: its move button hides once the row slides from under
+    // the pointer, and the write that removes the row passes focus on to the next one.
+    if (back && back.isConnected) {
+      if (row && row.isConnected && gone(row)) row.focus({ preventScroll: true });
+      else back.focus({ preventScroll: true });
+      if (document.activeElement !== back && row && row.isConnected) row.focus({ preventScroll: true });
+    }
     wake();
   }
   menu.addEventListener('click', (e) => {
     const b = e.target.closest('button.sec');
-    if (!b) return;
+    if (!b || !menuOn) return;
     const row = menuRow;
     // The leaving lock goes on before closeMenu lets go, so the slide plays on the row on screen.
     if (row && !b.hasAttribute('aria-current') && slideOut(row, -1)) moveTo(row.dataset.id, b.dataset.move);
     closeMenu();
   });
   document.addEventListener('pointerdown', (e) => {
-    if (!menu.hidden && !menu.contains(e.target)) {
+    if (menuOn && !menu.contains(e.target)) {
       closeMenu();
       swallow(400);
     }
   }, true);
 
   /* ---------- Sheets ---------- */
+  // The sheets and the confirm are modal: what is behind them goes inert, and focus goes
+  // back to the opener when they close (pass opener false on close to skip that).
+  const modals = new Map(); // open wrap -> { el, id } of its opener
+  function modal(open, wrap, opener) {
+    const box = wrap.querySelector('.sheet, .dialog');
+    const back = open ? null : modals.get(wrap);
+    if (open) {
+      box.setAttribute('aria-modal', 'true');
+      const el = opener || document.activeElement;
+      const row = el && el.closest ? el.closest('#list > [data-id]') : null;
+      modals.set(wrap, { el, id: row ? row.dataset.id : null });
+    } else {
+      box.removeAttribute('aria-modal');
+      modals.delete(wrap);
+    }
+    const on = modals.size > 0;
+    for (const el of [document.querySelector('.sidebar'), document.querySelector('main'), $('fab'), $('switcher'), toastEl]) el.inert = on;
+    $('edit').inert = modals.has($('confirm'));
+    if (!back || opener === false) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && !a.closest('.sheet-wrap, .dialog-wrap')) return; // focus already went somewhere
+    // A row moved away from the edit sheet hands focus to the row that was next to it.
+    const el = back.el && back.el !== document.body && back.el.isConnected ? back.el
+      : (back.id && byId(back.id)) || (back.next && byId(back.next));
+    if (el) el.focus({ preventScroll: true });
+  }
+
   const closingSheets = new Set();
-  function openSheet(wrap, kb) {
+  function openSheet(wrap, kb, opener) {
     const sheet = wrap.querySelector('.sheet');
+    rest(sheet); // a sheet caught leaving comes back
+    rest(wrap.querySelector('.scrim'));
     sheet.style.transform = '';
-    sheet.classList.remove('closing');
     closingSheets.delete(sheet);
     setKb(sheet, kb === undefined ? keyboard() : kb);
     wrap.hidden = false;
+    modal(true, wrap, opener);
   }
-  function closeSheet(wrap, after) {
-    if (wrap.hidden) return;
+  // after always runs once, also when the sheet is opened again before it has left.
+  function closeSheet(wrap, after, refocus = true) {
     const sheet = wrap.querySelector('.sheet');
-    if (desk.matches || reduced.matches) { wrap.hidden = true; if (after) after(); return; }
+    if (wrap.hidden || closingSheets.has(sheet)) return;
+    const scrim = wrap.querySelector('.scrim');
     closingSheets.add(sheet); // the keyboard dropping now does not move it
-    sheet.classList.add('closing');
-    // Its height plus the keyboard offset (--kb is negative), so it ends below the screen.
-    sheet.style.transform = 'translateY(calc(100% - var(--kb, 0px)))';
-    setTimeout(() => {
-      closingSheets.delete(sheet);
-      wrap.hidden = true;
-      sheet.classList.remove('closing');
-      sheet.style.transform = '';
+    modal(false, wrap, refocus);
+    let frames;
+    if (M.reduced) frames = [{ opacity: 1 }, { opacity: 0 }];
+    // Desktop sheets are centred with transform, so the scale rides on its own property.
+    else if (desk.matches) frames = [{ opacity: 1, scale: 1 }, { opacity: 0, scale: 0.98 }];
+    else {
+      // From where it is (a drag may have moved it) to its height plus the keyboard offset
+      // (--kb is negative), so it ends below the screen.
+      const kb = parseFloat(sheet.style.getPropertyValue('--kb')) || 0;
+      frames = [{ transform: sheet.style.transform || 'none' }, { transform: 'translateY(' + (sheet.offsetHeight - kb) + 'px)' }];
+    }
+    leave(scrim, [{ opacity: 1 }, { opacity: 0 }]);
+    leave(sheet, frames).then(() => {
+      if (closingSheets.delete(sheet)) {
+        wrap.hidden = true;
+        sheet.style.transform = '';
+        rest(sheet);
+        rest(scrim);
+      }
       if (after) after();
-    }, 180);
+    });
   }
 
   // Keep the open sheet above the iPhone keyboard. The offset rides on the CSS translate
@@ -836,9 +1154,10 @@
   for (const wrap of [$('capture'), $('edit')]) {
     const sheet = wrap.querySelector('.sheet');
     let s = null;
-    let snapTimer = 0;
+    let back = null; // the snap-back glide
     sheet.addEventListener('pointerdown', (e) => {
-      if (desk.matches || e.target.closest('textarea, input, button')) return;
+      if (desk.matches || closingSheets.has(sheet) || e.target.closest('textarea, input, button')) return;
+      if (back) { back.cancel(); back = null; }
       s = { y0: e.clientY, dy: 0, pid: e.pointerId };
       try { sheet.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       sheet.classList.add('dragging');
@@ -855,11 +1174,14 @@
       s = null;
       if (far) (wrap.id === 'edit' ? closeEdit : closeCapture)();
       else {
-        sheet.classList.add('closing');
+        const from = sheet.style.transform;
         sheet.style.transform = '';
-        // Off again once the snap-back ends, so the next drag follows the finger.
-        clearTimeout(snapTimer);
-        snapTimer = setTimeout(() => { if (!closingSheets.has(sheet)) sheet.classList.remove('closing'); }, 180);
+        // A glide on its own, so no transition is left behind for the next drag.
+        if (from && !M.reduced) {
+          const p = play(sheet, [{ transform: from }, { transform: 'none' }]);
+          back = p.anim;
+          p.then(() => { if (back === p.anim) back = null; });
+        }
       }
     };
     sheet.addEventListener('pointerup', end);
@@ -899,7 +1221,8 @@
     const v = cleanText(capInput.value);
     capInput.value = '';
     capInput.blur();
-    closeSheet($('capture'), () => { capClosing = false; if (v) addTask(v); });
+    if (v) addTask(v); // written at the tap: the page can hide before the sheet has left
+    closeSheet($('capture'), () => { capClosing = false; });
   }
   capInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
@@ -952,8 +1275,10 @@
     editId = id;
     editText.value = it.text;
     paintEditSeg(it.section);
-    openSheet($('edit'));
+    const a = document.activeElement;
+    openSheet($('edit'), undefined, list.contains(a) ? a : desk.matches ? row : null);
     if (desk.matches) { editText.focus(); editText.setSelectionRange(editText.value.length, editText.value.length); }
+    else $('editClose').focus({ preventScroll: true }); // on the phone the keyboard waits for a tap in the text
   }
   function paintEditSeg(section) {
     for (const b of document.querySelectorAll('#editSeg button')) b.setAttribute('aria-checked', String(b.dataset.section === section));
@@ -968,12 +1293,8 @@
     if (editId === null) return; // already closing
     saveEditText();
     editText.blur();
-    const id = editId;
     editId = null;
-    closeSheet($('edit'), () => {
-      const row = list.querySelector('.row[data-id="' + id + '"]');
-      if (row && desk.matches) row.focus({ preventScroll: true });
-    });
+    closeSheet($('edit')); // focus goes back to the row it opened from
   }
   editText.addEventListener('input', () => {
     clearTimeout(editTimer);
@@ -989,21 +1310,52 @@
       const it = items[editId];
       if (!it || it.section === b.dataset.section) return;
       saveEditText();
+      // Where focus goes on close if the row has left by then (only when it came from the row).
+      const back = modals.get($('edit'));
+      const row = byId(editId);
+      if (back && back.id === editId && row) back.next = neighbour(row);
       moveTo(editId, b.dataset.section, false);
       paintEditSeg(b.dataset.section);
     });
   }
-  $('editDelete').addEventListener('click', () => {
-    $('confirm').hidden = false;
+  // The confirm fades in (app.css) and out.
+  const confirmWrap = $('confirm');
+  let confirmClosing = false;
+  function openConfirm() {
+    if (editId === null) return; // the edit sheet is already leaving
+    rest(confirmWrap.querySelector('.dialog'));
+    rest(confirmWrap.querySelector('.scrim'));
+    confirmClosing = false;
+    confirmWrap.hidden = false;
+    modal(true, confirmWrap, $('editDelete'));
     $('confirmCancel').focus();
-  });
-  $('confirmCancel').addEventListener('click', () => { $('confirm').hidden = true; });
+  }
+  function closeConfirm(refocus = true) {
+    if (confirmWrap.hidden || confirmClosing) return;
+    confirmClosing = true;
+    modal(false, confirmWrap, refocus);
+    const dialog = confirmWrap.querySelector('.dialog');
+    const scrim = confirmWrap.querySelector('.scrim');
+    const fade = [{ opacity: 1 }, { opacity: 0 }];
+    leave(scrim, fade);
+    leave(dialog, fade).then((ok) => {
+      if (!ok) return;
+      confirmWrap.hidden = true;
+      confirmClosing = false;
+      rest(dialog);
+      rest(scrim);
+    });
+  }
+  $('editDelete').addEventListener('click', openConfirm);
+  $('confirmCancel').addEventListener('click', () => closeConfirm());
   $('confirmDelete').addEventListener('click', () => {
-    $('confirm').hidden = true;
+    if (confirmClosing || editId === null) return;
+    closeConfirm(false); // focus goes with the edit sheet to the row, then next to it once the row leaves
     const id = editId;
     clearTimeout(editTimer);
     editId = null;
-    closeSheet($('edit'), () => remove(id));
+    remove(id); // written at the tap; the row collapses behind the leaving sheet
+    closeSheet($('edit'));
   });
 
   /* ---------- Keyboard (desktop) ---------- */
@@ -1011,8 +1363,8 @@
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') {
-      if (!$('confirm').hidden) { $('confirm').hidden = true; return; }
-      if (!menu.hidden) { closeMenu(); return; }
+      if (!confirmWrap.hidden) { closeConfirm(); return; }
+      if (menuOn) { closeMenu(); return; }
       if (!$('edit').hidden) { closeEdit(); return; }
       if (!$('capture').hidden) { closeCapture(); return; }
       closeReveal();
@@ -1020,7 +1372,7 @@
     }
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || !$('edit').hidden || !$('capture').hidden || !$('confirm').hidden) return;
-    if (!menu.hidden) {
+    if (menuOn) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         const bs = Array.from(menu.querySelectorAll('button.sec'));
         const i = bs.indexOf(document.activeElement);
@@ -1049,14 +1401,7 @@
     if (k === 'Enter' && e.target === focused) { e.preventDefault(); openEdit(focused.dataset.id); return; }
     if (k === ' ' && e.target === focused) {
       e.preventDefault();
-      // The next row that stays (rows still leaving are skipped), else the one above.
-      let next = focused.nextElementSibling;
-      while (next && gone(next)) next = next.nextElementSibling;
-      if (!next) {
-        next = focused.previousElementSibling;
-        while (next && gone(next)) next = next.previousElementSibling;
-      }
-      if (completeRow(focused) && next) focusNext = next.dataset.id; // focused in the render that removes this row
+      completeRow(focused); // the render that removes it focuses the next row that stays
     }
   });
 

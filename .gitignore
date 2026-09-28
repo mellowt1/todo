@@ -18,3 +18,6 @@ live-shots/
 
 # WebKit screenshots from npm run check:webkit
 screenshots/webkit/
+
+# Motion videos recorded for review before a push
+screenshots/motion/

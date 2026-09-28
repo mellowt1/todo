@@ -1,4 +1,6 @@
 // Release 1 checks: per-row locks (M1) and the swipe, toast, sheet and keyboard fixes (B1 B2 B3 B8 B9).
+// Release 2a checks: motion tokens and awaited exits (M2), FLIP (M3), overlay exits (A2), the check (A3),
+// the toast (A4), Undo (A6), the sidebar drop (C1), focus (X1) and modals (X2).
 // Every check runs twice, with reduced motion off and on, in Chromium or WebKit.
 //   npm run feel           Chromium
 //   npm run feel:webkit    WebKit
@@ -6,7 +8,7 @@
 // Uses the dev values in worker/.dev.vars. Never the real code.
 import { chromium, webkit } from 'playwright';
 import { readFileSync } from 'node:fs';
-import assert from 'node:assert/strict';
+import strict from 'node:assert/strict';
 import { touch } from './touch.mjs';
 
 const vars = Object.fromEntries(readFileSync(new URL('../worker/.dev.vars', import.meta.url), 'utf8')
@@ -18,6 +20,12 @@ const APP = process.env.APP_URL || 'http://localhost:8080/';
 const CODE = vars.TODO_CODE;
 const OPEN = APP + '?c=' + CODE + '&api=' + encodeURIComponent(API);
 const ONLY = process.env.ONLY ? new RegExp(process.env.ONLY) : null;
+// SOFT=1 lists every failed assertion of a check instead of stopping at the first.
+const SOFT = process.env.SOFT === '1';
+let softFails = [];
+const assert = SOFT
+  ? Object.fromEntries(['ok', 'equal', 'notEqual', 'deepEqual'].map((k) => [k, (...a) => { try { strict[k](...a); } catch (e) { softFails.push(e.message.split('\n')[0]); } }]))
+  : strict;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------- API helpers ---------- */
@@ -114,11 +122,128 @@ function kit() {
       return { heights, checks: log.filter((m) => m.target === circle).length };
     };
   };
+
+  /* Release 2a helpers */
+  // Calls fn on every frame until stopped and keeps what it returns, with the time.
+  window.__frames = (fn) => {
+    const t0 = performance.now();
+    const out = [];
+    let on = true;
+    const tick = () => {
+      if (!on) return;
+      out.push(Object.assign({ t: Math.round(performance.now() - t0) }, fn()));
+      requestAnimationFrame(tick);
+    };
+    tick();
+    return () => { on = false; return out; };
+  };
+  // Where transforms and the translate and scale properties put an element, as computed now.
+  window.__tr = (el) => {
+    const cs = getComputedStyle(el);
+    let x = 0, y = 0, s = 1;
+    if (cs.transform && cs.transform !== 'none') {
+      const m = new DOMMatrixReadOnly(cs.transform);
+      x += m.m41; y += m.m42; s = Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d));
+    }
+    if (cs.translate && cs.translate !== 'none') { const p = cs.translate.split(' '); x += parseFloat(p[0]) || 0; y += parseFloat(p[1] || '0') || 0; }
+    if (cs.scale && cs.scale !== 'none') s *= Math.max(...cs.scale.split(' ').map(parseFloat));
+    return { x, y, s };
+  };
+  // What the eye sees of a row: its opacity times its inner's, and its shift.
+  const rowLook = (row) => {
+    const inner = row.querySelector('.row-inner');
+    const a = __tr(row), b = inner ? __tr(inner) : { x: 0, y: 0 };
+    const op = parseFloat(getComputedStyle(row).opacity) * (inner ? parseFloat(getComputedStyle(inner).opacity) : 1);
+    return { op, x: a.x + b.x, y: a.y + b.y, anims: row.getAnimations().length + (inner ? inner.getAnimations().length : 0) };
+  };
+  window.__rowLook = rowLook;
+  // When does a row start to collapse, and was its slide still running then? before() is
+  // sampled on every frame (and every write to the row) until the collapse starts.
+  window.__leaveWatch = (row, before) => {
+    const t0 = performance.now();
+    const inner = row.querySelector('.row-inner');
+    const h0 = row.getBoundingClientRect().height;
+    const slides = new Set();
+    const w = { start: -1, slideRunning: false, seen: [] };
+    const started = () => !row.isConnected || row.classList.contains('collapsing') || row.style.height !== '' || row.style.opacity !== ''
+      || row.getAnimations().some((a) => a.playState === 'running') || row.getBoundingClientRect().height < h0 - 0.5;
+    let on = true;
+    const check = () => {
+      if (!on || w.start >= 0) return;
+      if (started()) {
+        w.start = Math.round(performance.now() - t0);
+        w.slideRunning = [...slides].some((a) => a.playState === 'running');
+        return;
+      }
+      for (const a of inner.getAnimations()) slides.add(a);
+      if (before) w.seen.push(Object.assign({ t: Math.round(performance.now() - t0) }, before()));
+    };
+    const mo = new MutationObserver(check);
+    mo.observe(row, { attributes: true, attributeFilter: ['style', 'class'] });
+    const tick = () => { if (!on) return; check(); requestAnimationFrame(tick); };
+    tick();
+    return () => { check(); on = false; mo.disconnect(); return w; };
+  };
+  // Follows one row's top frame by frame, the order of the rows, and the first 120ms of
+  // any row that was not there at the start.
+  window.__follow = (watchId) => {
+    const list = document.getElementById('list');
+    const t0 = performance.now();
+    const before = new Set([...list.querySelectorAll('.row')].map((r) => r.dataset.id));
+    const tops = [];
+    const added = {};
+    const look = (row) => {
+      const id = row.dataset && row.dataset.id;
+      if (!id || before.has(id) || !row.isConnected) return;
+      const t = performance.now() - t0;
+      const a = added[id] || (added[id] = { at: t, minOp: 1, minY: 0, maxShift: 0, anims: 0 });
+      if (t - a.at > 120) return;
+      const l = rowLook(row);
+      a.minOp = Math.min(a.minOp, l.op);
+      a.minY = Math.min(a.minY, l.y);
+      a.maxShift = Math.max(a.maxShift, Math.abs(l.y), Math.abs(l.x));
+      a.anims = Math.max(a.anims, l.anims);
+    };
+    const mo = new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.matches('.row')) look(n); });
+    mo.observe(list, { childList: true });
+    let on = true;
+    const tick = () => {
+      if (!on) return;
+      const r = __row(watchId);
+      tops.push(r ? Math.round(r.getBoundingClientRect().top * 10) / 10 : null);
+      for (const row of list.querySelectorAll('.row')) look(row);
+      requestAnimationFrame(tick);
+    };
+    tick();
+    return () => { on = false; mo.disconnect(); return { tops, added, order: [...list.querySelectorAll('.row')].map((r) => r.dataset.id) }; };
+  };
+  // An overlay on every frame: shown or not, its opacity, its box, and its scrim's opacity.
+  window.__overlay = (wrapSel, boxSel) => __frames(() => {
+    const wrap = document.querySelector(wrapSel);
+    const el = document.querySelector(boxSel);
+    const scrim = wrap.querySelector('.scrim');
+    const b = el.getBoundingClientRect();
+    const open = !wrap.hidden && getComputedStyle(wrap).display !== 'none' && b.width > 0;
+    return {
+      open, op: parseFloat(getComputedStyle(el).opacity) * (wrap === el ? 1 : parseFloat(getComputedStyle(wrap).opacity)),
+      scrim: scrim ? parseFloat(getComputedStyle(scrim).opacity) : 1,
+      l: b.left, r: b.right, top: b.top, bot: b.bottom, w: b.width,
+      dx: b.left + b.width / 2 - innerWidth / 2, dy: b.top + b.height / 2 - innerHeight / 2,
+    };
+  });
+  // Rows that are half gone: squashed, faded, or still carrying exit styles.
+  window.__ghosts = () => [...document.querySelectorAll('#list .row:not(.skeleton)')]
+    .filter((r) => r.offsetHeight < 30 || r.style.height || r.style.opacity || r.classList.contains('collapsing') || r.classList.contains('sliding')
+      || rowLook(r).op < 0.99 || Math.abs(rowLook(r).x) > 0.5)
+    .map((r) => '"' + r.querySelector('.text').textContent + '" ' + r.offsetHeight + 'px ' + r.className + ' ' + (r.getAttribute('style') || ''));
 }
 
 /* ---------- Runner ---------- */
 const browser = await (ENGINE === 'webkit' ? webkit : chromium).launch();
 const results = [];
+// A check this engine can not make throws Skip; a part it can not make is noted with part().
+class Skip extends Error {}
+const skipped = [];
 async function test(name, motion, fn) {
   if (ONLY && !ONLY.test(name)) return;
   const label = name + ' [' + motion + ']';
@@ -139,13 +264,22 @@ async function test(name, motion, fn) {
   };
   try {
     await resetServer();
-    await fn(open, motion);
+    const part = (reason) => { skipped.push([label, 'part: ' + reason]); console.log('      part skipped:', reason); };
+    softFails = [];
+    await fn(open, motion, part);
     assert.deepEqual(errors, [], 'page error');
+    if (softFails.length) throw new Error(softFails.join(' | '));
     results.push(['ok', label]);
     console.log('ok  ', label);
   } catch (e) {
-    results.push(['FAIL', label, e.message.split('\n')[0]]);
-    console.log('FAIL', label, '\n     ', e.message.split('\n')[0]);
+    if (e instanceof Skip) {
+      skipped.push([label, e.message]);
+      console.log('skip', label, '\n     ', e.message);
+      return;
+    }
+    const why = [...(SOFT && !softFails.includes(e.message.split(' | ')[0]) ? softFails : []), e.message.split('\n')[0]].join(' | ');
+    results.push(['FAIL', label, why]);
+    console.log('FAIL', label, '\n     ', why);
   } finally {
     for (const c of contexts) await c.close().catch(() => {});
   }
@@ -155,6 +289,32 @@ const gone = (page, ids, ms = 3000) => until(async () => !(await page.evaluate((
 const box = (page, sel) => page.evaluate((sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, cx: r.left + r.width / 2, h: r.height }; }, sel);
 // The y part of the computed 'translate' ('none', '0px -300px', ...).
 const translateY = (page, sel) => page.evaluate((sel) => { const t = getComputedStyle(document.querySelector(sel)).translate; return t === 'none' ? 0 : parseFloat(t.split(' ')[1] || '0'); }, sel);
+
+/* ---------- Release 2a helpers ---------- */
+// Runs act and follows row watchId frame by frame. mid counts the frames where its top was
+// between where it started and where it ended: 0 is a snap, several is a glide.
+async function follow(page, watchId, act, ms = 1000) {
+  await page.evaluate((id) => { window.__stopFollow = __follow(id); }, watchId);
+  await act();
+  await page.waitForTimeout(ms);
+  const f = await page.evaluate(() => __stopFollow());
+  const ys = f.tops.filter((y) => y !== null);
+  const from = ys[0], to = ys[ys.length - 1];
+  const lo = Math.min(from, to) + 1, hi = Math.max(from, to) - 1;
+  f.mid = ys.filter((y) => y > lo && y < hi).length;
+  f.moved = Math.round(Math.abs(to - from));
+  return f;
+}
+// Samples an overlay while act runs and for ms after.
+async function overlay(page, wrapSel, boxSel, act, ms = 600) {
+  await page.evaluate(([w, b]) => { window.__stopOverlay = __overlay(w, b); }, [wrapSel, boxSel]);
+  await act();
+  await page.waitForTimeout(ms);
+  return page.evaluate(() => __stopOverlay());
+}
+// Frames where the overlay was still on screen but part way faded.
+const fading = (fr) => fr.filter((f) => f.open && f.op > 0.02 && f.op < 0.95);
+const ms = (v) => (/ms$/.test(v) ? parseFloat(v) : /s$/.test(v) ? parseFloat(v) * 1000 : NaN);
 
 for (const motion of ['no-preference', 'reduce']) {
   console.log(`\n${ENGINE}, reduced motion: ${motion}`);
@@ -568,11 +728,699 @@ for (const motion of ['no-preference', 'reduce']) {
     assert.equal(await translateY(desk, '#edit .sheet'), 0, 'desktop sheet offset');
     assert.equal(await desk.evaluate(() => document.querySelector('#edit .sheet').style.bottom), '', 'desktop style.bottom');
   });
+
+  /* ================= Release 2a: M2 tokens and awaited animations ================= */
+  await test('M2 tokens: --dur-press, --dur-move, --dur-exit and --dist on :root, no --t: 1ms', motion, async (open, motion) => {
+    await seed([['Anything']]);
+    const page = await open();
+    const v = await page.evaluate(() => {
+      const cs = getComputedStyle(document.documentElement);
+      return Object.fromEntries(['--dur-press', '--dur-move', '--dur-exit', '--dist', '--t'].map((k) => [k, cs.getPropertyValue(k).trim()]));
+    });
+    assert.equal(v['--dist'], motion === 'reduce' ? '0' : '1', '--dist is ' + JSON.stringify(v['--dist']));
+    const move = ms(v['--dur-move']);
+    assert.ok(move >= 180 && move <= 240, '--dur-move is ' + JSON.stringify(v['--dur-move']));
+    for (const k of ['--dur-press', '--dur-exit']) assert.ok(ms(v[k]) > 0 && ms(v[k]) <= 240, k + ' is ' + JSON.stringify(v[k]));
+    assert.notEqual(v['--t'], '1ms', '--t is still 1ms');
+  });
+
+  await test('M2 a row slides all the way before it collapses (swipe commit, menu pick)', motion, async (open) => {
+    const ids = await seed([['Swipe me done'], ['Pick me a section'], ['Stays one'], ['Stays two']]);
+    const page = await open();
+    const t = await touch(page, ENGINE);
+    const w = await page.evaluate(() => innerWidth);
+    await t.drag(page.locator(`.row[data-id="${ids[0]}"]`), Math.round(w * 0.45), { end: false });
+    await page.evaluate((id) => { window.__lw = __leaveWatch(__row(id)); }, ids[0]);
+    await t.release();
+    await gone(page, [ids[0]]);
+    let a = await page.evaluate(() => __lw());
+    assert.ok(a.start >= 0, 'the swiped row never collapsed');
+    assert.ok(!a.slideRunning, `swipe: the row started collapsing at ${a.start}ms with its slide still running`);
+    await serverHas((i) => i.id === ids[0] && i.done, 'done on server');
+
+    await t.longPress(page.locator(`.row[data-id="${ids[1]}"]`));
+    await page.waitForSelector('#menu:not([hidden])');
+    await page.waitForTimeout(300);
+    await page.evaluate((id) => { window.__lw = __leaveWatch(__row(id)); __tapSel('#menu button[data-move="soon"]'); }, ids[1]);
+    await gone(page, [ids[1]]);
+    a = await page.evaluate(() => __lw());
+    assert.ok(a.start >= 0, 'the picked row never collapsed');
+    assert.ok(!a.slideRunning, `menu pick: the row started collapsing at ${a.start}ms with its slide still running`);
+    await serverHas((i) => i.id === ids[1] && i.section === 'soon', 'move on server');
+  });
+
+  await test('M2 motion follows a reduced-motion change at runtime', motion, async (open, motion) => {
+    const ids = await seed([['Top row'], ['Second row']]);
+    const page = await open();
+    const now = motion === 'reduce' ? 'no-preference' : 'reduce';
+    await page.emulateMedia({ reducedMotion: now });
+    await page.waitForTimeout(150);
+    let newId;
+    const f = await follow(page, ids[0], async () => { [newId] = await seed([['Arrived after the switch']]); await page.evaluate(() => __poll()); }, 1200);
+    assert.ok(f.added[newId], 'the new task showed');
+    assert.ok(f.moved > 20, 'the top row moved down ' + f.moved + 'px');
+    if (now === 'reduce') {
+      assert.equal(f.mid, 0, 'rows still glide after reduced motion came on: ' + f.tops.join(' '));
+      assert.ok(f.added[newId].maxShift <= 0.5, 'the new row still slides after reduced motion came on');
+    } else {
+      assert.ok(f.mid >= 2, 'rows still snap after reduced motion went off: ' + f.tops.join(' '));
+    }
+  });
+
+  /* ================= M3: FLIP around renderList ================= */
+  await test('M3 a task from the other device: the rows below glide down, the new row fades in', motion, async (open, motion) => {
+    const ids = await seed([['Was first'], ['Was second'], ['Was third']]);
+    const page = await open();
+    let newId;
+    const f = await follow(page, ids[0], async () => { [newId] = await seed([['Arrived from the other device']]); await page.evaluate(() => __poll()); }, 1200);
+    const n = f.added[newId];
+    assert.ok(n, 'the new task showed');
+    assert.equal(f.order[0], newId, 'the new task is on top');
+    assert.ok(f.moved > 20, 'the old first row moved down ' + f.moved + 'px');
+    assert.ok(n.minOp < 0.95, 'the new row appeared at full opacity, no fade');
+    if (motion === 'reduce') {
+      assert.equal(f.mid, 0, 'rows glide with reduced motion: ' + f.tops.join(' '));
+      assert.ok(n.maxShift <= 0.5, 'the new row slides with reduced motion (' + n.maxShift + 'px)');
+    } else {
+      assert.ok(f.mid >= 2, 'the rows below jumped in one frame: ' + f.tops.join(' '));
+      assert.ok(n.minY <= -1, 'the new row did not come down from above (' + n.minY + 'px)');
+    }
+  });
+
+  await test('M3 a poll that changes nothing on screen leaves the list alone (list and Done)', motion, async (open) => {
+    await seed([['Open one'], ['Open two'], ['Done one', 'today', { done: true, doneAt: Date.now() - 60000 }]]);
+    const page = await open();
+    for (const where of ['Today', 'Done']) {
+      if (where === 'Done') { await page.click('#historyBtn'); await page.waitForSelector('.drow'); await page.waitForTimeout(300); }
+      await page.evaluate(() => {
+        window.__muts = [];
+        window.__mo = new MutationObserver((ms) => { __muts.push(...ms.map((m) => m.type)); });
+        __mo.observe(document.getElementById('list'), { childList: true, subtree: true });
+      });
+      const rev0 = await page.evaluate(() => __rev());
+      await otherDevice('Someday, on the other device ' + where);
+      await page.evaluate(() => __poll());
+      await until(async () => (await page.evaluate(() => __rev())) > rev0, 4000, 'the poll to land');
+      await page.waitForTimeout(400);
+      const muts = await page.evaluate(() => { __mo.disconnect(); return __muts.length; });
+      assert.equal(muts, 0, where + ': the list was rewritten for a change in another section');
+    }
+  });
+
+  await test('M3 a section switch draws at once; an added task enters once while the rows below glide', motion, async (open, motion) => {
+    const ids = await seed([['Today one'], ['Today two'], ['Soon one', 'soon'], ['Soon two', 'soon']]);
+    const desk = await open({ desktop: true });
+    await desk.evaluate(() => {
+      window.__stopSw = __frames(() => ({ rows: [...document.querySelectorAll('#list .row')].map((r) => { const l = __rowLook(r); return l.anims + '/' + l.op.toFixed(2) + '/' + l.y.toFixed(1); }) }));
+    });
+    await desk.click('.nav-item[data-section="soon"]');
+    await desk.waitForTimeout(400);
+    const fr = await desk.evaluate(() => __stopSw());
+    const moving = fr.flatMap((f) => f.rows.filter((r) => r !== '0/1.00/0.0').map((r) => f.t + 'ms ' + r));
+    assert.deepEqual(moving.slice(0, 4), [], 'rows animated on a section switch (animations/opacity/y)');
+
+    await desk.keyboard.press('n');
+    await desk.waitForSelector('#inlineAdd:not([hidden])');
+    await desk.keyboard.type('Freshly added');
+    const f = await follow(desk, ids[2], () => desk.keyboard.press('Enter'), 1000);
+    const [nid] = Object.keys(f.added);
+    assert.ok(nid, 'the new row showed');
+    assert.ok(f.added[nid].anims <= 1, 'the new row ran ' + f.added[nid].anims + ' animations at once');
+    assert.ok(f.moved > 20, 'the row below moved ' + f.moved + 'px');
+    if (motion === 'reduce') assert.equal(f.mid, 0, 'rows glide with reduced motion: ' + f.tops.join(' '));
+    else assert.ok(f.mid >= 2, 'the rows below jumped in one frame: ' + f.tops.join(' '));
+  });
+
+  await test('M3 no ghost row: Undo during the collapse, a pick on a task deleted elsewhere', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Undo me mid-collapse'], ['Row C'], ['Deleted elsewhere'], ['Row E']]);
+    const page = await open();
+    await page.evaluate((id) => __tap(id), ids[1]);
+    await page.waitForTimeout(250);
+    await page.click('#toastUndo');
+    await page.waitForTimeout(1500);
+    assert.ok(await inList(page, ids[1]), 'the row came back');
+    assert.deepEqual(await page.evaluate(() => __ghosts()), [], 'ghost rows after Undo');
+    assert.ok(!(await page.evaluate((id) => !!__row(id).querySelector('.circle.checked'), ids[1])), 'the returned row is still checked');
+
+    // Deleted on the other device while the menu is open; the pick then finds no task.
+    const t = await touch(page, ENGINE);
+    await t.longPress(page.locator(`.row[data-id="${ids[3]}"]`));
+    await page.waitForSelector('#menu:not([hidden])');
+    await postOps([{ op: 'delete', item: { id: ids[3], updatedAt: Date.now() + 1000 } }]);
+    const rev0 = await page.evaluate(() => __rev());
+    await page.evaluate(() => __poll());
+    await until(async () => (await page.evaluate(() => __rev())) > rev0, 4000, 'the poll to land');
+    await page.evaluate(() => __tapSel('#menu button[data-move="soon"]'));
+    await page.waitForTimeout(1200);
+    assert.ok(!(await inList(page, ids[3])), 'the deleted task left');
+    assert.deepEqual(await page.evaluate(() => __ghosts()), [], 'ghost rows after the pick');
+
+    // A render with nothing new for this list keeps it that way.
+    await otherDevice();
+    await page.evaluate(() => __poll());
+    await page.waitForTimeout(800);
+    assert.deepEqual(await page.evaluate(() => __ghosts()), [], 'ghost rows after the next poll');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('#list .row').length), 4, 'rows listed');
+  });
+
+  await test('M3 the sync answer does not bring back a row that left', motion, async (open) => {
+    const ids = await seed([['Tick and sync'], ['Stays put']]);
+    const page = await open();
+    await page.evaluate((id) => {
+      window.__back = 0;
+      new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.dataset.id === id) window.__back++; })
+        .observe(document.getElementById('list'), { childList: true });
+      __tap(id);
+    }, ids[0]);
+    await gone(page, [ids[0]]);
+    await serverHas((i) => i.id === ids[0] && i.done, 'done on server');
+    await page.waitForTimeout(600);
+    assert.equal(await page.evaluate(() => __back), 0, 'the row came back when the sync answered');
+  });
+
+  /* ================= A2: overlays leave the way they came ================= */
+  const scrimFades = (fr, name) => {
+    const on = fr.filter((f) => f.open);
+    assert.ok(on.some((f) => f.scrim > 0.02 && f.scrim < 0.95), `${name}: the scrim never faded out (${on.map((f) => f.scrim.toFixed(2)).join(' ')})`);
+    const up = on.findIndex((f, i) => i > 0 && f.scrim > on[i - 1].scrim + 0.02);
+    assert.equal(up, -1, name + ': the scrim came back up while closing');
+    assert.ok(!fr[fr.length - 1].open, name + ' closed');
+  };
+
+  await test('A2 phone sheets: the scrim fades out with the sheet (capture, edit)', motion, async (open) => {
+    const [id] = await seed([['Open my edit sheet']]);
+    const page = await open();
+    await page.click('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.waitForTimeout(400);
+    scrimFades(await overlay(page, '#capture', '#capture .sheet', () => page.keyboard.press('Escape')), 'capture');
+    await page.evaluate((id) => __tap(id, '.text'), id);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(400);
+    scrimFades(await overlay(page, '#edit', '#edit .sheet', () => page.click('#editClose')), 'edit');
+  });
+
+  await test('A2 desktop edit sheet: fades and scales from .98, centred on every frame', motion, async (open, motion) => {
+    const [id] = await seed([['Open me on the desk']]);
+    const desk = await open({ desktop: true });
+    const inF = await overlay(desk, '#edit', '#edit .sheet', () => desk.click(`.row[data-id="${id}"] .text`), 500);
+    const outF = await overlay(desk, '#edit', '#edit .sheet', () => desk.keyboard.press('Escape'), 500);
+    const rest = inF[inF.length - 1];
+    assert.ok(rest.open, 'the sheet opened');
+    const off = [...inF, ...outF].filter((f) => f.open && (Math.abs(f.dx) > 2 || Math.abs(f.dy) > 2));
+    assert.deepEqual(off.slice(0, 3).map((f) => `${f.t}ms ${f.dx.toFixed(1)},${f.dy.toFixed(1)}`), [], 'the sheet left the centre');
+    assert.ok([...inF, ...outF].every((f) => !f.open || f.w <= rest.w + 0.5), 'the sheet grew past its size');
+    assert.ok(inF.some((f) => f.open && f.op < 0.95), 'the sheet did not fade in');
+    assert.ok(fading(outF).length, 'the sheet did not fade out');
+    if (motion === 'no-preference') {
+      assert.ok(inF.some((f) => f.open && f.w < rest.w - 1), 'no scale from .98 on open: ' + inF.filter((f) => f.open).map((f) => f.w.toFixed(1)).join(' '));
+      assert.ok(fading(outF).some((f) => f.w < rest.w - 1), 'no scale to .98 on close');
+    }
+    scrimFades(outF, 'desktop edit');
+  });
+
+  await test('A2 the confirm dialog fades in and out, centred on every frame', motion, async (open) => {
+    const [id] = await seed([['Maybe delete me']]);
+    const desk = await open({ desktop: true });
+    await desk.click(`.row[data-id="${id}"] .text`);
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(300);
+    for (const [how, act] of [['Escape', () => desk.keyboard.press('Escape')], ['Cancel', () => desk.click('#confirmCancel')]]) {
+      const inF = await overlay(desk, '#confirm', '#confirm .dialog', () => desk.click('#editDelete'), 400);
+      assert.ok(inF.some((f) => f.open && f.op < 0.95), 'the confirm did not fade in');
+      const outF = await overlay(desk, '#confirm', '#confirm .dialog', act, 400);
+      assert.ok(fading(outF).length, how + ': the confirm did not fade out');
+      assert.ok(!outF[outF.length - 1].open, how + ': the confirm closed');
+      const off = [...inF, ...outF].filter((f) => f.open && (Math.abs(f.dx) > 2 || Math.abs(f.dy) > 2));
+      assert.deepEqual(off.slice(0, 3).map((f) => `${f.t}ms ${f.dx.toFixed(1)},${f.dy.toFixed(1)}`), [], how + ': the confirm left the centre');
+      assert.ok(!(await desk.isHidden('#edit')), how + ': the edit sheet stays open');
+    }
+  });
+
+  await test('A2 the menu grows from its anchor corner and fades out, below and above the row', motion, async (open, motion) => {
+    const ids = await seed(Array.from({ length: 14 }, (_, i) => ['Row ' + (i + 1)]));
+    const desk = await open({ desktop: true });
+    const low = await desk.evaluate(() => {
+      const rs = [...document.querySelectorAll('#list .row')].filter((r) => r.getBoundingClientRect().bottom < innerHeight - 20);
+      return rs[rs.length - 1].dataset.id;
+    });
+    for (const [id, where] of [[ids[0], 'below'], [low, 'above']]) {
+      await desk.hover(`.row[data-id="${id}"] .text`);
+      const inF = await overlay(desk, '#menu', '#menu', () => desk.click(`.row[data-id="${id}"] .move-btn`), 400);
+      const rest = inF[inF.length - 1];
+      const row = await box(desk, `.row[data-id="${id}"] .move-btn`); // the anchor
+      assert.ok(rest.open, 'the menu opened');
+      assert.ok(where === 'below' ? rest.top >= row.bottom - 1 : rest.bot <= row.top + 1, 'the menu did not open ' + where + ' its button');
+      assert.ok(inF.every((f) => !f.open || f.w <= rest.w + 0.5), 'the menu grew past its size');
+      if (motion === 'no-preference') {
+        const grow = inF.filter((f) => f.open && f.w < rest.w - 0.5);
+        assert.ok(grow.some((f) => f.w < rest.w - 1), `${where}: no scale from .96 (${inF.filter((f) => f.open).map((f) => f.w.toFixed(1)).join(' ')})`);
+        const drift = grow.filter((f) => Math.abs(f.r - rest.r) > 1 || Math.abs(where === 'below' ? f.top - rest.top : f.bot - rest.bot) > 1);
+        assert.deepEqual(drift.slice(0, 3).map((f) => `${f.t}ms right ${f.r.toFixed(1)} top ${f.top.toFixed(1)} bottom ${f.bot.toFixed(1)}`), [], where + ': the corner at the anchor moved while the menu grew');
+      }
+      const outF = await overlay(desk, '#menu', '#menu', () => desk.keyboard.press('Escape'), 400);
+      assert.ok(fading(outF).length, where + ': the menu did not fade out');
+      assert.ok(!outF[outF.length - 1].open, where + ': the menu closed');
+    }
+  });
+
+  /* ================= A3: the check moment ================= */
+  await test('A3 the check: strike and grey first, the collapse starts within 400ms, no pulse', motion, async (open, motion) => {
+    const ids = await seed([['Check me off'], ['Neighbour'], ['Third']]);
+    const page = await open();
+    const r = await page.evaluate((id) => new Promise((done) => {
+      const row = __row(id);
+      const text = row.querySelector('.text');
+      const circle = row.querySelector('.circle');
+      const ic = circle.querySelector('.ic');
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--secondary)';
+      document.body.append(probe);
+      const secondary = getComputedStyle(probe).color;
+      probe.remove();
+      let maxScale = 0, dash = '';
+      const offs = [];
+      const stop = __leaveWatch(row, () => {
+        const cs = getComputedStyle(text);
+        maxScale = Math.max(maxScale, __tr(circle).s, __tr(ic).s);
+        const is = getComputedStyle(ic);
+        if (is.strokeDasharray && is.strokeDasharray !== 'none') dash = is.strokeDasharray;
+        offs.push(parseFloat(is.strokeDashoffset) || 0);
+        return { strike: /line-through/.test(cs.textDecorationLine || cs.textDecoration), grey: cs.color === secondary };
+      });
+      __tap(id);
+      setTimeout(() => done(Object.assign(stop(), { maxScale, dash, offs })), 900);
+    }), ids[0]);
+    assert.ok(r.start >= 0, 'the row never collapsed');
+    assert.ok(r.start <= 420, `the collapse started ${r.start}ms after the tap`);
+    assert.ok(r.seen.some((s) => s.strike && s.grey), 'the text never showed a line-through in --secondary before the collapse');
+    assert.ok(r.maxScale <= 1.001, 'the circle scaled to ' + r.maxScale.toFixed(3));
+    if (motion === 'no-preference') {
+      const d = parseFloat(r.dash);
+      assert.ok(d >= 18 && d <= 22, 'check stroke-dasharray is ' + JSON.stringify(r.dash));
+      assert.ok(r.offs.some((o) => o > 0.5 && o < 19.5), 'the check stroke never drew (dashoffset ' + [...new Set(r.offs)].slice(0, 6).join(' ') + ')');
+    }
+    await serverHas((i) => i.id === ids[0] && i.done, 'done on server');
+  });
+
+  /* ================= A6: Undo ================= */
+  await test('A6 Undo: the row fades back into its old slot while the rows below part', motion, async (open, motion) => {
+    const ids = await seed([['Row A'], ['Undo brings me back'], ['Row C'], ['Row D']]);
+    const page = await open();
+    await page.evaluate((id) => __tap(id), ids[1]);
+    await gone(page, [ids[1]]);
+    await page.waitForTimeout(200);
+    const f = await follow(page, ids[2], () => page.click('#toastUndo'), 1000);
+    assert.deepEqual(f.order, ids, 'the row came back in its old slot');
+    const b = f.added[ids[1]];
+    assert.ok(b, 'the row came back');
+    assert.ok(b.minOp < 0.95, 'the row popped back at full opacity');
+    assert.ok(f.moved > 20, 'the row below moved ' + f.moved + 'px');
+    if (motion === 'reduce') {
+      assert.equal(f.mid, 0, 'rows glide with reduced motion: ' + f.tops.join(' '));
+      assert.ok(b.maxShift <= 0.5, 'the returning row slides with reduced motion');
+    } else {
+      assert.ok(f.mid >= 2, 'the rows below jumped in one frame: ' + f.tops.join(' '));
+    }
+    await serverHas((i) => i.id === ids[1] && !i.done, 'open again on server');
+  });
+
+  /* ================= C1: sidebar drop ================= */
+  await test('C1 sidebar drop: .dragging while dragged, the row slides out, its own section leaves no ghost', motion, async (open, motion, part) => {
+    const ids = await seed([['Row A'], ['Drop me on Soon'], ['Drop me on Today'], ['Row D']]);
+    const desk = await open({ desktop: true });
+    await desk.evaluate(() => { window.__starts = 0; document.addEventListener('dragstart', () => { __starts++; }, true); });
+    const drag = async (id, section, beforeDrop) => {
+      await desk.hover(`.row[data-id="${id}"] .text`);
+      await desk.mouse.down();
+      const n = await box(desk, `.nav-item[data-section="${section}"]`);
+      await desk.mouse.move(n.cx, n.top + n.h / 2, { steps: 8 });
+      const d = await desk.evaluate((id) => ({ starts: __starts, dragging: !!__row(id) && __row(id).classList.contains('dragging') }), id);
+      if (beforeDrop) await beforeDrop();
+      await desk.mouse.up();
+      return d;
+    };
+    const d = await drag(ids[1], 'soon', () => desk.evaluate((id) => {
+      window.__stopSlide = __frames(() => {
+        const r = __row(id);
+        const t = document.getElementById('toast');
+        const toast = !t.hidden && document.getElementById('toastText').textContent;
+        if (!r) return { con: false, toast };
+        const l = __rowLook(r);
+        return { con: true, toast, slid: Math.abs(l.x) > 2 || l.op < 0.99 || r.classList.contains('sliding') || r.classList.contains('collapsing') };
+      });
+    }, ids[1]));
+    if (!d.starts) {
+      await desk.evaluate(() => __stopSlide());
+      throw new Skip(`Playwright ${ENGINE} on Windows starts no native drag from the mouse, so there is nothing to drop`);
+    }
+    assert.ok(d.dragging, 'no .dragging on the row while it was dragged');
+    await desk.waitForTimeout(900);
+    const fr = await desk.evaluate(() => __stopSlide());
+    assert.equal(await desk.evaluate(() => document.querySelectorAll('.row.dragging').length), 0, '.dragging left after the drop');
+    if (ENGINE !== 'chromium') {
+      part('Playwright WebKit on Windows fires no drop, so the move and the same-section drop are checked in Chromium only');
+      return;
+    }
+    assert.ok(fr.some((f) => f.con && f.slid), 'the dropped row vanished without sliding out');
+    const toastAt = fr.find((f) => f.toast === 'Moved to Soon.');
+    assert.ok(toastAt && toastAt.t <= 300, 'no "Moved to Soon." toast at the drop');
+    await gone(desk, [ids[1]]);
+    await serverHas((i) => i.id === ids[1] && i.section === 'soon', 'move on server');
+
+    await drag(ids[2], 'today');
+    await desk.waitForTimeout(800);
+    assert.ok(await inList(desk, ids[2]), 'a drop on its own section removed the row');
+    assert.deepEqual(await desk.evaluate(() => __ghosts()), [], 'ghost rows after a drop on its own section');
+    await otherDevice();
+    await desk.evaluate(() => __poll());
+    await desk.waitForTimeout(800);
+    assert.deepEqual(await desk.evaluate(() => __ghosts()), [], 'ghost rows after the next poll');
+  });
+
+  /* ================= A4: the toast ================= */
+  await test('A4 two ticks and a move: one toast stays up with no bounce, the text follows, centred (desktop)', motion, async (open) => {
+    const ids = await seed([['Tick A'], ['Tick B'], ['Move C'], ['Stays']]);
+    const desk = await open({ desktop: true });
+    const cx = (await box(desk, '.col')).cx;
+    await desk.evaluate((cx) => {
+      const t = document.getElementById('toast');
+      const t0 = performance.now();
+      window.__hid = [];
+      new MutationObserver((ms) => { for (const m of ms) __hid.push(Math.round(performance.now() - t0)); }).observe(t, { attributes: true, attributeFilter: ['hidden'] });
+      window.__stopToast = __frames(() => {
+        const cs = getComputedStyle(t);
+        const b = t.getBoundingClientRect();
+        return { open: !t.hidden && cs.display !== 'none', op: parseFloat(cs.opacity), dx: b.left + b.width / 2 - cx, text: document.getElementById('toastText').textContent };
+      });
+    }, cx);
+    await desk.click(`.row[data-id="${ids[0]}"] .circle`);
+    await gone(desk, [ids[0]]);
+    await desk.click(`.row[data-id="${ids[1]}"] .circle`);
+    await gone(desk, [ids[1]]);
+    await desk.hover(`.row[data-id="${ids[2]}"] .text`);
+    await desk.click(`.row[data-id="${ids[2]}"] .move-btn`);
+    await desk.waitForSelector('#menu:not([hidden])');
+    await desk.click('#menu button[data-move="soon"]');
+    await desk.waitForTimeout(400);
+    const fr = await desk.evaluate(() => __stopToast());
+    const hid = await desk.evaluate(() => __hid);
+    const first = fr.find((f) => f.open);
+    assert.ok(first, 'no toast');
+    const from = first.t + 300;
+    const bad = fr.filter((f) => f.t >= from && (!f.open || f.op < 0.99 || Math.abs(f.dx) > 2));
+    assert.deepEqual(bad.slice(0, 4).map((f) => `${f.t}ms open ${f.open} opacity ${f.op.toFixed(2)} dx ${f.dx.toFixed(1)}`), [], 'the toast hid, dipped or moved while it was replaced');
+    assert.deepEqual(hid.filter((t) => t >= from), [], 'hidden was toggled on the toast after it first showed (ms)');
+    assert.equal(fr[fr.length - 1].text, 'Moved to Soon.', 'toast text');
+  });
+
+  await test('A4 the toast waits while the pointer or focus is on it, then leaves with 2s left', motion, async (open) => {
+    const ids = await seed([['Tick and hover'], ['Tick and focus'], ['Stays']]);
+    const desk = await open({ desktop: true });
+    const cx = (await box(desk, '.col')).cx;
+    await desk.click(`.row[data-id="${ids[0]}"] .circle`);
+    const t0 = Date.now();
+    await desk.waitForSelector('#toast:not([hidden])');
+    await desk.waitForTimeout(800);
+    await desk.hover('#toast');
+    await desk.waitForTimeout(5000 - (Date.now() - t0));
+    assert.ok(await desk.isVisible('#toast'), 'the toast left at 4s with the pointer on it');
+    await desk.evaluate((cx) => {
+      const t = document.getElementById('toast');
+      window.__stopToast = __frames(() => {
+        const b = t.getBoundingClientRect();
+        const cs = getComputedStyle(t);
+        return { open: !t.hidden && cs.display !== 'none', op: parseFloat(cs.opacity), dx: b.left + b.width / 2 - cx };
+      });
+    }, cx);
+    await desk.mouse.move(700, 80);
+    await desk.waitForTimeout(3200);
+    const fr = await desk.evaluate(() => __stopToast());
+    const shut = fr.find((f) => !f.open);
+    assert.ok(shut, 'the toast never left after the pointer did');
+    assert.ok(shut.t >= 1500, `the toast left ${shut.t}ms after the pointer, not about 2s`);
+    assert.ok(fading(fr).length, 'the toast left without fading');
+    const off = fr.filter((f) => f.open && Math.abs(f.dx) > 2);
+    assert.deepEqual(off.slice(0, 3).map((f) => f.t + 'ms ' + f.dx.toFixed(1)), [], 'the toast left the column centre as it went');
+
+    await desk.click(`.row[data-id="${ids[1]}"] .circle`);
+    await desk.waitForSelector('#toast:not([hidden])');
+    // After the row has left, so moving focus off a leaving row can not take it from the toast.
+    await gone(desk, [ids[1]]);
+    await desk.waitForTimeout(100);
+    await desk.evaluate(() => document.getElementById('toastUndo').focus());
+    await desk.waitForTimeout(5000);
+    assert.ok(await desk.isVisible('#toast'), 'the toast left at 4s with focus on Undo');
+    await desk.evaluate(() => document.activeElement.blur());
+    await desk.waitForSelector('#toast', { state: 'hidden', timeout: 3500 });
+  });
+
+  await test('A4 the toast leaves with a fade, 8px down (still with reduced motion)', motion, async (open, motion) => {
+    const [id] = await seed([['Tick me'], ['Stays']]);
+    const page = await open();
+    await page.evaluate((id) => __tap(id), id);
+    await page.waitForTimeout(3300);
+    await page.evaluate(() => {
+      const t = document.getElementById('toast');
+      window.__stopToast = __frames(() => ({ open: !t.hidden && getComputedStyle(t).display !== 'none', op: parseFloat(getComputedStyle(t).opacity), top: t.getBoundingClientRect().top }));
+    });
+    await page.waitForTimeout(1700);
+    const fr = await page.evaluate(() => __stopToast());
+    assert.ok(fr[0].open, 'the toast was up at 3.3s');
+    assert.ok(!fr[fr.length - 1].open, 'the toast left');
+    assert.ok(fading(fr).length, 'the toast left without fading');
+    const drop = Math.max(...fr.filter((f) => f.open).map((f) => f.top - fr[0].top));
+    if (motion === 'reduce') assert.ok(drop <= 1, `the toast moved ${drop.toFixed(1)}px with reduced motion`);
+    else assert.ok(drop >= 3 && drop <= 9, `the toast moved ${drop.toFixed(1)}px down as it left`);
+  });
+
+  /* ================= X1: focus survives a row leaving ================= */
+  await test('X1 circle by keyboard: focus lands on the next row; a finger leaves no focus', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Row B'], ['Row C'], ['Row D']]);
+    const desk = await open({ desktop: true });
+    await desk.evaluate((id) => __row(id).querySelector('.circle').focus(), ids[1]);
+    await desk.keyboard.press('Enter');
+    await gone(desk, [ids[1]]);
+    await desk.waitForTimeout(300);
+    assert.equal(await desk.evaluate(() => __focusText()), 'Row C', 'focus after the ticked row left');
+
+    const phone = await open();
+    await phone.evaluate((id) => __tap(id), ids[2]);
+    await gone(phone, [ids[2]]);
+    await phone.waitForTimeout(300);
+    const f = await phone.evaluate(() => { const a = document.activeElement; return a && a.closest && a.closest('#list') ? a.outerHTML.slice(0, 60) : ''; });
+    assert.equal(f, '', 'a tap left focus in the list');
+  });
+
+  await test('X1 menu by keyboard: Escape gives focus back to the opener, a pick moves it to the next row', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Row B'], ['Row C'], ['Row D']]);
+    const desk = await open({ desktop: true });
+    const openMenu = async (id) => {
+      await desk.hover(`.row[data-id="${id}"] .text`);
+      await desk.evaluate((id) => __row(id).querySelector('.move-btn').focus(), id);
+      await desk.keyboard.press('Enter');
+      await desk.waitForSelector('#menu:not([hidden])');
+      await desk.waitForTimeout(250);
+    };
+    const where = () => desk.evaluate(() => {
+      const a = document.activeElement;
+      const r = a && a.closest && a.closest('.row');
+      return r ? r.querySelector('.text').textContent + (a.classList.contains('move-btn') ? ' move-btn' : '') : a.tagName;
+    });
+    await openMenu(ids[1]);
+    await desk.keyboard.press('Escape');
+    await desk.waitForSelector('#menu', { state: 'hidden' });
+    await desk.waitForTimeout(100);
+    assert.equal(await where(), 'Row B move-btn', 'focus after Escape closed the menu');
+
+    await openMenu(ids[1]);
+    assert.equal(await desk.evaluate(() => document.activeElement.dataset.move), 'soon', 'the menu focuses Soon');
+    await desk.keyboard.press('Enter');
+    await gone(desk, [ids[1]]);
+    await desk.waitForTimeout(300);
+    assert.equal(await where(), 'Row C', 'focus after the moved row left');
+    await serverHas((i) => i.id === ids[1] && i.section === 'soon', 'move on server');
+  });
+
+  await test('X1 reopen in Done by keyboard: focus lands on the next done row', motion, async (open) => {
+    const t = Date.now() - 600000;
+    const ids = await seed([['Done one', 'today', { done: true, doneAt: t }], ['Done two', 'today', { done: true, doneAt: t - 1000 }],
+      ['Done three', 'today', { done: true, doneAt: t - 2000 }], ['Open task']]);
+    const desk = await open({ desktop: true });
+    await desk.click('.nav-item[data-section="done"]');
+    await desk.waitForSelector(`.drow[data-id="${ids[1]}"]`);
+    await desk.evaluate((id) => document.querySelector(`.drow[data-id="${id}"]`).focus(), ids[1]);
+    await desk.keyboard.press('Enter');
+    await until(async () => !(await desk.$(`.drow[data-id="${ids[1]}"]`)), 3000, 'the reopened row to leave Done');
+    await desk.waitForTimeout(300);
+    const f = await desk.evaluate(() => { const d = document.activeElement.closest && document.activeElement.closest('.drow'); return d ? d.querySelector('.dtext').textContent : document.activeElement.tagName; });
+    assert.equal(f, 'Done three', 'focus after reopening');
+  });
+
+  await test('X1 delete through the confirm by keyboard: focus lands on the next row', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Delete me'], ['Row C']]);
+    const desk = await open({ desktop: true });
+    await desk.evaluate((id) => __row(id).focus(), ids[1]);
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(300);
+    await desk.focus('#editDelete');
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#confirm:not([hidden])');
+    await desk.waitForTimeout(250);
+    await desk.focus('#confirmDelete');
+    await desk.keyboard.press('Enter');
+    await gone(desk, [ids[1]]);
+    await desk.waitForTimeout(500);
+    assert.equal(await desk.evaluate(() => __focusText()), 'Row C', 'focus after the task was deleted');
+    await until(async () => !(await getList()).find((i) => i.id === ids[1]), 8000, 'delete on server');
+  });
+
+  await test('X1 a section change in the edit sheet (desktop): focus lands on the next row when it closes', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Move me'], ['Row C']]);
+    const desk = await open({ desktop: true });
+    await desk.evaluate((id) => __row(id).focus(), ids[1]);
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(300);
+    await desk.click('#editSeg button[data-section="soon"]');
+    await gone(desk, [ids[1]]); // the row has left the list behind the sheet
+    await desk.waitForTimeout(100);
+    await desk.keyboard.press('Escape');
+    await desk.waitForSelector('#edit', { state: 'hidden' });
+    await desk.waitForTimeout(200);
+    assert.equal(await desk.evaluate(() => __focusText()), 'Row C', 'focus after the moved task left');
+  });
+
+  await test('M1 write at tap: capture Done and confirm Delete write their op before the sheet leaves', motion, async (open) => {
+    const [a, b] = await seed([['Delete on the phone'], ['Delete on the desk']]);
+    const page = await open();
+    await page.click('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.waitForTimeout(300);
+    const added = await page.evaluate(() => {
+      document.getElementById('capInput').value = 'Typed then Done';
+      document.getElementById('capDone').click();
+      return __queue().some((o) => o.op === 'upsert' && o.item.text === 'Typed then Done');
+    });
+    assert.ok(added, 'the new task was not queued at the Done tap');
+    await serverHas((i) => i.text === 'Typed then Done', 'added on server');
+
+    const confirmDelete = async (p) => {
+      await p.click('#editDelete');
+      await p.waitForSelector('#confirm:not([hidden])');
+      await p.waitForTimeout(250);
+    };
+    const queuedAtTap = (p, id) => p.evaluate((id) => {
+      document.getElementById('confirmDelete').click();
+      return __queue().some((o) => o.op === 'delete' && o.item.id === id);
+    }, id);
+    await page.evaluate((id) => __tap(id, '.text'), a);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(300);
+    await confirmDelete(page);
+    assert.ok(await queuedAtTap(page, a), 'phone: the delete was not queued at the tap');
+
+    const desk = await open({ desktop: true });
+    await desk.evaluate((id) => __row(id).focus(), b);
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(300);
+    await confirmDelete(desk);
+    assert.ok(await queuedAtTap(desk, b), 'desktop: the delete was not queued at the tap');
+    await until(async () => !(await getList()).some((i) => i.id === a || i.id === b), 8000, 'deletes on server');
+  });
+
+  /* ================= X2: real modals ================= */
+  const modalState = (page) => page.evaluate(() => ({
+    edit: document.querySelector('#edit .sheet').getAttribute('aria-modal'),
+    capture: document.querySelector('#capture .sheet').getAttribute('aria-modal'),
+    confirm: document.querySelector('#confirm .dialog').getAttribute('aria-modal'),
+    inert: Object.fromEntries(['.sidebar', 'main', '#fab', '#switcher', '#toast', '#edit'].map((s) => { const el = document.querySelector(s); return [s, !!el.inert || el.hasAttribute('inert')]; })),
+  }));
+  const behind = { '.sidebar': true, main: true, '#fab': true, '#switcher': true, '#toast': true, '#edit': false };
+  const none = { '.sidebar': false, main: false, '#fab': false, '#switcher': false, '#toast': false, '#edit': false };
+
+  await test('X2 desktop: the edit sheet and the confirm are modal, Tab stays in, focus goes back', motion, async (open) => {
+    const ids = await seed([['Row A'], ['Edit me'], ['Row C']]);
+    const desk = await open({ desktop: true });
+    // Where 8 Tabs land that is outside sel (the page itself counts as inside: focus left for the browser).
+    const tabOut = async (sel) => {
+      const out = [];
+      for (let i = 0; i < 8; i++) {
+        await desk.keyboard.press('Tab');
+        const w = await desk.evaluate((sel) => {
+          const a = document.activeElement;
+          if (!a || a === document.body || a === document.documentElement || a.closest(sel)) return '';
+          return a.id || a.className || a.tagName;
+        }, sel);
+        if (w) out.push(w);
+      }
+      return out;
+    };
+    await desk.evaluate((id) => __row(id).focus(), ids[1]);
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(300);
+    let s = await modalState(desk);
+    assert.equal(s.edit, 'true', 'edit sheet aria-modal');
+    assert.deepEqual(s.inert, behind, 'inert behind the edit sheet');
+    assert.deepEqual(await tabOut('#edit'), [], 'Tab left the edit sheet for');
+
+    await desk.focus('#editDelete');
+    await desk.keyboard.press('Enter');
+    await desk.waitForSelector('#confirm:not([hidden])');
+    await desk.waitForTimeout(250);
+    s = await modalState(desk);
+    assert.equal(s.confirm, 'true', 'confirm aria-modal');
+    assert.ok(s.inert['#edit'], 'the edit sheet is not inert under the confirm');
+    assert.deepEqual(await tabOut('#confirm'), [], 'Tab left the confirm for');
+    await desk.keyboard.press('Escape');
+    await desk.waitForSelector('#confirm', { state: 'hidden' });
+    await desk.waitForTimeout(100);
+    assert.equal(await desk.evaluate(() => document.activeElement.id), 'editDelete', 'focus after the confirm closed');
+    assert.ok(!(await modalState(desk)).inert['#edit'], 'the edit sheet stayed inert after the confirm closed');
+
+    await desk.keyboard.press('Escape');
+    await desk.waitForSelector('#edit', { state: 'hidden' });
+    await desk.waitForTimeout(200);
+    assert.equal(await desk.evaluate(() => __focusText()), 'Edit me', 'focus after the edit sheet closed');
+    assert.deepEqual((await modalState(desk)).inert, none, 'inert left behind after closing');
+  });
+
+  await test('X2 phone: the edit sheet focuses Close, both sheets are modal, inert clears on close', motion, async (open) => {
+    const [id] = await seed([['Tap my text']]);
+    const page = await open();
+    await page.evaluate((id) => __tap(id, '.text'), id);
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'editClose', 'focus in the phone edit sheet');
+    let s = await modalState(page);
+    assert.equal(s.edit, 'true', 'edit sheet aria-modal');
+    assert.deepEqual(s.inert, behind, 'inert behind the edit sheet');
+    await page.click('#editClose');
+    await page.waitForSelector('#edit', { state: 'hidden' });
+    await page.waitForTimeout(150);
+    assert.deepEqual((await modalState(page)).inert, none, 'inert left behind after the edit sheet');
+
+    await page.click('#fab');
+    await page.waitForSelector('#capture:not([hidden])');
+    await page.waitForTimeout(150);
+    s = await modalState(page);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'capInput', 'focus in the capture sheet');
+    assert.equal(s.capture, 'true', 'capture sheet aria-modal');
+    assert.deepEqual(s.inert, behind, 'inert behind the capture sheet');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#capture', { state: 'hidden' });
+    await page.waitForTimeout(150);
+    assert.deepEqual((await modalState(page)).inert, none, 'inert left behind after the capture sheet');
+  });
 }
 
 await resetServer();
 await browser.close();
 const fails = results.filter((r) => r[0] === 'FAIL');
-console.log(`\n${ENGINE}: ${results.length - fails.length} passed, ${fails.length} failed`);
+console.log(`\n${ENGINE}: ${results.length - fails.length} passed, ${fails.length} failed, ${skipped.length} skipped`);
 for (const f of fails) console.log(' ', f[1], ':', f[2]);
+for (const s of skipped) console.log('  skipped', s[0], ':', s[1]);
 process.exit(fails.length ? 1 : 0);

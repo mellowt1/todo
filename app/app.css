@@ -21,8 +21,12 @@
 
   --top: max(24px, calc(env(safe-area-inset-top) + 15px));
   --bottom: max(16px, env(safe-area-inset-bottom));
+  /* Motion: app.js reads these into M. Calm first: nothing bounces, moves ease out. */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --t: 220ms;
+  --dur-press: 140ms;  /* colour and state changes */
+  --dur-move: 220ms;   /* rows, sheets, entrances */
+  --dur-exit: 180ms;   /* things leaving */
+  --dist: 1;           /* 0 under reduced motion: slides become fades */
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -80,9 +84,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .pill {
   align-self: flex-start; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
   border-radius: 14px; background: var(--surface); color: var(--secondary); font-size: 13px;
-  transition: opacity 400ms ease;
 }
-.pill.fade { opacity: 0; }
 .banner { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; min-height: 44px; border-radius: 12px; background: var(--surface); }
 .banner span { flex: 1; font-size: 13px; padding: 10px 0; }
 
@@ -101,23 +103,28 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
 .row .text {
   flex: 1; min-width: 0; font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; cursor: default;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  transition: color var(--dur-press) ease;
 }
+/* The check moment: the text dims and is struck through while the row rests (the strike fades in from app.js). */
+.row.ticked .text { color: var(--secondary); text-decoration: line-through; }
 .circle {
   flex-shrink: 0; width: 24px; height: 24px; border-radius: 12px; border: 1.5px solid var(--ring);
   display: flex; align-items: center; justify-content: center; color: var(--on-accent); position: relative;
-  transition: background 160ms ease, border-color 160ms ease;
+  transition: background var(--dur-press) ease, border-color var(--dur-press) ease;
 }
 .circle::before { content: ""; position: absolute; inset: -10px; } /* 44px hit area */
-.circle .ic { opacity: 0; transform: scale(0.6); transition: opacity 160ms ease, transform 160ms var(--ease); }
+.circle .ic { opacity: 0; transform: scale(0.6); stroke-dasharray: 20; transition: opacity var(--dur-press) ease, transform var(--dur-press) var(--ease); }
 .circle.checked { background: var(--accent); border-color: var(--accent); }
 .circle.checked .ic { opacity: 1; transform: none; }
+/* A tap draws the tick (path about 19.8 long, dashed at 20) instead of growing it. */
+.row.ticked .circle .ic { opacity: 1; transform: none; transition: none; }
 .circle-static { flex-shrink: 0; width: 24px; height: 24px; border-radius: 12px; border: 1.5px solid var(--ring); }
 .move-btn { display: none; }
 
 /* Swipe backgrounds sit under the row and show as it slides. */
 .swipe-done, .swipe-move { position: absolute; inset: 0; display: none; align-items: center; }
 .swipe-done { background: var(--accent); color: var(--on-accent); padding-left: 20px; }
-.swipe-done .ic { transition: transform 160ms var(--ease); }
+.swipe-done .ic { transition: transform var(--dur-press) var(--ease); }
 .row.armed .swipe-done .ic { transform: scale(1.25); }
 .row.swipe-r .swipe-done, .row.swipe-l .swipe-move { display: flex; }
 .swipe-move { justify-content: flex-end; padding-right: 12px; background: var(--bg); }
@@ -127,11 +134,11 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
   font-size: 14px; font-weight: 600;
 }
 .swipe-move button[aria-current] { background: var(--surface); color: var(--secondary); cursor: default; }
-.row.sliding .row-inner { transition: transform var(--t) var(--ease); }
-.row.collapsing { transition: height 200ms var(--ease), opacity 200ms ease; }
+/* .sliding and .collapsing mark rows on their way out; app.js animates them. */
+.row.dragging { opacity: 0.4; }
 
-.row.enter { animation: row-in 240ms var(--ease); }
-@keyframes row-in { from { opacity: 0; transform: translateY(-10px); } }
+.row.enter { animation: row-in var(--dur-move) var(--ease); }
+@keyframes row-in { from { opacity: 0; transform: translateY(calc(-8px * var(--dist))); } }
 .row.nudge .row-inner { animation: nudge 900ms var(--ease) 400ms; }
 @keyframes nudge { 0%, 100% { transform: none; } 35%, 55% { transform: translateX(24px); } }
 
@@ -176,24 +183,25 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 .toast {
   position: fixed; left: 16px; right: 84px; bottom: calc(var(--bottom) + 60px); z-index: 12; height: 56px; padding: 0 8px 0 16px;
   border-radius: 14px; background: var(--toast); color: var(--toast-text); display: flex; align-items: center; justify-content: space-between;
-  font-size: 15px; animation: toast-in 200ms var(--ease);
+  font-size: 15px; animation: toast-in var(--dur-move) var(--ease);
 }
 .toast button { height: 44px; padding: 0 12px; color: var(--toast-accent); font-size: 15px; font-weight: 600; }
 body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button in Done */
-@keyframes toast-in { from { opacity: 0; transform: translateY(12px); } }
+/* On translate, so the desktop centring (transform) is never touched. */
+@keyframes toast-in { from { opacity: 0; translate: 0 calc(12px * var(--dist)); } }
+.toast.leaving, .menu.leaving { pointer-events: none; }
 
 /* ---------- Sheets and dialogs ---------- */
 .sheet-wrap, .dialog-wrap { position: fixed; inset: 0; z-index: 30; }
-.scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade-in var(--t) ease; }
+.scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade-in var(--dur-move) ease; }
 .sheet {
   position: absolute; left: 0; right: 0; bottom: 0; background: var(--sheet); border-radius: 16px 16px 0 0;
   padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px;
-  animation: sheet-in var(--t) var(--ease); touch-action: none;
+  animation: sheet-in var(--dur-move) var(--ease); touch-action: none;
   translate: 0 var(--kb, 0px); transition: translate 240ms var(--ease); /* rides above the keyboard */
 }
-.sheet.closing { transition: transform 180ms var(--ease), translate 240ms var(--ease); }
 .sheet.dragging { animation: none; transition: none; }
-/* The page panned under the keyboard: the offset follows at once, a snap-back keeps its glide. */
+/* The page panned under the keyboard: the offset follows at once. */
 .sheet.kb-snap { transition-property: transform; }
 .grabber { align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--ring); }
 .cap-row { display: flex; align-items: center; gap: 14px; min-height: 52px; }
@@ -202,7 +210,7 @@ body.view-done .toast { bottom: var(--bottom); right: 16px; } /* no add button i
 .cap-head { display: flex; align-items: center; justify-content: space-between; margin: -6px 0 -10px; }
 .cap-added { list-style: none; margin: 0; padding: 2px 0 0; display: flex; flex-direction: column; }
 .cap-added:empty { display: none; }
-.cap-added li { display: flex; align-items: center; gap: 14px; min-height: 30px; color: var(--secondary); animation: row-in 240ms var(--ease); }
+.cap-added li { display: flex; align-items: center; gap: 14px; min-height: 30px; color: var(--secondary); animation: row-in var(--dur-move) var(--ease); }
 .cap-added .ok { width: 24px; display: flex; justify-content: center; color: var(--accent-text); }
 .cap-added .t { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-sheet { gap: 16px; min-height: min(460px, 70vh); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
@@ -220,7 +228,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 .dialog {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(300px, calc(100vw - 48px));
   background: var(--sheet); border-radius: 14px; padding: 20px 16px 8px; text-align: center; box-shadow: var(--shadow);
-  animation: fade-in 180ms ease;
+  animation: fade-in var(--dur-move) ease;
 }
 .dialog p { margin: 0 0 12px; font-size: 17px; }
 .dialog-actions { display: flex; border-top: 0.5px solid var(--sep); margin: 0 -16px; }
@@ -230,11 +238,12 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 /* From below the screen, whatever keyboard offset is already on the sheet. */
 @keyframes sheet-in { from { transform: translateY(calc(100% - var(--kb, 0px))); } }
 @keyframes fade-in { from { opacity: 0; } }
+/* Desktop sheets are centred with transform, so they grow on the scale property. */
+@keyframes sheet-pop { from { opacity: 0; scale: 0.98; } }
 
 .menu {
   position: fixed; z-index: 40; min-width: 200px; padding: 6px; border-radius: 14px; background: var(--sheet);
   box-shadow: var(--shadow); border: 0.5px solid var(--sep); display: flex; flex-direction: column; gap: 4px;
-  animation: fade-in 140ms ease;
 }
 .menu .menu-title { padding: 6px 8px 2px; }
 .menu button.sec { height: 44px; text-align: left; padding: 0 12px; border-radius: 9px; font-size: 17px; color: var(--text); }
@@ -290,24 +299,22 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 
   .toast { left: calc(50% + 120px); right: auto; bottom: 24px; transform: translateX(-50%); width: 360px; }
   body.view-done .toast { bottom: 24px; right: auto; }
-  @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 12px); } }
 
-  .sheet { left: 50%; right: auto; bottom: auto; top: 50%; width: 440px; transform: translate(-50%, -50%); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 20px 16px; animation: fade-in 160ms ease; translate: none; }
+  /* The centring transform puts the centre on the top left corner of the box, so the scale grows from there. */
+  .sheet { left: 50%; right: auto; bottom: auto; top: 50%; width: 440px; transform: translate(-50%, -50%); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 20px 16px; animation: sheet-pop var(--dur-move) var(--ease); translate: none; transform-origin: 0 0; }
   .grabber { display: none; }
   .edit-sheet { min-height: 0; }
   .edit-sheet .grow { flex: 0 0 8px; }
 }
 
-/* Reduced motion: slides become fades, nothing bounces. */
+/* Reduced motion: slides become fades, nothing bounces. --dist only reaches keyframes written
+   with it, so each transform transition has its own rule here; app.js reads M.reduced and M.dist.
+   Durations stay, so fades keep their pace. */
 @media (prefers-reduced-motion: reduce) {
-  :root { --t: 1ms; }
-  .sheet, .toast { animation: fade-in 160ms ease !important; }
-  .sheet { transition: none; }
-  .sheet.closing { transition: transform 180ms var(--ease); }
-  .sheet.dragging { transition: none; }
-  .row.enter, .cap-added li { animation: fade-in 160ms ease; }
+  :root { --dist: 0; }
+  .sheet, .toast { animation: fade-in var(--dur-move) ease !important; }
+  .sheet { transition: none; } /* the keyboard offset (translate) moves at once */
+  .row.enter, .cap-added li { animation: fade-in var(--dur-move) ease; }
   .row.nudge .row-inner { animation: none; }
-  .row.sliding .row-inner { transition: opacity 160ms ease; }
-  .circle .ic, .row.armed .swipe-done .ic { transition: opacity 120ms ease; transform: none !important; }
-  .pill { transition: opacity 200ms ease; }
+  .circle .ic, .row.armed .swipe-done .ic { transition: opacity var(--dur-press) ease; transform: none !important; }
 }
