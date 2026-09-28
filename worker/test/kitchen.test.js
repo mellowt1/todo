@@ -102,6 +102,15 @@ test('cleanRecipe keeps the contract, rounds amounts and says what is wrong', ()
   assert.match(cleanRecipe(null).error, /object/);
 });
 
+test('cleanRecipe keeps an ingredient section, and leaves it off when there is none', () => {
+  const g = (over) => ({ qty: 1, unit: 'cup', item: 'rice', aisle: 'pasta', ...over });
+  const out = cleanRecipe(recipe({ ingredients: [g({ group: '  For the   marinade ' }), g({ group: '' }), g({ group: null }), g({})] })).value.ingredients;
+  assert.equal(out[0].group, 'For the marinade');
+  for (const x of out.slice(1)) assert.equal('group' in x, false);
+  assert.match(cleanRecipe(recipe({ ingredients: [g({ group: 'x'.repeat(LIMITS.group + 1) })] })).error, /ingredient 1: group/);
+  assert.match(cleanRecipe(recipe({ ingredients: [g({ group: 5 })] })).error, /ingredient 1: group/);
+});
+
 // The same pairs as the page's titleCase in app/logic.js; the two must stay identical.
 const TITLES = [
   ['chickpea and spinach curry', 'Chickpea and Spinach Curry'],

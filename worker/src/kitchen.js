@@ -5,7 +5,7 @@
  * Five record types, each merged on its own (newest updatedAt wins, deletes leave a
  * tombstone), so two phones editing different things never lose each other's work:
  *
- *   recipe  { id, title, servings, time, veg, ingredients: [{ qty, unit, item, aisle }], steps: [text], notes }
+ *   recipe  { id, title, servings, time, veg, ingredients: [{ qty, unit, item, aisle, group? }], steps: [text], notes }
  *   day     { id: "<YYYY-Www>:<mon..sun>:<person>:<meal>", kind: "recipe" | "text" | "pizza", recipeId, text, servings }
  *           one meal of one person. The old "<YYYY-Www>:<mon..sun>" (a dinner for both, before
  *           each had a plan) is still accepted, so a phone on the old page keeps working.
@@ -31,7 +31,7 @@ const WEEK_RE = /^(\d{4})-W(\d{2})$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const LIMITS = {
-  title: 200, time: 40, unit: 20, item: 120, step: 1000, steps: 40, ingredients: 80,
+  title: 200, time: 40, unit: 20, item: 120, group: 60, step: 1000, steps: 40, ingredients: 80,
   notes: 4000, dayText: 200, extraText: 200, qty: 40, key: 120, servings: 50,
   recipeBytes: 60000, ops: 200, rows: 20000,
 };
@@ -205,7 +205,10 @@ export function cleanRecipe(it) {
     const item = cleanLine(g.item, LIMITS.item);
     if (item === null) return no(`item must be text, 1 to ${LIMITS.item} characters`);
     if (!AISLES.includes(g.aisle)) return no('aisle must be one of ' + AISLES.join(', '));
-    ingredients.push({ qty, unit, item, aisle: g.aisle });
+    // The section an ingredient is under, like "For the marinade". Left off when there is none.
+    const group = g.group === undefined || g.group === null ? '' : cleanLine(g.group, LIMITS.group, true);
+    if (group === null) return no(`group must be text up to ${LIMITS.group} characters`);
+    ingredients.push(group ? { qty, unit, item, aisle: g.aisle, group } : { qty, unit, item, aisle: g.aisle });
   }
   if (!Array.isArray(it.steps) || it.steps.length > LIMITS.steps) return bad(`steps must be a list of at most ${LIMITS.steps}`);
   const steps = [];
