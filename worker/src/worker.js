@@ -30,6 +30,11 @@
  *   POST /api/german/outcome  Bearer <GERMAN_PUSH_TOKEN>  <- { id, status, minutes?, outcomeAt, fixes? }
  *   GET  /api/german/calls    Bearer <GERMAN_READ_TOKEN>  ?from=YYYY-MM-DD  -> { calls, updated }
  *
+ * Heartbeats (src/health.js; Bearer <BEAT_TOKEN>): jobs that run on their own report in, and an
+ * hourly cron sends one ntfy alert (NTFY_TOPIC) when one goes quiet:
+ *   POST /api/health/beat   <- { job, note? }  -> { ok: true }
+ *   GET  /api/health        -> { jobs: [{ job, name, at, late }] }
+ *
  * Admin (Authorization: Bearer <ADMIN_TOKEN>):
  *   GET  /api/admin/todo/export         -> the whole list, tombstones included
  *   POST /api/admin/kitchen/recipes     <- { recipes: [recipe, ...] }  (no id: a new recipe)
@@ -51,6 +56,7 @@ import { handleMorning, putProjects } from './morning.js';
 import { cleanBatch as cleanKitchenBatch, cleanRecipe, ID as KITCHEN_ID } from './kitchen.js';
 import { kitchen } from './kitchen-store.js';
 import { handleGerman } from './german.js';
+import { handleHealth, checkHealth } from './health.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -244,6 +250,7 @@ const MODULES = {
   morning: (request, env, rest) => handleMorning(request, env, rest, json),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
+  health: (request, env, rest) => handleHealth(request, env, rest, json),
   admin: handleAdmin,
 };
 
@@ -258,5 +265,8 @@ export default {
     } catch (e) {
       return json({ error: 'server' }, request, 500);
     }
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(checkHealth(env));
   },
 };

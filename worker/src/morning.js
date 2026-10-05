@@ -1,6 +1,6 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, rotas, news, kitchen, projects, german }
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, rotas, news, kitchen, projects, german, repos, links }
  *   POST /api/morning/:code/parked <- { id, action: "today" | "done" | "drop" | "undo" } -> { ok, projects }
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
@@ -1020,6 +1020,40 @@ export async function actOnParked(env, body, now = Date.now()) {
   return { projects: doc };
 }
 
+/* ---------- Not pushed: repos with work that only lives on the PC ----------
+ * The PC's daily run scans its git repos and writes morning:repos through wrangler:
+ *   { updated, repos: [{ name, why }] }  only the ones that need something. Null until the first scan. */
+export const REPOS_KEY = 'morning:repos';
+
+export function cleanRepos(doc) {
+  if (!doc || !Array.isArray(doc.repos)) return null;
+  const text = (v, max) => (typeof v === 'string' ? clean(v).slice(0, max) : '');
+  const repos = doc.repos.slice(0, 20).map((r) => ({ name: text(r && r.name, 60), why: text(r && r.why, 120) })).filter((r) => r.name);
+  return { updated: validIso(doc.updated) ? doc.updated : null, repos };
+}
+
+export async function reposBlock(env) {
+  return cleanRepos(await env.HUB_KV.get(REPOS_KEY, 'json'));
+}
+
+/* ---------- Apps: one-tap links, from the LINKS secret (they carry codes, so never in the repo) ----------
+ *   LINKS = [{ "name": "Kitchen", "url": "https://..." }, ...]  https only, at most 12. */
+export function linksBlock(raw) {
+  let list;
+  try { list = JSON.parse(raw || '[]'); } catch (e) { return { links: [] }; }
+  if (!Array.isArray(list)) return { links: [] };
+  const links = [];
+  for (const l of list.slice(0, 12)) {
+    if (!l || typeof l.name !== 'string' || typeof l.url !== 'string') continue;
+    let u;
+    try { u = new URL(l.url); } catch (e) { continue; }
+    if (u.protocol !== 'https:') continue;
+    const name = clean(l.name).slice(0, 30);
+    if (name) links.push({ name, url: u.href });
+  }
+  return { links };
+}
+
 /* ---------- The route ---------- */
 
 /* ---------- Kitchen: tonight's dinner and the pizza dough's mix day ---------- */
@@ -1054,7 +1088,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   }
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german] = await Promise.all([
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german, repos] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
@@ -1067,6 +1101,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => kitchenBlock(env, now), "Kitchen can't load right now"),
     block(() => projectsBlock(env), "Projects can't load right now"),
     block(() => germanBlock(env, now), "German calls can't load right now"),
+    block(() => reposBlock(env), "Repos can't load right now"),
   ]);
   return json({
     now: new Date(now).toISOString(),
@@ -1082,5 +1117,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     kitchen: kitchenB,
     projects,
     german,
+    repos,
+    links: linksBlock(env.LINKS),
   }, request);
 }

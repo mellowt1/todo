@@ -239,7 +239,7 @@ test('morning: german field counts this week and the answered streak, null witho
   const before = await morning();
   assert.equal(before.german, null);
   // The other blocks are unchanged by the new field.
-  assert.deepEqual(Object.keys(before), ['now', 'todos', 'calendar', 'fixed', 'weather', 'arsenal', 'bins', 'birthdays', 'rotas', 'news', 'kitchen', 'projects', 'german']);
+  assert.deepEqual(Object.keys(before), ['now', 'todos', 'calendar', 'fixed', 'weather', 'arsenal', 'bins', 'birthdays', 'rotas', 'news', 'kitchen', 'projects', 'german', 'repos', 'links']);
 
   await week(env, [
     call('w-prev', '2026-10-01'), call('w-prev2', '2026-10-02'), call('w-prev3', '2026-10-03'),
