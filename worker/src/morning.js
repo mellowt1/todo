@@ -1,6 +1,7 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
  *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news, kitchen, projects, german }
+ *   POST /api/morning/:code/parked <- { id, action: "today" | "done" | "drop" | "undo" } -> { ok, projects }
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                  -> { ok: true, count }
@@ -11,7 +12,8 @@
  * HUB_KV keys:
  *   morning:calendar     the last push from Odysseus, { sent, received, events }
  *   morning:projects     projects and parked items, { updated, projects, parked }, set
- *                        with POST /api/admin/morning/projects (ADMIN_TOKEN)
+ *                        with POST /api/admin/morning/projects (ADMIN_TOKEN); parked things carry { id, since }
+ *   morning:parked-done  what the page's Parked buttons took off, newest first, so pushes never bring it back
  *   cache:weather        Open-Meteo, 15 minutes
  *   cache:arsenal        ESPN, 1 hour
  *   cache:bins:<hash>    Den Haag huisvuilkalender, 12 hours
@@ -838,9 +840,15 @@ export const MAX_PROJECTS = 20;
 export const MAX_PARKED = 30;
 const MAX_LINE = 240;
 
-/* Validate a projects push. Returns { doc } or { error }. The page only reads it.
- *   { projects: [{ name, status, next }], parked: [{ text, from }] }
- * status is one of PROJECT_STATUS; next and from may be left out. */
+export const PARKED_DONE_KEY = 'morning:parked-done';
+export const PARKED_ACTIONS = ['today', 'done', 'drop'];
+const MAX_RESOLVED = 100;
+const PID = /^[a-z0-9]{6,32}$/;
+
+/* Validate a projects push. Returns { doc } or { error }.
+ *   { projects: [{ name, status, next, id?, since? }], parked: [{ text, from, id?, since? }] }
+ * status is one of PROJECT_STATUS; next and from may be left out. id and since are kept
+ * when they are well formed; mergeProjects fills them in for everything parked. */
 export function cleanProjects(body, now = Date.now()) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'body must be an object' };
   if (!Array.isArray(body.projects)) return { error: 'projects must be a list' };
@@ -857,7 +865,7 @@ export function cleanProjects(body, now = Date.now()) {
     if (!name) return { error: `project ${i}: name is required` };
     if (!PROJECT_STATUS.includes(p.status)) return { error: `project ${i}: status must be one of ${PROJECT_STATUS.join(', ')}` };
     if (p.next !== undefined && typeof p.next !== 'string') return { error: `project ${i}: next must be text` };
-    projects.push({ name, status: p.status, next: text(p.next, MAX_LINE) });
+    projects.push(withKeys({ name, status: p.status, next: text(p.next, MAX_LINE) }, p));
   }
   const parked = [];
   for (let i = 0; i < parkedIn.length; i++) {
@@ -866,9 +874,50 @@ export function cleanProjects(body, now = Date.now()) {
     const t = text(p.text, MAX_LINE);
     if (!t) return { error: `parked ${i}: text is required` };
     if (p.from !== undefined && typeof p.from !== 'string') return { error: `parked ${i}: from must be text` };
-    parked.push({ text: t, from: text(p.from, 80) });
+    parked.push(withKeys({ text: t, from: text(p.from, 80) }, p));
   }
   return { doc: { updated: new Date(now).toISOString(), projects, parked } };
+}
+
+function withKeys(out, p) {
+  if (typeof p.id === 'string' && PID.test(p.id)) out.id = p.id;
+  if (validDay(p.since)) out.since = p.since;
+  return out;
+}
+
+const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+export const newParkedId = () => [...crypto.getRandomValues(new Uint8Array(10))].map((b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+
+/* Something parked is an item in `parked` or a project with status parked. Both carry
+ * { id, since } so the page can age them and act on them. */
+const isParkedProject = (p) => p.status === 'parked';
+
+/* Give a clean push its ids and parked-since days, keeping both from the stored doc for
+ * whatever is still parked (matched by id, else by text or project name), and leave out
+ * anything already handled from the page (done, dropped or sent to the to-do list), so a
+ * later push from memory never brings it back. Pure: returns { doc, skipped }. */
+export function mergeProjects(doc, prev, resolved, now = Date.now(), makeId = newParkedId) {
+  const today = local(now).date;
+  const was = [...((prev && prev.parked) || []), ...((prev && prev.projects) || []).filter(isParkedProject)];
+  const byId = new Map(was.filter((x) => x.id).map((x) => [x.id, x]));
+  const byKey = new Map(was.map((x) => [norm(x.name || x.text), x]));
+  const goneIds = new Set((resolved || []).map((r) => r.id));
+  const goneKeys = new Set((resolved || []).map((r) => norm(r.key)));
+  let skipped = 0;
+  const keep = (x, key) => {
+    if ((x.id && goneIds.has(x.id)) || goneKeys.has(norm(key))) { skipped++; return null; }
+    const old = (x.id && byId.get(x.id)) || byKey.get(norm(key));
+    const since = x.since && x.since <= today ? x.since : old && old.since ? old.since : today;
+    return { ...x, id: x.id || (old && old.id) || makeId(), since };
+  };
+  const projects = [];
+  for (const p of doc.projects) {
+    if (!isParkedProject(p)) { const { id, since, ...rest } = p; projects.push(rest); continue; }
+    const k = keep(p, p.name);
+    if (k) projects.push(k);
+  }
+  const parked = doc.parked.map((p) => keep(p, p.text)).filter(Boolean);
+  return { doc: { ...doc, projects, parked }, skipped };
 }
 
 /* Null until the first push, so the page can hide the block. */
@@ -880,8 +929,52 @@ export async function projectsBlock(env) {
 export async function putProjects(env, body, now = Date.now()) {
   const out = cleanProjects(body, now);
   if (out.error) return out;
-  await env.HUB_KV.put(PROJECTS_KEY, JSON.stringify(out.doc));
-  return out;
+  const [prev, resolved] = await Promise.all([env.HUB_KV.get(PROJECTS_KEY, 'json'), env.HUB_KV.get(PARKED_DONE_KEY, 'json')]);
+  const merged = mergeProjects(out.doc, prev, resolved, now);
+  await env.HUB_KV.put(PROJECTS_KEY, JSON.stringify(merged.doc));
+  return merged;
+}
+
+/* ---------- Acting on something parked, from the page ----------
+ *   POST /api/morning/:code/parked  <- { id, action: "today" | "done" | "drop" | "undo" }
+ * today adds it to the to-do list's Today section; all three take it off Parked and remember
+ * it in morning:parked-done. undo puts the last one back (and takes the to-do away again).
+ * Answers { ok, projects } with the block as it now stands. */
+export async function actOnParked(env, body, now = Date.now()) {
+  if (!body || typeof body !== 'object' || typeof body.id !== 'string' || !PID.test(body.id)) return { status: 400, error: 'id required' };
+  const action = body.action;
+  if (action !== 'undo' && !PARKED_ACTIONS.includes(action)) return { status: 400, error: 'action must be today, done, drop or undo' };
+  const [doc, resolvedIn] = await Promise.all([env.HUB_KV.get(PROJECTS_KEY, 'json'), env.HUB_KV.get(PARKED_DONE_KEY, 'json')]);
+  if (!doc) return { status: 404, error: 'nothing parked' };
+  const resolved = Array.isArray(resolvedIn) ? resolvedIn : [];
+  const todo = (op, item) => env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE))
+    .fetch('https://list/apply', { method: 'POST', body: JSON.stringify({ ops: [{ op, item }] }), headers: { 'Content-Type': 'application/json' } });
+
+  if (action === 'undo') {
+    const i = resolved.findIndex((r) => r.id === body.id);
+    if (i < 0) return { status: 404, error: 'nothing to undo' };
+    const [r] = resolved.splice(i, 1);
+    if (r.kind === 'project') doc.projects.push(r.item); else doc.parked.push(r.item);
+    if (r.todoId) await todo('delete', { id: r.todoId, updatedAt: now });
+    await Promise.all([env.HUB_KV.put(PROJECTS_KEY, JSON.stringify(doc)), env.HUB_KV.put(PARKED_DONE_KEY, JSON.stringify(resolved))]);
+    return { projects: doc };
+  }
+
+  let kind = 'parked';
+  let i = doc.parked.findIndex((x) => x.id === body.id);
+  if (i < 0) { kind = 'project'; i = doc.projects.findIndex((x) => x.id === body.id && isParkedProject(x)); }
+  if (i < 0) return { status: 404, error: 'not parked' };
+  const [item] = kind === 'project' ? doc.projects.splice(i, 1) : doc.parked.splice(i, 1);
+  const entry = { id: item.id, key: kind === 'project' ? item.name : item.text, kind, action, at: new Date(now).toISOString(), item };
+  if (action === 'today') {
+    const words = kind === 'project' ? (item.next ? `${item.name}: ${item.next}` : item.name) : item.text;
+    entry.todoId = newParkedId() + 'pk';
+    const r = await todo('upsert', { id: entry.todoId, text: words.slice(0, 500), section: 'today', done: false, doneAt: null, updatedAt: now, pos: now });
+    if (!r.ok) return { status: 502, error: "the to-do list can't take it right now" };
+  }
+  resolved.unshift(entry);
+  await Promise.all([env.HUB_KV.put(PROJECTS_KEY, JSON.stringify(doc)), env.HUB_KV.put(PARKED_DONE_KEY, JSON.stringify(resolved.slice(0, MAX_RESOLVED)))]);
+  return { projects: doc };
 }
 
 /* ---------- The route ---------- */
@@ -901,10 +994,21 @@ const block = (fn, message) => Promise.resolve().then(fn).catch(() => ({ error: 
 
 export async function handleMorning(request, env, rest, json, now = Date.now()) {
   if (rest.length === 1 && rest[0] === 'calendar') return pushCalendar(request, env, json);
-  if (rest.length !== 1) return json({ error: 'not found' }, request, 404);
+  const parkedRoute = rest.length === 2 && rest[1] === 'parked';
+  if (rest.length !== 1 && !parkedRoute) return json({ error: 'not found' }, request, 404);
   const code = rest[0];
   if (!CODE.test(code)) return json({ error: 'bad code' }, request, 400);
   if (!env.TODO_CODE || !safeEqual(code, env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
+  if (parkedRoute) {
+    if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
+    const text = await request.text();
+    if (text.length > 2000) return json({ error: 'too large' }, request, 413);
+    let body;
+    try { body = JSON.parse(text); } catch (e) { return json({ error: 'bad json' }, request, 400); }
+    const out = await actOnParked(env, body, now);
+    if (out.error) return json({ error: out.error }, request, out.status);
+    return json({ ok: true, projects: out.projects }, request);
+  }
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
   const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB, kitchenB, projects, german] = await Promise.all([

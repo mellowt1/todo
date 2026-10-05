@@ -14,6 +14,7 @@
  * Morning Screen (src/morning.js; the to-do's code, read only):
  *   GET  /api/morning/:code          -> { now, todos, calendar, fixed, weather, arsenal, bins, ..., projects }
  *                                    every block loads on its own; a failed one is { error }
+ *   POST /api/morning/:code/parked   <- { id, action: "today" | "done" | "drop" | "undo" }  the Parked buttons
  *   POST /api/morning/calendar       Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                    <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                    -> { ok: true, count }   (Odysseus, every 15 minutes)

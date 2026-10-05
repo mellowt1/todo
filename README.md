@@ -52,6 +52,7 @@ The Morning Screen (repo `mellowt1/morning`) reads everything from one route, wi
 | Route | Auth | What |
 |---|---|---|
 | `GET /api/morning/:code` | the code | `{ now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news }`. Each block loads on its own; one that fails is `{ error: "..." }` and the rest still arrive. |
+| `POST /api/morning/:code/parked` | the code | The Morning Screen's Parked buttons: `{ id, action }`, action `today` (adds it to the to-do list's Today), `done`, `drop` or `undo` (the last one back, and its to-do taken away). Takes it off Parked and remembers it in KV `morning:parked-done`, so a later projects push never brings it back. Answers `{ ok, projects }`. The one Morning route that changes anything. |
 | `POST /api/morning/calendar` | `Bearer CALENDAR_PUSH_TOKEN` | Odysseus sends `{ sent, events: [{ title, start, end, allDay, location }] }` every 15 minutes. Timed events carry an offset, all day events are `YYYY-MM-DD` with the day after as end. At most 500 events, titles up to 200 characters, body up to 200 KB. Answers `{ ok: true, count }`. |
 
 Where each block comes from:
@@ -88,7 +89,7 @@ The Kitchen app (repo `mellowt1/kitchen`) keeps the week's dinners, recipes, the
 |---|---|---|
 | `GET /api/kitchen/:code` | the kitchen code | `{ items, rev, updated }`, or `{ unchanged: true }` with `?since=<rev>` |
 | `POST /api/kitchen/:code/ops` | the kitchen code | `{ ops: [{ op: "upsert" \| "delete", type, item }] }`, returns `{ rev, updated, items, rejected }` |
-| `POST /api/admin/morning/projects` | `Bearer ADMIN_TOKEN` | `{ projects: [{ name, status, next }], parked: [{ text, from }] }`. `status` is `active`, `waiting`, `live`, `next` or `parked`. Replaces the Morning Screen's whole Projects block (KV `morning:projects`). Returns `{ ok, projects, parked }`. |
+| `POST /api/admin/morning/projects` | `Bearer ADMIN_TOKEN` | `{ projects: [{ name, status, next }], parked: [{ text, from }] }`. `status` is `active`, `waiting`, `live`, `next` or `parked`. Replaces the Morning Screen's whole Projects block (KV `morning:projects`). Everything parked (items and `parked` projects) gets an `id` and a `since` day (YYYY-MM-DD, kept from the stored block when the id, text or name matches); anything in `morning:parked-done` is left out. Returns `{ ok, projects, parked }`. |
 | `POST /api/admin/kitchen/recipes` | `Bearer ADMIN_TOKEN` | `{ recipes: [recipe, ...] }`, at most 25. No `id`: a new recipe. An existing `id`: replaced, always, even over a newer edit from a phone whose clock runs ahead. All or nothing: a bad recipe refuses the call and `errors` says which one and why. Returns `{ ok, ids, rev }`. |
 | `GET /api/admin/kitchen/export` | `Bearer ADMIN_TOKEN` | every kitchen record, tombstones included, for backups |
 

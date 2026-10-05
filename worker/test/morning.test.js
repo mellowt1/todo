@@ -9,7 +9,7 @@ import {
   parseAddress, parseBins, streamNames, binsBlock, cached, handleMorning, CAL_KEY,
   WEATHER_URL, ESPN_RESULTS, ESPN_FIXTURES, BINS_BASE,
   parseBirthdays, birthdaysBlock, parseNews, NEWS_URL, addDays as addDaysW,
-  cleanProjects, PROJECTS_KEY, MAX_PROJECTS,
+  cleanProjects, PROJECTS_KEY, MAX_PROJECTS, mergeProjects, PARKED_DONE_KEY,
 } from '../src/morning.js';
 import { memNamespace } from './mem.js';
 
@@ -754,11 +754,92 @@ test('projects: admin route stores them, the morning answer serves them read onl
   assert.deepEqual(await r.json(), { ok: true, projects: 1, parked: 1 });
   const b = await morning();
   assert.deepEqual(b.projects.projects, [{ name: 'Made up app', status: 'waiting', next: 'Answer three questions' }]);
-  assert.deepEqual(b.projects.parked, [{ text: 'Loose idea', from: '' }]);
+  assert.equal(b.projects.parked.length, 1);
+  assert.equal(b.projects.parked[0].text, 'Loose idea');
+  assert.match(b.projects.parked[0].id, /^[a-z0-9]{6,32}$/);
+  assert.match(b.projects.parked[0].since, /^\d{4}-\d{2}-\d{2}$/);
   assert.ok(Date.parse(b.projects.updated));
 
   // A push replaces the whole block.
   await push({ projects: [] });
   assert.deepEqual((await morning()).projects.projects, []);
   assert.deepEqual((await morning()).projects.parked, []);
+});
+
+/* ---------- Parked: ages and the page's buttons ---------- */
+
+test('parked: mergeProjects keeps ids and days, and never brings back what was handled', () => {
+  const now = Date.parse('2026-10-07T06:00:00Z');
+  let n = 0;
+  const id = () => 'newid' + (++n);
+  const prev = {
+    projects: [{ name: 'Old app', status: 'parked', next: 'Later', id: 'oldapp1', since: '2026-09-20' }],
+    parked: [{ text: 'Tidy files', from: 'Admin', id: 'tidy001', since: '2026-09-24' }],
+  };
+  const resolved = [{ id: 'gone001', key: 'Fix the shed', kind: 'parked' }];
+  const doc = cleanProjects({
+    projects: [{ name: 'old app', status: 'parked', next: 'Later still' }, { name: 'Live one', status: 'live', id: 'abcdefg', since: '2026-01-01' }],
+    parked: [{ text: 'tidy  files', from: 'Admin' }, { text: 'Fix the shed' }, { text: 'Brand new' }, { text: 'Kept id', id: 'gone001' }, { text: 'Given day', since: '2026-10-01' }, { text: 'Future day', since: '2026-12-01' }],
+  }, now).doc;
+  const out = mergeProjects(doc, prev, resolved, now, id);
+  assert.equal(out.skipped, 2);
+  assert.deepEqual(out.doc.projects, [
+    { name: 'old app', status: 'parked', next: 'Later still', id: 'oldapp1', since: '2026-09-20' },
+    { name: 'Live one', status: 'live', next: '' },
+  ]);
+  assert.deepEqual(out.doc.parked, [
+    { text: 'tidy files', from: 'Admin', id: 'tidy001', since: '2026-09-24' },
+    { text: 'Brand new', from: '', id: 'newid1', since: '2026-10-07' },
+    { text: 'Given day', from: '', id: 'newid2', since: '2026-10-01' },
+    { text: 'Future day', from: '', id: 'newid3', since: '2026-10-07' },
+  ]);
+});
+
+test('parked: today, done, drop and undo from the page', async () => {
+  const env = makeEnv({ ADMIN_TOKEN: 'admin-token-for-tests' });
+  allSources();
+  const admin = (body) => worker.fetch(new Request(BASE + '/api/admin/morning/projects', {
+    method: 'POST', headers: { Authorization: 'Bearer admin-token-for-tests' }, body: JSON.stringify(body),
+  }), env);
+  const act = (body, code = CODE, method = 'POST') => worker.fetch(new Request(`${BASE}/api/morning/${code}/parked`, {
+    method, body: method === 'POST' ? JSON.stringify(body) : undefined,
+  }), env);
+  const todos = async () => (await (await env.TODO_LIST.get('todo:' + CODE).fetch('https://list/read')).json()).items;
+
+  await admin({ projects: [{ name: 'Old app', status: 'parked', next: 'Add the tests' }], parked: [{ text: 'Tidy files', from: 'Admin' }, { text: 'Fix the shed' }] });
+  const doc = JSON.parse(env.HUB_KV.m.get(PROJECTS_KEY));
+  const [tidy, shed] = doc.parked;
+  const app = doc.projects[0];
+
+  assert.equal((await act({ id: tidy.id, action: 'today' }, 'zzzzzzzzzzzzzzzz')).status, 404);
+  assert.equal((await act(null, CODE, 'GET')).status, 405);
+  assert.equal((await act({ id: tidy.id, action: 'later' })).status, 400);
+  assert.equal((await act({ id: 'nosuchid', action: 'done' })).status, 404);
+
+  // Do today: on the to-do list's Today, off Parked.
+  const r = await act({ id: tidy.id, action: 'today' });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).projects.parked.map((x) => x.text), ['Fix the shed']);
+  assert.deepEqual((await todos()).map((t) => [t.text, t.section, t.done]), [['Tidy files', 'today', false]]);
+
+  // Undo takes the to-do away again and puts it back with its day.
+  const u = await (await act({ id: tidy.id, action: 'undo' })).json();
+  assert.deepEqual(u.projects.parked.map((x) => [x.text, x.since]), [['Fix the shed', shed.since], ['Tidy files', tidy.since]]);
+  assert.deepEqual(await todos(), []);
+  assert.equal((await act({ id: tidy.id, action: 'undo' })).status, 404);
+
+  // A parked project, sent to Today, reads "name: next".
+  await act({ id: app.id, action: 'today' });
+  assert.deepEqual((await todos()).map((t) => t.text), ['Old app: Add the tests']);
+  assert.deepEqual(JSON.parse(env.HUB_KV.m.get(PROJECTS_KEY)).projects, []);
+
+  // Done and drop: gone, and the next push from memory does not bring them back.
+  await act({ id: shed.id, action: 'done' });
+  await act({ id: tidy.id, action: 'drop' });
+  assert.deepEqual(JSON.parse(env.HUB_KV.m.get(PROJECTS_KEY)).parked, []);
+  assert.equal(JSON.parse(env.HUB_KV.m.get(PARKED_DONE_KEY)).length, 3);
+  await admin({ projects: [{ name: 'Old app', status: 'parked', next: 'Add the tests' }], parked: [{ text: 'Tidy files', from: 'Admin' }, { text: 'fix the shed' }, { text: 'New thing' }] });
+  const after = JSON.parse(env.HUB_KV.m.get(PROJECTS_KEY));
+  assert.deepEqual(after.parked.map((x) => x.text), ['New thing']);
+  assert.deepEqual(after.projects, []);
 });
