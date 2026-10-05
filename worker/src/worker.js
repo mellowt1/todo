@@ -35,6 +35,9 @@
  *   POST /api/health/beat   <- { job, note? }  -> { ok: true }
  *   GET  /api/health        -> { jobs: [{ job, name, at, late }] }
  *
+ * Backups: once a day the cron also copies the to-do list and the kitchen into KV
+ * (backup:todo, backup:kitchen, backup:at) for the PC's weekly backup.
+ *
  * Admin (Authorization: Bearer <ADMIN_TOKEN>):
  *   GET  /api/admin/todo/export         -> the whole list, tombstones included
  *   POST /api/admin/kitchen/recipes     <- { recipes: [recipe, ...] }  (no id: a new recipe)
@@ -267,6 +270,18 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(checkHealth(env));
+    ctx.waitUntil(Promise.allSettled([checkHealth(env), snapshot(env)]));
   },
 };
+
+/* Once a day the cron copies the to-do list and the kitchen out of their Durable Objects into
+ * KV (backup:todo, backup:kitchen), so the PC's weekly backup can take them with the rest of
+ * HUB_KV through wrangler, without the admin token. */
+export async function snapshot(env, now = Date.now()) {
+  const last = Date.parse(await env.HUB_KV.get('backup:at'));
+  if (last && now - last < 20 * 3600000) return false;
+  if (env.TODO_CODE) await env.HUB_KV.put('backup:todo', JSON.stringify((await list(env, env.TODO_CODE, '/export')).data));
+  if (env.KITCHEN_CODE && env.KITCHEN_STORE) await env.HUB_KV.put('backup:kitchen', JSON.stringify((await kitchen(env, env.KITCHEN_CODE, '/export')).data));
+  await env.HUB_KV.put('backup:at', new Date(now).toISOString());
+  return true;
+}

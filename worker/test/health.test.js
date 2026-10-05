@@ -118,3 +118,15 @@ test('links: https only, broken secret is empty', () => {
   ]));
   assert.deepEqual(l.links.map((x) => x.name), ['Kitchen', 'Day']);
 });
+
+test('snapshot: copies the to-do list into KV once a day', async () => {
+  const { snapshot } = await import('../src/worker.js');
+  const { memNamespace } = await import('./mem.js');
+  const e = env({ TODO_CODE: 'abcdefgh23456789', TODO_LIST: memNamespace() });
+  assert.equal(await snapshot(e, NOW), true);
+  const doc = JSON.parse(e.HUB_KV.m.get('backup:todo'));
+  assert.ok(doc && typeof doc === 'object');
+  assert.equal(e.HUB_KV.m.get('backup:at'), new Date(NOW).toISOString());
+  assert.equal(await snapshot(e, NOW + 2 * HOUR), false, 'not again the same day');
+  assert.equal(await snapshot(e, NOW + 21 * HOUR), true);
+});
