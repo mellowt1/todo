@@ -8,7 +8,7 @@ import {
   trimWeather, weatherBlock, rainSlots, rainLine, relativeWind, compass, parseArsenal, arsenalBlock,
   parseAddress, parseBins, streamNames, binsBlock, cached, handleMorning, CAL_KEY,
   WEATHER_URL, ESPN_RESULTS, ESPN_FIXTURES, BINS_BASE,
-  parseBirthdays, birthdaysBlock, parseNews, NEWS_URL, addDays as addDaysW,
+  parseBirthdays, birthdaysBlock, parseRotas, rotasBlock, parseNews, NEWS_URL, addDays as addDaysW,
   cleanProjects, PROJECTS_KEY, MAX_PROJECTS, mergeProjects, PARKED_DONE_KEY,
 } from '../src/morning.js';
 import { memNamespace } from './mem.js';
@@ -283,6 +283,33 @@ test('fixed events: a missing or broken secret is just empty', () => {
     assert.deepEqual(fixedBlock(raw, now), { events: [], countdowns: [] });
   }
   assert.equal(parseFixed(FIXED).events.length, 4);
+});
+
+/* ---------- Rotas ---------- */
+
+const ROTAS = JSON.stringify([
+  { what: 'Cleaning', from: '2026-10-03', every: 7, days: 2, turns: ['Ann', 'Bo', 'Both of you'] },
+  { what: 'no turns', from: '2026-10-03', turns: [] },
+  { what: 'bad date', from: '2026-13-03', turns: ['x'] },
+]);
+
+test('rotas: the turn on now or next, going round every week', () => {
+  const at = (date, time = '08:00') => rotasBlock(ROTAS, zoned(date, time)).rotas.map((r) => [r.date, r.end, r.days, r.who, r.then]);
+  assert.deepEqual(at('2026-10-03'), [['2026-10-03', '2026-10-04', 0, 'Ann', 'Bo']]);
+  assert.deepEqual(at('2026-10-04', '22:00'), [['2026-10-03', '2026-10-04', -1, 'Ann', 'Bo']]);
+  assert.deepEqual(at('2026-10-05'), [['2026-10-10', '2026-10-11', 5, 'Bo', 'Both of you']]);
+  assert.deepEqual(at('2026-10-11'), [['2026-10-10', '2026-10-11', -1, 'Bo', 'Both of you']]);
+  assert.deepEqual(at('2026-10-12'), [['2026-10-17', '2026-10-18', 5, 'Both of you', 'Ann']]);
+  assert.deepEqual(at('2026-10-19'), [['2026-10-24', '2026-10-25', 5, 'Ann', 'Bo']]);
+  // Before the first turn, the first turn is next.
+  assert.deepEqual(at('2026-09-30'), [['2026-10-03', '2026-10-04', 3, 'Ann', 'Bo']]);
+  // Across the clock change and far ahead, it still lands on Saturdays.
+  assert.deepEqual(at('2027-03-29'), [['2027-04-03', '2027-04-04', 5, 'Both of you', 'Ann']]);
+});
+
+test('rotas: a missing or broken secret is just empty', () => {
+  for (const raw of [undefined, '', 'not json', '{}', 'null']) assert.deepEqual(rotasBlock(raw, zoned('2026-10-05', '08:00')), { rotas: [] });
+  assert.equal(parseRotas(ROTAS).length, 1);
 });
 
 /* ---------- Weather ---------- */

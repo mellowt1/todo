@@ -1,6 +1,6 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, news, kitchen, projects, german }
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, rotas, news, kitchen, projects, german }
  *   POST /api/morning/:code/parked <- { id, action: "today" | "done" | "drop" | "undo" } -> { ok, projects }
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
@@ -21,7 +21,7 @@
  * Cached entries are { at, data }. If a source fails, the last good copy is used for a
  * while (see STALE), so one bad minute at ESPN does not blank the block.
  *
- * Secrets (never in this repo): TODO_CODE, CALENDAR_PUSH_TOKEN, FIXED_EVENTS, BIN_ADDRESS, BIRTHDAYS.
+ * Secrets (never in this repo): TODO_CODE, CALENDAR_PUSH_TOKEN, FIXED_EVENTS, BIN_ADDRESS, BIRTHDAYS, ROTAS.
  * The kitchen block is read inside the Worker with KITCHEN_CODE; that code never leaves it.
  */
 
@@ -778,6 +778,49 @@ export function birthdaysBlock(raw, now) {
   return { birthdays };
 }
 
+/* ---------- Rotas (whose turn it is), from the ROTAS secret ---------- */
+
+/* [{ what, from: "YYYY-MM-DD", every: days, days: length of a turn, turns: [who, ...] }].
+ * The first turn starts on from, the next one every days later, and the turns go round.
+ * Tolerant: a missing or broken secret, or a broken entry, is skipped, never an error. */
+export function parseRotas(raw) {
+  let list = raw;
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw); } catch (e) { list = null; }
+  }
+  const out = [];
+  for (const r of Array.isArray(list) ? list : []) {
+    if (!r || typeof r.what !== 'string' || !clean(r.what) || !validDay(r.from)) continue;
+    const every = Number.isInteger(r.every) && r.every > 0 && r.every <= 366 ? r.every : 7;
+    const length = Number.isInteger(r.days) && r.days > 0 && r.days <= every ? r.days : 1;
+    const turns = (Array.isArray(r.turns) ? r.turns : []).filter((t) => typeof t === 'string' && clean(t)).map((t) => clean(t).slice(0, 60));
+    if (!turns.length) continue;
+    out.push({ what: clean(r.what).slice(0, MAX_TITLE), from: r.from, every, length, turns });
+  }
+  return out;
+}
+
+/* The turn on now, or the next one: { what, date, end, days, who, then }. days is 0 or less
+ * while the turn is on (its first day is date, its last is end). */
+export function rotasBlock(raw, now) {
+  const today = local(now).date;
+  const rotas = [];
+  for (const r of parseRotas(raw)) {
+    let n = Math.max(0, Math.floor(daysBetween(r.from, today) / r.every));
+    if (daysBetween(addDays(r.from, n * r.every + r.length - 1), today) > 0) n++;
+    const date = addDays(r.from, n * r.every);
+    rotas.push({
+      what: r.what,
+      date,
+      end: addDays(date, r.length - 1),
+      days: daysBetween(today, date),
+      who: r.turns[n % r.turns.length],
+      then: r.turns[(n + 1) % r.turns.length],
+    });
+  }
+  return { rotas };
+}
+
 /* ---------- News: NOS headlines ---------- */
 
 export const NEWS_URL = 'https://feeds.nos.nl/nosnieuwsalgemeen';
@@ -1011,7 +1054,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   }
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, newsB, kitchenB, projects, german] = await Promise.all([
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
@@ -1019,6 +1062,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => bins(env, now), "Bin days can't load right now"),
     block(() => fixedBlock(env.FIXED_EVENTS, now), 'Fixed events could not be read'),
     block(() => birthdaysBlock(env.BIRTHDAYS, now), 'Birthdays could not be read'),
+    block(() => rotasBlock(env.ROTAS, now), 'Rotas could not be read'),
     block(() => news(env, now), "News can't load right now"),
     block(() => kitchenBlock(env, now), "Kitchen can't load right now"),
     block(() => projectsBlock(env), "Projects can't load right now"),
@@ -1033,6 +1077,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     arsenal: arsenalB,
     bins: binsB,
     birthdays: birthdays.error ? { birthdays: [] } : birthdays,
+    rotas: rotas.error ? { rotas: [] } : rotas,
     news: newsB,
     kitchen: kitchenB,
     projects,
