@@ -18,7 +18,7 @@ Replace the iOS Notes to-do page with the simplest possible list: capture in one
 ## Must nots
 * No tags, no priorities.
 * No accounts or login. Access is a private link with a code, like Runway.
-* No AI features.
+* No AI inside the list. The list itself stays dumb and fast. Intake (a Worker route, `worker/src/intake.js`, 2026-10-11) may feed it tasks read from a PDF, a photo or pasted text; in the app that is one paper-clip button and nothing more.
 * No due dates, no repeats, no reminders or push (not now).
 * No sub-tasks in v1. Ask Paul again after a month of use.
 
