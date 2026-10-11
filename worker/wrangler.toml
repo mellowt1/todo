@@ -41,6 +41,7 @@ id = "a8b5f676c79f416f9e5ae37b5c589b4a"
 #   GERMAN_PUSH_TOKEN    the German tutor PC, POST /api/german/week and /api/german/outcome
 #   GERMAN_READ_TOKEN    Odysseus, read only, GET /api/german/calls
 #   ANTHROPIC_API_KEY    Intake: the Claude API key, POST /api/intake/:code (npx wrangler secret put ANTHROPIC_API_KEY)
+#   EVENT_TOKEN          Events: every sender posts to POST /api/event with it (npx wrangler secret put EVENT_TOKEN)
 #   INTAKE_PEOPLE        Intake: a few lines saying who mom, dad, lucho, nick, derreck and olivia are (optional)
 
 # Heartbeats: once an hour, alert on ntfy when a job that runs on its own has gone quiet (src/health.js).

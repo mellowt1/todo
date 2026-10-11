@@ -36,6 +36,11 @@
  *                             -> { id, record, tasks, usage }  or  { duplicate: true, ... }
  *   GET  /api/intake/:code    ?limit=20  -> { items: [{ id, at, record, tasks }] }  newest first
  *
+ * Events (src/events.js; Bearer <EVENT_TOKEN>): the hub's inbox. Other apps and jobs post one line
+ * when something happens; Morning shows the last three days as a feed (30 days in KV):
+ *   POST /api/event   <- { source, text, kind?, who?, at? }  -> { ok: true, id, at }
+ *   GET  /api/event   ?days=3  -> { events: [{ id, source, kind, who, text, at }] }  newest first
+ *
  * Heartbeats (src/health.js; Bearer <BEAT_TOKEN>): jobs that run on their own report in, and an
  * hourly cron sends one ntfy alert (NTFY_TOPIC) when one goes quiet:
  *   POST /api/health/beat   <- { job, note? }  -> { ok: true }
@@ -67,6 +72,7 @@ import { kitchen } from './kitchen-store.js';
 import { handleGerman } from './german.js';
 import { handleHealth, checkHealth } from './health.js';
 import { handleIntake } from './intake.js';
+import { handleEvent } from './events.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -262,6 +268,7 @@ const MODULES = {
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   health: (request, env, rest) => handleHealth(request, env, rest, json),
   intake: (request, env, rest, url) => handleIntake(request, env, rest, url, { json, list, code: CODE }),
+  event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
   admin: handleAdmin,
 };
 
