@@ -543,6 +543,10 @@ test('GET: every block in one answer; to-dos are open Today items only, newest f
   assert.equal(b.arsenal.last.result, 'Lost');
   assert.deepEqual(b.bins.collections, [{ date: '2026-10-08', types: ['GFT'] }, { date: '2026-10-13', types: ['Papier'] }]);
   assert.equal(b.now, new Date(now).toISOString());
+  assert.equal(b.status, null, 'no hub:status yet');
+  env.HUB_KV.m.set('hub:status', JSON.stringify({ at: new Date(now).toISOString(), line: 'A quiet night.', summary: null, summaryAt: null, facts: {} }));
+  const b2 = await (await get(env, now)).json();
+  assert.deepEqual(b2.status, { line: 'A quiet night.', summary: null, summaryAt: null, at: new Date(now).toISOString() });
 });
 
 test('GET: one failing source never breaks the others', async () => {

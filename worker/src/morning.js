@@ -1037,6 +1037,14 @@ export async function reposBlock(env) {
   return cleanRepos(await env.HUB_KV.get(REPOS_KEY, 'json'));
 }
 
+/* ---------- Status: the hub's one line about everything (src/status.js writes hub:status) ----------
+ * Read straight from KV here: status.js imports this file, so this file must not import it. */
+export async function statusBlock(env) {
+  const s = await env.HUB_KV.get('hub:status', 'json');
+  if (!s || typeof s.line !== 'string') return null;
+  return { line: s.line, summary: typeof s.summary === 'string' && s.summary ? s.summary : null, summaryAt: s.summaryAt || null, at: s.at };
+}
+
 /* ---------- Read for you: what Intake read lately (src/intake.js) ----------
  * Records live in HUB_KV as intake:r:<ms, 14 digits>:<id>, so the newest sort last. Null until
  * the first one, so the card stays hidden. Only summaries travel; never the file, never the quotes. */
@@ -1118,7 +1126,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   }
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german, repos, intake, events] = await Promise.all([
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german, repos, intake, events, status] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
@@ -1134,6 +1142,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => reposBlock(env), "Repos can't load right now"),
     block(() => intakeBlock(env, now), "Read items can't load right now"),
     block(() => eventsBlock(env, now), "The feed can't load right now"),
+    block(() => statusBlock(env), "The status can't load right now"),
   ]);
   return json({
     now: new Date(now).toISOString(),
@@ -1152,6 +1161,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     repos,
     intake,
     events,
+    status,
     links: linksBlock(env.LINKS),
   }, request);
 }

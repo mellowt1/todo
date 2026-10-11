@@ -49,6 +49,9 @@
  * Backups: once a day the cron also copies the to-do list and the kitchen into KV
  * (backup:todo, backup:kitchen, backup:at) for the PC's weekly backup.
  *
+ * Status (src/status.js): every hour the cron reads what the hub holds and writes one line
+ * (hub:status); once a day after 06:00 Claude adds a two-sentence summary. Morning shows it.
+ *
  * Admin (Authorization: Bearer <ADMIN_TOKEN>):
  *   GET  /api/admin/todo/export         -> the whole list, tombstones included
  *   POST /api/admin/kitchen/recipes     <- { recipes: [recipe, ...] }  (no id: a new recipe)
@@ -73,6 +76,7 @@ import { handleGerman } from './german.js';
 import { handleHealth, checkHealth } from './health.js';
 import { handleIntake } from './intake.js';
 import { handleEvent } from './events.js';
+import { refreshStatus } from './status.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -285,7 +289,7 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(Promise.allSettled([checkHealth(env), snapshot(env)]));
+    ctx.waitUntil(Promise.allSettled([checkHealth(env), snapshot(env), refreshStatus(env)]));
   },
 };
 

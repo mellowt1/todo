@@ -75,7 +75,7 @@ export const SYSTEM = [
 ].join('\n');
 
 let client = null;
-function anthropic(env) {
+export function anthropic(env) {
   if (!client || client._key !== env.ANTHROPIC_API_KEY) {
     client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120000 });
     client._key = env.ANTHROPIC_API_KEY;
