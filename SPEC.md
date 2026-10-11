@@ -1,6 +1,6 @@
 # Simple to-do: SPEC
 
-Status: approved by Paul on 23 Sept 2026. No code, no repo yet.
+Status: approved by Paul on 23 Sept 2026. Built and live: the PWA at mellowt1.github.io/todo, synced through the paul-hub Worker (see README.md).
 
 ## Purpose
 Replace the iOS Notes to-do page with the simplest possible list: capture in one tap, done with a swipe, three sections. It opens instantly, works offline and syncs when back online. Its Worker becomes shared infrastructure for the Morning Screen.

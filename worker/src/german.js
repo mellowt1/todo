@@ -1,8 +1,8 @@
 /* German tutor calls (src/german.js).
  *
  * The tutor app on Paul's Windows PC "calls" him on four random evenings a week. The PC
- * pushes the week's plan and each call's outcome here; Odysseus pulls them for calendar
- * events. Times are Europe/Amsterdam.
+ * pushes the week's plan and each call's outcome here; the Odysseus backend pulls them
+ * and keeps one calendar event per call, which shows in Day. Times are Europe/Amsterdam.
  *
  *   POST /api/german/week     Authorization: Bearer <GERMAN_PUSH_TOKEN>
  *                             <- { calls: [{ id, date, windowStart, windowEnd, at, persona, topic }] }
