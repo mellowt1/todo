@@ -32,7 +32,11 @@
   <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M6 11v9h12v-9"/></symbol>
   <symbol id="i-addbox" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8"/></symbol>
 </svg>
+
+<!-- Intake: the paper-clip opens this. Photos and PDFs go to the Worker, which asks Claude for the dates. -->
+<input id="fileIn" type="file" accept="image/*,application/pdf" multiple hidden tabindex="-1" aria-hidden="true">
 
 <nav class="sidebar" aria-label="Sections">
   <div class="brand">To-do</div>
@@ -61,6 +65,9 @@
           <button id="retry" class="text-btn">Retry</button>
         </div>
       </div></div>
+      <div id="readSlot" class="slot"><div class="slot-clip">
+        <div id="reading" class="pill reading" hidden><svg class="ic spin" width="16" height="16"><use href="#i-sync"/></svg><span></span></div>
+      </div></div>
     </header>
 
     <div id="inlineSlot" class="inline-slot"><div class="inline-clip">
@@ -69,6 +76,7 @@
         <label for="inlineInput" class="sr-only">New task</label>
         <input id="inlineInput" type="text" placeholder="New task" maxlength="500" autocomplete="off" autocapitalize="sentences">
         <span class="meta">Enter to add</span>
+        <button id="inlineClip" class="icon-btn clip" aria-label="Read a letter or PDF" title="Read a letter or PDF"><svg class="ic" width="20" height="20"><use href="#i-clip"/></svg></button>
       </div>
     </div></div>
 
@@ -116,6 +124,7 @@
     <div class="cap-row">
       <span class="circle-static" aria-hidden="true"></span>
       <input id="capInput" type="text" placeholder="New task" maxlength="500" autocomplete="off" autocapitalize="sentences">
+      <button id="capClip" class="icon-btn clip" aria-label="Read a letter or PDF"><svg class="ic" width="22" height="22"><use href="#i-clip"/></svg></button>
     </div>
   </div>
 </div>
@@ -134,6 +143,11 @@
       <button role="radio" data-section="today">Today</button>
       <button role="radio" data-section="soon">Soon</button>
       <button role="radio" data-section="someday">Someday</button>
+    </div>
+    <div id="editFrom" class="edit-from" hidden>
+      <div class="meta">Read from <span id="editFromKind"></span></div>
+      <p id="editFromSummary"></p>
+      <ul id="editFromQuotes"></ul>
     </div>
     <div class="grow"></div>
     <button id="editDelete" class="danger-btn">Delete task</button>

@@ -433,3 +433,22 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   body.ready .seg::before { transition: none; }
   body.ready .seg button { transition: opacity var(--dur-press) ease; }
 }
+
+/* ---------- Intake: the paper-clip ---------- */
+/* Same 44px hit area as the other icon buttons; in the desktop add row it sits inside the border. */
+.cap-row .clip { margin-right: -10px; }
+.inline-add .clip { width: 36px; height: 36px; margin-right: -8px; }
+.clip:hover { color: var(--text); }
+/* "Reading brief.pdf" under the title while the Worker asks Claude. The icon turns; not under reduced motion. */
+.pill.reading .spin { animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pill.reading .spin { animation: none; } }
+/* A task that came from a letter carries a small clip after its text, instead of the raw [intake] mark. */
+.clipmark { display: inline-block; vertical-align: -2px; margin-left: 5px; color: var(--secondary); }
+/* The edit sheet shows what the letter said, under the section picker. */
+.edit-from { background: var(--field); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.edit-from p { margin: 0; font-size: var(--fs-body); line-height: 1.35; }
+.edit-from ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.edit-from li { font-size: var(--fs-meta); color: var(--secondary); padding-left: 10px; border-left: 2px solid var(--sep); line-height: 1.35; }
+/* Desktop: a file dragged over the list can be dropped on it. */
+main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: -2px; border-radius: 12px; min-height: 120px; }

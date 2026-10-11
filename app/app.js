@@ -414,6 +414,14 @@
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
   const pad = (n) => String(n).padStart(2, '0');
+  // A task Intake wrote ends in "[intake]". It shows as a small clip, not as the mark.
+  const INTAKE_MARK = /\s*\[intake\]$/;
+  const isIntake = (it) => INTAKE_MARK.test(it.text);
+  function textHtml(it) {
+    if (!isIntake(it)) return esc(it.text);
+    return esc(it.text.replace(INTAKE_MARK, '')) +
+      '<svg class="ic clipmark" width="14" height="14" role="img" aria-label="from a letter"><use href="#i-clip"/></svg>';
+  }
 
   function dayLabel(t) {
     const d = new Date(t);
@@ -435,7 +443,7 @@
       '<div class="swipe-move"><span class="move-group">' + moves + '</span></div>' +
       '<div class="row-inner">' +
       '<button class="circle" aria-label="Mark done" aria-describedby="t-' + it.id + '"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></button>' +
-      '<div class="text" id="t-' + it.id + '" role="button">' + esc(it.text) + '</div>' +
+      '<div class="text" id="t-' + it.id + '" role="button">' + textHtml(it) + '</div>' +
       '<button class="move-btn" aria-label="Move task" aria-describedby="t-' + it.id + '" aria-haspopup="menu" aria-expanded="false"><svg class="ic" width="20" height="20"><use href="#i-move"/></svg></button>' +
       '</div></li>';
   }
@@ -455,7 +463,7 @@
       html += '<li class="drow" data-id="' + it.id + '">' +
         '<button class="dbtn" aria-label="Reopen ' + esc(it.text) + '" aria-describedby="ds-' + it.id + ' dt-' + it.id + '">' +
         '<span class="dcheck" aria-hidden="true"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span>' +
-        '<span class="dbody"><span class="dtext">' + esc(it.text) + '</span><span class="meta" id="ds-' + it.id + '">' + LABEL[it.section] + '</span></span>' +
+        '<span class="dbody"><span class="dtext">' + textHtml(it) + '</span><span class="meta" id="ds-' + it.id + '">' + LABEL[it.section] + '</span></span>' +
         '<span class="meta dtime" id="dt-' + it.id + '">' + pad(t.getHours()) + ':' + pad(t.getMinutes()) + '</span></button></li>';
     }
     return html;
@@ -1612,7 +1620,8 @@
     if (!it || leaving.has(id) || (row && gone(row))) return; // a task about to leave does not open
     editId = id;
     editFrom = { id, section: it.section, pos: it.pos };
-    editText.value = it.text;
+    editText.value = it.text.replace(INTAKE_MARK, ''); // the mark stays on the task, not in the box
+    showFrom(it);
     const seg = $('editSeg');
     seg.classList.add('instant');
     paintEditSeg(it.section);
@@ -1644,7 +1653,8 @@
   function saveEditText() {
     clearTimeout(editTimer);
     const it = items[editId];
-    const t = cleanText(editText.value);
+    let t = cleanText(editText.value);
+    if (it && t && isIntake(it) && !INTAKE_MARK.test(t)) t = cleanText(t + ' [intake]') || t;
     if (it && t && t !== it.text) upsert(Object.assign({}, it, { text: t }));
   }
   function closeEdit() {
@@ -1798,6 +1808,157 @@
     }
   });
 
+  /* ---------- Intake: a letter, a PDF or a photo becomes tasks ---------- */
+  // The paper-clip (capture sheet on the phone, add row on the desktop) and a file dropped on the
+  // list go to POST /api/intake. The Worker asks Claude for one record and writes the tasks into
+  // the list itself; the next poll draws them. The pill under the title shows the wait, a toast
+  // says what came of it. The last records stay on this device, so the edit sheet can show what the
+  // letter said; on load the Worker's recent records are merged in once, for tasks read elsewhere.
+  const INTAKE_KEY = 'todo.intake.' + code;
+  const MAX_FILES = 10;
+  const MAX_PDF = 15 * 1024 * 1024;
+  const MAX_SIDE = 1600; // photos are shrunk on the phone before they go
+  const KINDS = { letter: 'a letter', bill: 'a bill', contract: 'a contract', 'credit-report': 'a credit report', job: 'a job posting', note: 'your note', other: 'a document' };
+  let recs = Array.isArray(store.get(INTAKE_KEY)) ? store.get(INTAKE_KEY) : [];
+  const fileIn = $('fileIn');
+  const readPill = $('reading');
+  let readingN = 0;
+
+  function pickFiles() { fileIn.value = ''; fileIn.click(); }
+  fileIn.addEventListener('change', () => { if (fileIn.files.length) readFiles(Array.from(fileIn.files)); });
+  $('capClip').addEventListener('click', pickFiles);
+  $('inlineClip').addEventListener('click', pickFiles);
+
+  const asBase64 = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+  // A photo becomes a JPEG no wider than MAX_SIDE. Browsers draw it the right way up from its EXIF.
+  function shrink(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const s = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * s));
+        c.height = Math.max(1, Math.round(img.naturalHeight * s));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL('image/jpeg', 0.85).split(',')[1] || null);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+
+  async function readFiles(files) {
+    if (view !== 'list') setSection(ui.section);
+    if (!$('capture').hidden) closeCapture(); // what was typed is added; the pill tells the rest
+    hideInline();
+    if (!navigator.onLine) return toast('Needs a connection to read it.');
+    if (files.length > MAX_FILES) return toast('At most ' + MAX_FILES + ' files at a time.');
+    const out = [];
+    for (const f of files) {
+      const type = f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : '');
+      if (type === 'application/pdf') {
+        if (f.size > MAX_PDF) return toast(f.name + ' is too big. 15 MB at most.');
+        out.push({ name: f.name, media_type: type, data: await asBase64(f) });
+      } else if (/^image\//.test(type)) {
+        const data = await shrink(f);
+        if (!data) return toast('Could not open ' + f.name + '.');
+        out.push({ name: f.name, media_type: 'image/jpeg', data });
+      } else {
+        return toast('Only photos and PDFs can be read.');
+      }
+    }
+    if (out.length) sendIntake(out, files.length === 1 ? files[0].name : files.length + ' files');
+  }
+
+  const READ_ERRORS = {
+    'api key refused': 'Reading is not set up on the server.',
+    refused: 'Claude declined to read this one.',
+    'too large': 'Too big. Try fewer pages.',
+    'cut off': 'Too long to read in one go. Try fewer pages.',
+  };
+  async function sendIntake(files, label) {
+    readingN++;
+    readPill.querySelector('span').textContent = 'Reading ' + label;
+    slotIn(readPill);
+    say('Reading ' + label);
+    try {
+      const r = await fetch(API + '/api/intake/' + code, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      });
+      const d = await r.json().catch(() => null);
+      if (refused(r.status, d)) return showNoCode();
+      if (r.status === 429) return toast('Busy. Try again in a minute.');
+      if (!r.ok || !d) return toast((d && READ_ERRORS[d.error]) || 'Could not read it. Try again.');
+      if (d.record) remember(d);
+      if (d.duplicate) return toast('Already read' + (d.at ? ' ' + dayLabel(Date.parse(d.at)).toLowerCase() : '') + '.');
+      const rec = d.record || {};
+      if (rec.readable === false) return toast('Could not read it. Try a sharper photo.');
+      const tasks = Array.isArray(d.tasks) ? d.tasks : [];
+      if (!tasks.length) return toast('Read. Nothing to do.');
+      await poll(); // the Worker already wrote the tasks; draw them now rather than in ten seconds
+      if (!tasks.every((t) => items[t.id])) setTimeout(poll, 1200); // a poll was already running
+      const by = {};
+      for (const t of tasks) by[t.section] = (by[t.section] || 0) + 1;
+      const where = SECTIONS.filter((s) => by[s]).map((s) => LABEL[s] + ' ' + by[s]).join(', ');
+      toast((tasks.length === 1 ? '1 task' : tasks.length + ' tasks') + ' from ' + (KINDS[rec.kind] || 'the document') + ': ' + where + '.');
+    } catch (e) {
+      toast(navigator.onLine ? 'Could not read it. Try again.' : 'Needs a connection to read it.');
+    } finally {
+      if (--readingN === 0) slotOut(readPill);
+    }
+  }
+
+  // Keep what the edit sheet needs: the summary, a few quotes, which tasks it made.
+  function remember(d) {
+    const rec = d.record || {};
+    const ids = Array.isArray(d.tasks) ? d.tasks.map((t) => t.id) : [];
+    const entry = { id: d.id, at: d.at, kind: rec.kind, who: rec.who, summary: rec.summary || '', note: rec.note || null, quotes: (rec.quotes || []).slice(0, 4), tasks: ids };
+    recs = [entry].concat(recs.filter((x) => x.id !== d.id)).slice(0, 40);
+    store.set(INTAKE_KEY, recs);
+  }
+  const recOf = (taskId) => recs.find((x) => x.tasks.includes(taskId)) || null;
+  function showFrom(it) {
+    const box = $('editFrom');
+    const rec = isIntake(it) ? recOf(it.id) : null;
+    box.hidden = !rec;
+    if (!rec) return;
+    $('editFromKind').textContent = KINDS[rec.kind] || 'a document';
+    $('editFromSummary').textContent = rec.summary + (rec.note ? ' ' + rec.note : '');
+    $('editFromQuotes').innerHTML = rec.quotes.slice(0, 3).map((q) => '<li>' + esc(q) + '</li>').join('');
+  }
+  // Once per load: records made on another device.
+  async function loadRecs() {
+    try {
+      const r = await fetch(API + '/api/intake/' + code + '?limit=30', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      if (!d || !Array.isArray(d.items)) return;
+      const have = new Set(recs.map((x) => x.id));
+      for (const x of d.items) if (!have.has(x.id)) remember(x);
+    } catch (e) { /* the edit sheet just shows less */ }
+  }
+
+  // Desktop: a file dragged over the list can be dropped on it. Rows dragged between sections
+  // carry their own type and are not files.
+  const mainEl = document.querySelector('main');
+  const hasFiles = (e) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+  mainEl.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); mainEl.classList.add('drop-files'); } });
+  mainEl.addEventListener('dragleave', (e) => { if (!mainEl.contains(e.relatedTarget)) mainEl.classList.remove('drop-files'); });
+  mainEl.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    mainEl.classList.remove('drop-files');
+    readFiles(Array.from(e.dataTransfer.files));
+  });
+
   /* ---------- Life cycle ---------- */
   let pollTimer = 0;
   function startPolling() {
@@ -1839,6 +2000,7 @@
   poll();
   if (st.queue.length) scheduleFlush(300);
   startPolling();
+  setTimeout(loadRecs, 1500); // after the list, never before it
 
   if ('serviceWorker' in navigator && (!isLocal || params.has('sw'))) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

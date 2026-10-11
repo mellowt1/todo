@@ -1036,6 +1036,35 @@ export async function reposBlock(env) {
   return cleanRepos(await env.HUB_KV.get(REPOS_KEY, 'json'));
 }
 
+/* ---------- Read for you: what Intake read lately (src/intake.js) ----------
+ * Records live in HUB_KV as intake:r:<ms, 14 digits>:<id>, so the newest sort last. Null until
+ * the first one, so the card stays hidden. Only summaries travel; never the file, never the quotes. */
+const INTAKE_PREFIX = 'intake:r:';
+export async function intakeBlock(env, now) {
+  const listed = await env.HUB_KV.list({ prefix: INTAKE_PREFIX, limit: 200 });
+  const names = listed.keys.map((k) => k.name).sort().reverse();
+  if (!names.length) return null;
+  const weekAgo = now - 7 * DAY;
+  const msOf = (k) => Number(k.slice(INTAKE_PREFIX.length, INTAKE_PREFIX.length + 14)) || 0;
+  const recent = (await Promise.all(names.slice(0, 8).map((k) => env.HUB_KV.get(k, 'json')))).filter((r) => r && r.record && r.record.readable !== false);
+  const items = recent.map((r) => ({
+    id: String(r.id || ''),
+    at: validIso(r.at) ? r.at : null,
+    who: typeof r.record.who === 'string' ? r.record.who.slice(0, 12) : 'other',
+    kind: typeof r.record.kind === 'string' ? r.record.kind.slice(0, 16) : 'other',
+    summary: typeof r.record.summary === 'string' ? clean(r.record.summary).slice(0, 160) : '',
+    tasks: Array.isArray(r.tasks) ? r.tasks.length : 0,
+    needs: r.record.needs_paul === true,
+  }));
+  const usage = await env.HUB_KV.get('intake:usage:' + new Date(now).toISOString().slice(0, 7), 'json');
+  return {
+    week: names.filter((k) => msOf(k) >= weekAgo).length,
+    needs: items.filter((x) => x.needs && x.at && Date.parse(x.at) >= weekAgo).slice(0, 3),
+    recent: items.slice(0, 4),
+    month: usage && typeof usage === 'object' ? { calls: Number(usage.calls) || 0, input: Number(usage.input) || 0, output: Number(usage.output) || 0 } : null,
+  };
+}
+
 /* ---------- Apps: one-tap links, from the LINKS secret (they carry codes, so never in the repo) ----------
  *   LINKS = [{ "name": "Kitchen", "url": "https://..." }, ...]  https only, at most 12. */
 export function linksBlock(raw) {
@@ -1088,7 +1117,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   }
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
-  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german, repos] = await Promise.all([
+  const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german, repos, intake] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
     block(() => weather(env, now), "Weather can't load right now"),
@@ -1102,6 +1131,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => projectsBlock(env), "Projects can't load right now"),
     block(() => germanBlock(env, now), "German calls can't load right now"),
     block(() => reposBlock(env), "Repos can't load right now"),
+    block(() => intakeBlock(env, now), "Read items can't load right now"),
   ]);
   return json({
     now: new Date(now).toISOString(),
@@ -1118,6 +1148,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     projects,
     german,
     repos,
+    intake,
     links: linksBlock(env.LINKS),
   }, request);
 }

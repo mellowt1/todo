@@ -34,6 +34,7 @@ function memKV() {
       return type === 'json' ? JSON.parse(v) : v;
     },
     async put(k, v) { kv.puts++; if (kv.fail) throw new Error('kv down'); m.set(k, v); },
+    async list({ prefix = '' } = {}) { if (kv.fail) throw new Error('kv down'); return { keys: [...m.keys()].filter((k) => k.startsWith(prefix)).sort().map((name) => ({ name })) }; },
   };
   return kv;
 }
@@ -869,4 +870,30 @@ test('parked: today, done, drop and undo from the page', async () => {
   const after = JSON.parse(env.HUB_KV.m.get(PROJECTS_KEY));
   assert.deepEqual(after.parked.map((x) => x.text), ['New thing']);
   assert.deepEqual(after.projects, []);
+});
+
+test('intake block: hidden until the first record, then the newest first with what needs Paul', async () => {
+  const env = makeEnv();
+  allSources();
+  const now = Date.now();
+  const morning = async () => (await worker.fetch(new Request(`${BASE}/api/morning/${CODE}`), env)).json();
+  assert.equal((await morning()).intake, null);
+
+  const rec = (ms, id, over = {}) => env.HUB_KV.m.set('intake:r:' + String(ms).padStart(14, '0') + ':' + id, JSON.stringify({
+    id, at: new Date(ms).toISOString(), tasks: [{ id: 'aaaaaaaa' }],
+    record: { readable: true, who: 'mom', kind: 'letter', summary: 'A letter that wants a reply.', needs_paul: true, quotes: ['never shown'], ...over },
+  }));
+  rec(now - 20 * 24 * 3600000, 'old1', { needs_paul: true });          // old: counts for nothing this week
+  rec(now - 2 * 24 * 3600000, 'new1');                                  // needs Paul
+  rec(now - 3600000, 'new2', { who: 'me', kind: 'bill', needs_paul: false, summary: 'Paid already.' });
+  rec(now - 60000, 'bad1', { readable: false });                        // an unreadable photo is not shown
+  env.HUB_KV.m.set('intake:usage:' + new Date(now).toISOString().slice(0, 7), JSON.stringify({ calls: 4, input: 100, output: 20, cacheRead: 0, cacheWrite: 0 }));
+
+  const b = (await morning()).intake;
+  assert.equal(b.week, 3);
+  assert.deepEqual(b.recent.map((x) => x.id), ['new2', 'new1', 'old1']);
+  assert.deepEqual(b.needs.map((x) => x.id), ['new1']);
+  assert.equal(b.recent[0].tasks, 1);
+  assert.equal(b.recent[0].quotes, undefined);
+  assert.deepEqual(b.month, { calls: 4, input: 100, output: 20 });
 });
