@@ -5,10 +5,13 @@
  * Stored document, one KV key per list (todo:<code>):
  *   { items: { [id]: Item }, tombs: { [id]: deletedAt }, rev, updated }
  *
- * Item: { id, text, section, done, doneAt, updatedAt, pos }
+ * Item: { id, text, section, done, doneAt, updatedAt, pos, link? }
  *   section  "today" | "soon" | "someday" (a done task keeps the section it came from)
  *   doneAt   ms since epoch, or null while open
  *   pos      ms since epoch, sort key inside a section (newest on top)
+ *   link     optional http(s) URL (a vacancy's page, set by the hub). An upsert without
+ *            `link` keeps the stored one, so an app that does not know links never drops it;
+ *            `link: null` removes it.
  *
  * Every op carries its own updatedAt. For each task the newest updatedAt wins, so an
  * offline phone and a desktop never overwrite each other's work on other tasks.
@@ -19,6 +22,7 @@ export const SECTIONS = ['today', 'soon', 'someday'];
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
+export const MAX_LINK = 800;
 export const MAX_OPS = 200;
 export const MAX_ITEMS = 10000;
 export const TOMB_DAYS = 90;
@@ -46,6 +50,19 @@ export function cleanText(v) {
   return t;
 }
 
+/* An http(s) URL, at most MAX_LINK long, or null. */
+export function cleanLink(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  if (!s || s.length > MAX_LINK || !/^https?:\/\//i.test(s)) return null;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /* One op in, one clean op out, or null. Anything not on the whitelist is dropped. */
 export function cleanOp(raw, now = Date.now()) {
   if (!raw || typeof raw !== 'object') return null;
@@ -65,7 +82,13 @@ export function cleanOp(raw, now = Date.now()) {
   if (doneAt === undefined) return null;
   const pos = cleanTime(it.pos, now, false);
   if (pos === undefined) return null;
-  return { op: 'upsert', item: { id: it.id, text, section: it.section, done, doneAt, updatedAt, pos } };
+  const item = { id: it.id, text, section: it.section, done, doneAt, updatedAt, pos };
+  if (it.link === null) item.link = null;
+  else if (it.link !== undefined) {
+    item.link = cleanLink(it.link);
+    if (item.link === null) return null;
+  }
+  return { op: 'upsert', item };
 }
 
 /* Validate a batch. Returns { ops, rejected } or { error }.
@@ -96,7 +119,10 @@ export function applyOps(doc, ops) {
     if (op === 'upsert') {
       if (tomb !== undefined && tomb >= item.updatedAt) continue;
       if (cur && cur.updatedAt >= item.updatedAt) continue;
-      doc.items[item.id] = item;
+      const next = { ...item };
+      if (next.link === undefined && cur && cur.link) next.link = cur.link;
+      if (next.link === null) delete next.link;
+      doc.items[item.id] = next;
       if (tomb !== undefined) delete doc.tombs[item.id];
       changed = true;
     } else {

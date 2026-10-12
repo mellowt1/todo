@@ -176,6 +176,7 @@
     enqueue({ op: 'upsert', item: {
       id: it.id, text: it.text, section: it.section, done: !!it.done,
       doneAt: it.done ? it.doneAt : null, pos: it.pos, updatedAt: stamp(),
+      ...(it.link ? { link: it.link } : {}), // set by the hub (a vacancy's page); the app only keeps it
     } });
   }
 
@@ -435,6 +436,16 @@
     return s;
   }
 
+  // A task the hub made can carry a link (a vacancy's page): a small icon that opens it.
+  const SAFE_LINK = /^https?:\/\//i;
+  function linkHtml(it) {
+    if (typeof it.link !== 'string' || !SAFE_LINK.test(it.link)) return '';
+    let host = '';
+    try { host = new URL(it.link).hostname.replace(/^www\./, ''); } catch (e) { return ''; }
+    return '<a class="link" href="' + esc(it.link) + '" target="_blank" rel="noopener noreferrer" aria-label="Open link, ' + esc(host) + '" title="' + esc(host) + '">' +
+      '<svg class="ic" width="20" height="20"><use href="#i-link"/></svg></a>';
+  }
+
   function rowHtml(it, enter) {
     const moves = SECTIONS.map((s) =>
       '<button data-move="' + s + '"' + (s === it.section ? ' aria-current="true" tabindex="-1"' : '') + '>' + LABEL[s] + '</button>').join('');
@@ -444,6 +455,7 @@
       '<div class="row-inner">' +
       '<button class="circle" aria-label="Mark done" aria-describedby="t-' + it.id + '"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></button>' +
       '<div class="text" id="t-' + it.id + '" role="button">' + textHtml(it) + '</div>' +
+      linkHtml(it) +
       '<button class="move-btn" aria-label="Move task" aria-describedby="t-' + it.id + '" aria-haspopup="menu" aria-expanded="false"><svg class="ic" width="20" height="20"><use href="#i-move"/></svg></button>' +
       '</div></li>';
   }
@@ -1197,6 +1209,10 @@
       revealed = null;
       if (slideOut(row, -1)) moveTo(row.dataset.id, mv.dataset.move);
       return;
+    }
+    if (e.target.closest('.link')) {
+      if (revealed === row) { e.preventDefault(); closeReveal(); }
+      return; // the browser opens it
     }
     if (revealed === row) { closeReveal(); return; }
     if (e.target.closest('.circle')) { completeRow(row); return; }

@@ -11,9 +11,13 @@
  * when it is missing or in the future, now is used.
  *
  * KV: event:<ms, 14 digits>:<id> { id, source, kind, who, text, at }, 30 days.
- * Secret: EVENT_TOKEN (shared with every sender; one token, it only lets you post a line). */
+ * Secret: EVENT_TOKEN (shared with every sender; one token, it only lets you post a line).
+ *
+ * A body with a `type` is a typed event for the hub's rules (src/hub.js), authorised by its
+ * source's own HUB_SECRET_<SOURCE>, not by EVENT_TOKEN. */
 
 import { safeEqual, bearer } from './todo.js';
+import { handleHubEvent } from './hub.js';
 
 const PREFIX = 'event:';
 const DAY = 86400000;
@@ -66,18 +70,23 @@ export async function eventsBlock(env, now = Date.now()) {
 
 export async function handleEvent(request, env, rest, url, json, now = Date.now()) {
   if (rest.length) return json({ error: 'not found' }, request, 404);
+  if (request.method === 'POST') {
+    const text = await request.text();
+    if (text.length > 6000) return json({ error: 'too large' }, request, 413);
+    let body;
+    try { body = JSON.parse(text); } catch (e) { return json({ error: 'bad json' }, request, 400); }
+    if (body && typeof body === 'object' && body.type !== undefined) return handleHubEvent(request, env, body, json, now);
+    if (!env.EVENT_TOKEN || !safeEqual(bearer(request), env.EVENT_TOKEN)) return json({ error: 'unauthorized' }, request, 401);
+    if (text.length > 2000) return json({ error: 'too large' }, request, 413);
+    const rec = cleanEvent(body, now);
+    if (rec.error) return json({ error: rec.error }, request, 400);
+    const id = await putEvent(env, rec, now);
+    return json({ ok: true, id, at: rec.at }, request);
+  }
   if (!env.EVENT_TOKEN || !safeEqual(bearer(request), env.EVENT_TOKEN)) return json({ error: 'unauthorized' }, request, 401);
   if (request.method === 'GET') {
     const days = Math.min(KEEP_DAYS, Math.max(1, Number(url.searchParams.get('days')) || 3));
     return json({ events: await listEvents(env, now, days, 200) }, request);
   }
-  if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
-  const text = await request.text();
-  if (text.length > 2000) return json({ error: 'too large' }, request, 413);
-  let body;
-  try { body = JSON.parse(text); } catch (e) { return json({ error: 'bad json' }, request, 400); }
-  const rec = cleanEvent(body, now);
-  if (rec.error) return json({ error: rec.error }, request, 400);
-  const id = await putEvent(env, rec, now);
-  return json({ ok: true, id, at: rec.at }, request);
+  return json({ error: 'method' }, request, 405);
 }

@@ -41,6 +41,11 @@
  *   POST /api/event   <- { source, text, kind?, who?, at? }  -> { ok: true, id, at }
  *   GET  /api/event   ?days=3  -> { events: [{ id, source, kind, who, text, at }] }  newest first
  *
+ * Hub (src/hub.js; D1 HUB_DB + queue HUB_QUEUE): a typed event goes to the same POST /api/event,
+ * with its source's own Bearer <HUB_SECRET_<SOURCE>>. It is stored once (the sender's id), and each
+ * enabled rule for its source and type queues one reaction (defence-digest vacancy.found -> a task):
+ *   POST /api/event   <- { id, source, type, summary, payload, caused_by?, hops? }  -> { ok, id, queued }
+ *
  * Heartbeats (src/health.js; Bearer <BEAT_TOKEN>): jobs that run on their own report in, and an
  * hourly cron sends one ntfy alert (NTFY_TOPIC) when one goes quiet:
  *   POST /api/health/beat   <- { job, note? }  -> { ok: true }
@@ -57,7 +62,9 @@
  *   POST /api/admin/kitchen/recipes     <- { recipes: [recipe, ...] }  (no id: a new recipe)
  *                                       -> { ok: true, ids, rev }  all or nothing; errors name the recipe
  *   GET  /api/admin/kitchen/export      -> every kitchen record, tombstones included
- *   POST /api/admin/morning/projects    <- { projects: [{ name, status, next }], parked: [{ text, from }] }
+ *   GET  /api/admin/rules               -> { rules: [{ id, source, type, target, fields, enabled }] }
+ *   POST /api/admin/rules/:id           <- { enabled: true | false }  -> { ok: true, rule }
+ *   POST /api/admin/morning/projects    <-{ projects: [{ name, status, next }], parked: [{ text, from }] }
  *                                       -> { ok: true, projects, parked }  replaces the whole block
  *
  * The list itself lives in a Durable Object (src/list.js), one per code, so writes
@@ -77,6 +84,7 @@ import { handleHealth, checkHealth } from './health.js';
 import { handleIntake } from './intake.js';
 import { handleEvent } from './events.js';
 import { refreshStatus } from './status.js';
+import { adminRules, consume } from './hub.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -245,6 +253,7 @@ async function handleAdmin(request, env, rest) {
     if (!env.TODO_CODE) return json({ error: 'not configured' }, request, 503);
     return json((await list(env, env.TODO_CODE, '/export')).data, request);
   }
+  if (rest[0] === 'rules') return adminRules(request, env, rest.slice(1), json, readBody);
   if (rest.join('/') === 'kitchen/recipes') {
     if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
     return adminRecipes(request, env);
@@ -290,6 +299,9 @@ export default {
   },
   async scheduled(event, env, ctx) {
     ctx.waitUntil(Promise.allSettled([checkHealth(env), snapshot(env), refreshStatus(env)]));
+  },
+  async queue(batch, env) {
+    await consume(batch, env);
   },
 };
 

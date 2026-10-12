@@ -29,6 +29,25 @@ new_sqlite_classes = ["KitchenStore"]
 binding = "HUB_KV"
 id = "a8b5f676c79f416f9e5ae37b5c589b4a"
 
+# The hub's event log and rules (src/hub.js, migrations/). HUB_KV keeps everything else.
+[[d1_databases]]
+binding = "HUB_DB"
+database_name = "hub"
+database_id = "SET-AFTER-d1-create"
+migrations_dir = "migrations"
+
+# Reactions to typed events. 5 attempts (1 + 4 retries), then the dead letter queue.
+[[queues.producers]]
+binding = "HUB_QUEUE"
+queue = "hub-events"
+
+[[queues.consumers]]
+queue = "hub-events"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 4
+dead_letter_queue = "hub-events-dlq"
+
 # Secrets, uploaded with `npx wrangler secret bulk <file.json>` (see README), never written here:
 #   TODO_CODE            the 16 character list code in Paul's private link
 #   TODO_READ_TOKEN      Odysseus, read only, GET /api/todo/open and nothing else
@@ -42,7 +61,8 @@ id = "a8b5f676c79f416f9e5ae37b5c589b4a"
 #   GERMAN_READ_TOKEN    Odysseus, read only, GET /api/german/calls
 #   ANTHROPIC_API_KEY    Intake: the Claude API key, POST /api/intake/:code (npx wrangler secret put ANTHROPIC_API_KEY)
 #   EVENT_TOKEN          Events: every sender posts to POST /api/event with it (npx wrangler secret put EVENT_TOKEN)
-#   INTAKE_PEOPLE        Intake: a few lines saying who mom, dad, lucho, nick, derreck and olivia are (optional)
+#   HUB_SECRET_DEFENCE_DIGEST  Hub: the defence-digest GitHub Action posts typed events with it
+#   INTAKE_PEOPLE       Intake: a few lines saying who mom, dad, lucho, nick, derreck and olivia are (optional)
 
 # Heartbeats: once an hour, alert on ntfy when a job that runs on its own has gone quiet (src/health.js).
 [triggers]
