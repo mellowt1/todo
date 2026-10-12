@@ -8,6 +8,8 @@
  *   r:<type>:<id>  the record, type included
  *   t:<type>:<id>  deletedAt, the tombstone of a deleted record
  *   meta           { rev, updated, count, pruned }
+ *   a:<base>       { date, away, seq }  Paul out for dinner, set by the hub (src/dinner.js);
+ *                  never a title. Every answer lists the dates as away: ["YYYY-MM-DD"].
  *
  * The Worker validates everything first; this class only ever sees clean ops.
  */
@@ -39,7 +41,32 @@ export class KitchenData {
   async read(since) {
     const m = await this.meta();
     if (since !== null && since === m.rev) return { unchanged: true, rev: m.rev };
-    return { items: await this.items(), rev: m.rev, updated: m.updated };
+    return { items: await this.items(), rev: m.rev, updated: m.updated, away: await this.awayDates() };
+  }
+
+  /* The dates Paul is out for dinner, oldest first. */
+  async awayDates() {
+    const dates = new Set();
+    for (const v of (await this.s.list({ prefix: 'a:' })).values()) if (v && v.away) dates.add(v.date);
+    return [...dates].sort();
+  }
+
+  /* The hub's reaction: one calendar event on one date (base) is away or back. A seq at or below
+   * the stored one is an older message and changes nothing. Bumps rev, so phones fetch it.
+   * Entries more than a week past are dropped here. */
+  async setAway({ base, date, away, seq }, now = Date.now()) {
+    const k = 'a:' + base;
+    const cur = await this.s.get(k);
+    if (cur && cur.seq >= seq) return { changed: false };
+    const m = await this.meta();
+    const cutoff = new Date(now - 7 * DAY).toISOString().slice(0, 10);
+    const old = [];
+    for (const [key, v] of await this.s.list({ prefix: 'a:' })) if (key !== k && v && v.date < cutoff) old.push(key);
+    const meta = { ...m, rev: m.rev + 1, updated: new Date(now).toISOString() };
+    const writes = [this.s.put({ [k]: { date, away: away === true, seq }, meta })];
+    for (const part of chunks(old)) writes.push(this.s.delete(part));
+    await Promise.all(writes);
+    return { changed: true, rev: meta.rev };
   }
 
   /* Apply clean ops, all written in one go with no await in between (committed atomically).
@@ -70,7 +97,7 @@ export class KitchenData {
       const k = keyOf(o.type, o.item.id);
       return o.op === 'upsert' ? doc.items[k] !== o.item : doc.tombs[k] !== o.item.updatedAt;
     }).map((o) => o.item.id);
-    if (!changed) return { rev: m.rev, updated: m.updated, items: await this.items(), skipped };
+    if (!changed) return { rev: m.rev, updated: m.updated, items: await this.items(), away: await this.awayDates(), skipped };
 
     const puts = {};
     const dels = [];
@@ -100,14 +127,16 @@ export class KitchenData {
     for (const part of chunks(dels)) writes.push(this.s.delete(part));
     writes.push(this.s.put('meta', meta));
     await Promise.all(writes);
-    return { rev: meta.rev, updated: meta.updated, items: await this.items(), skipped };
+    return { rev: meta.rev, updated: meta.updated, items: await this.items(), away: await this.awayDates(), skipped };
   }
 
   async exportAll() {
     const m = await this.meta();
     const tombs = {};
     for (const [k, v] of await this.s.list({ prefix: 't:' })) tombs[k.slice(2)] = v;
-    return { items: await this.items(), tombs, rev: m.rev, updated: m.updated };
+    const away = {};
+    for (const [k, v] of await this.s.list({ prefix: 'a:' })) away[k.slice(2)] = v;
+    return { items: await this.items(), tombs, away, rev: m.rev, updated: m.updated };
   }
 }
 
@@ -141,6 +170,9 @@ export class KitchenStore {
         const body = await request.json();
         out = await d.apply(body.ops, Date.now(), body.win === true);
       }
+        break;
+      case '/away':
+        out = await d.setAway(await request.json());
         break;
       case '/export':
         out = await d.exportAll();

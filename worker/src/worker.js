@@ -64,6 +64,8 @@
  *   GET  /api/admin/kitchen/export      -> every kitchen record, tombstones included
  *   GET  /api/admin/rules               -> { rules: [{ id, source, type, target, fields, enabled }] }
  *   POST /api/admin/rules/:id           <- { enabled: true | false }  -> { ok: true, rule }
+ *   GET  /api/admin/config              -> { config: { dinner_window } }
+ *   POST /api/admin/config/:key         <- { value: "18:00-21:00" | null }  (src/dinner.js)
  *   POST /api/admin/morning/projects    <-{ projects: [{ name, status, next }], parked: [{ text, from }] }
  *                                       -> { ok: true, projects, parked }  replaces the whole block
  *
@@ -85,6 +87,7 @@ import { handleIntake } from './intake.js';
 import { handleEvent } from './events.js';
 import { refreshStatus } from './status.js';
 import { adminRules, consume } from './hub.js';
+import { adminConfig, handleHub } from './dinner.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -190,7 +193,7 @@ async function handleKitchen(request, env, rest, url) {
     if (batch.error) return json({ error: batch.error }, request, 400);
     const out = batch.ops.length ? await kitchen(env, code, '/apply', { ops: batch.ops }) : await kitchen(env, code, '/read');
     if (out.data.error) return json(out.data, request, out.status);
-    return json({ rev: out.data.rev, updated: out.data.updated, items: out.data.items, rejected: batch.rejected }, request);
+    return json({ rev: out.data.rev, updated: out.data.updated, items: out.data.items, away: out.data.away, rejected: batch.rejected }, request);
   }
   return json({ error: 'not found' }, request, 404);
 }
@@ -254,6 +257,7 @@ async function handleAdmin(request, env, rest) {
     return json((await list(env, env.TODO_CODE, '/export')).data, request);
   }
   if (rest[0] === 'rules') return adminRules(request, env, rest.slice(1), json, readBody);
+  if (rest[0] === 'config') return adminConfig(request, env, rest.slice(1), json, readBody);
   if (rest.join('/') === 'kitchen/recipes') {
     if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
     return adminRecipes(request, env);
@@ -282,6 +286,7 @@ const MODULES = {
   health: (request, env, rest) => handleHealth(request, env, rest, json),
   intake: (request, env, rest, url) => handleIntake(request, env, rest, url, { json, list, code: CODE }),
   event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
+  hub: (request, env, rest, url) => handleHub(request, env, rest, url, json),
   admin: handleAdmin,
 };
 

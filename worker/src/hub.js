@@ -3,7 +3,8 @@
  * An event is a fact one app tells the hub ("defence-digest found a vacancy"). It is stored once
  * in D1 (HUB_DB). Each enabled rule that matches its source and type puts one message on the
  * queue (HUB_QUEUE), carrying only the payload fields the rule allows. The queue consumer hands
- * the message to the target's handler, which reacts (the to-do gets a task).
+ * the message to the target's handler, which reacts (the to-do gets a task; Kitchen marks Paul out
+ * for dinner, src/dinner.js).
  *
  *   POST /api/event   Authorization: Bearer <HUB_SECRET_<SOURCE>>
  *                     <- { id, source, type, summary, payload, caused_by?, hops? }
@@ -26,6 +27,7 @@
 
 import { safeEqual, bearer, cleanText, cleanLink, cleanOp } from './todo.js';
 import { putEvent } from './events.js';
+import { kitchenTarget } from './dinner.js';
 
 const SOURCE = /^[a-z0-9-]{2,24}$/;
 const TYPE = /^[a-z0-9-]{2,24}(\.[a-z0-9-]{2,24}){1,2}$/;
@@ -160,6 +162,9 @@ const TARGETS = {
     if (!r.ok) throw new Error('todo apply ' + r.status);
     return { done: id };
   },
+
+  /* Kitchen: Paul out for dinner on a date (src/dinner.js). Sets or clears a flag; never a meal. */
+  kitchen: (env, msg) => kitchenTarget(env, msg),
 };
 
 /* One message: skip if handled, react, then mark handled. Throws to have it retried. */

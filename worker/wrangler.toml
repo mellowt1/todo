@@ -62,6 +62,7 @@ dead_letter_queue = "hub-events-dlq"
 #   ANTHROPIC_API_KEY    Intake: the Claude API key, POST /api/intake/:code (npx wrangler secret put ANTHROPIC_API_KEY)
 #   EVENT_TOKEN          Events: every sender posts to POST /api/event with it (npx wrangler secret put EVENT_TOKEN)
 #   HUB_SECRET_DEFENCE_DIGEST  Hub: the defence-digest GitHub Action posts typed events with it
+#   HUB_SECRET_DAY       Hub: Day on the Mac posts dinner.away / dinner.back and reads GET /api/hub/config/day
 #   INTAKE_PEOPLE       Intake: a few lines saying who mom, dad, lucho, nick, derreck and olivia are (optional)
 
 # Heartbeats: once an hour, alert on ntfy when a job that runs on its own has gone quiet (src/health.js).
