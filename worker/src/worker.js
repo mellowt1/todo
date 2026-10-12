@@ -39,6 +39,10 @@
  *   POST /api/intake/:code    <- { files: [{ name, media_type, data }], text? }
  *                             -> { id, record, tasks, usage }  or  { duplicate: true, ... }
  *   GET  /api/intake/:code    ?limit=20  -> { items: [{ id, at, record, tasks }] }  newest first
+ *   GET  /api/intake/:code/cards           -> { tasks }  the tasks that open as a letter action card
+ *   GET  /api/intake/:code/card/:taskId    -> { card }   amount, IBAN, reference, case number, options, portal
+ *   POST /api/intake/:code/card/:taskId    <- { pick } | { done: { date, how } }   (src/letters.js)
+ *   Only the card carries IBANs and references in full; everything else is masked (src/mask.js).
  *
  * Events (src/events.js; Bearer <EVENT_TOKEN>): the hub's inbox. Other apps and jobs post one line
  * when something happens; Morning shows the last three days as a feed (30 days in KV):
@@ -96,6 +100,7 @@ import { refreshStatus } from './status.js';
 import { adminRules, consume } from './hub.js';
 import { adminConfig, handleHub } from './dinner.js';
 import { weekForMorning, handleWeek, weekCron } from './week.js';
+import { intakeCatchUp } from './intake.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -314,7 +319,7 @@ export default {
    * the Sunday reset runs every time, so the push lands within 15 minutes of its time.
    * Without a scheduledTime (a test) everything runs. */
   async scheduled(event, env, ctx) {
-    const jobs = [weekCron(env)];
+    const jobs = [weekCron(env), intakeCatchUp(env)]; // the catch-up runs once, then skips
     const t = event && event.scheduledTime;
     if (!t || new Date(t).getUTCMinutes() === 23) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));

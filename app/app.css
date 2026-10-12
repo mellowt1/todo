@@ -19,6 +19,9 @@
   --scrim: rgba(0, 0, 0, 0.28);
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
   --hover: rgba(127, 127, 127, 0.08); /* desktop hover wash */
+  --amber-bg: #FBEFD9;      /* a letter card's days left */
+  --amber-ink: #80520A;
+  --late-bg: #FBE3E3;
 
   --top: max(24px, calc(env(safe-area-inset-top) + 15px));
   --bottom: max(16px, env(safe-area-inset-bottom));
@@ -55,6 +58,9 @@
     --toast: #2C2C2E;
     --scrim: rgba(0, 0, 0, 0.5);
     --shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    --amber-bg: #3A2E1A;
+    --amber-ink: #F0C27A;
+    --late-bg: #3A1D20;
   }
 }
 
@@ -412,6 +418,50 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .edit-sheet .grow { flex: 0 0 8px; }
   .edit-sheet .sheet-head { margin-top: -6px; }
 }
+
+/* ---------- Letter cards (app.js, Letter cards) ---------- */
+.card-sheet { max-height: 92vh; max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; gap: 14px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+.card-body { display: flex; flex-direction: column; gap: 14px; }
+.card-want { margin: 4px 0 0; font-size: 22px; font-weight: 650; line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
+.card-due { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; font-size: 15px; }
+.card-left { padding: 3px 9px; border-radius: 99px; background: var(--amber-bg); color: var(--amber-ink); font-size: var(--fs-meta); font-weight: 650; }
+.card-left.late { background: var(--late-bg); color: var(--danger); }
+.card-facts { display: flex; flex-direction: column; border-radius: 12px; background: var(--field); }
+.card-fact { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; padding: 6px 8px 6px 14px; }
+.card-fact + .card-fact { border-top: 1px solid var(--sep); }
+.card-k { font-size: var(--fs-meta); color: var(--secondary); }
+.card-k small { display: block; font-size: 11px; }
+.card-v { min-width: 0; font-size: 16px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.card-v.none { color: var(--secondary); font-style: italic; font-size: 15px; }
+.card-copy { min-width: 64px; min-height: 40px; padding: 0 12px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-text); font-size: 14px; font-weight: 600; }
+.card-copy.ok { background: var(--accent); color: var(--on-accent); }
+.card-opts { display: flex; flex-direction: column; gap: 8px; margin-top: -8px; }
+.card-opt { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px 14px; border: 1.5px solid var(--sep); border-radius: 12px; text-align: left; color: var(--text); }
+.card-opt b { display: block; font-size: 16px; font-weight: 600; }
+.card-opt span span { font-size: 14px; color: var(--secondary); }
+.card-dot { width: 20px; height: 20px; margin-top: 1px; border: 1.5px solid var(--ring); border-radius: 50%; }
+.card-opt[aria-checked="true"] { border-color: var(--accent-text); background: var(--accent-soft); }
+.card-opt[aria-checked="true"] .card-dot { border: 6px solid var(--accent); }
+.card-portal { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 52px; padding: 6px 14px; border-radius: 12px; background: var(--field); color: var(--text); text-decoration: none; font-size: 16px; }
+.card-portal small { display: block; font-size: var(--fs-meta); color: var(--secondary); }
+.card-open { color: var(--accent-text); font-weight: 600; }
+.card-done { min-height: 52px; border-radius: 14px; background: var(--accent); color: var(--on-accent); font-size: var(--fs-body); font-weight: 650; }
+.card-note { margin: -4px 0 0; font-size: var(--fs-meta); color: var(--secondary); text-align: center; }
+.card-ask { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; background: var(--field); }
+.card-ask input { min-height: 44px; padding: 0 12px; border: 1px solid var(--sep); border-radius: 10px; background: var(--sheet); color: var(--text); font: inherit; font-size: 16px; }
+.card-hows { display: flex; flex-wrap: wrap; gap: 8px; }
+.card-hows button { min-height: 44px; padding: 0 16px; border: 1.5px solid var(--sep); border-radius: 99px; background: var(--sheet); color: var(--text); font-size: 15px; font-weight: 600; }
+.card-hows button[aria-pressed="true"] { border-color: var(--accent-text); background: var(--accent-soft); color: var(--accent-text); }
+.card-ask-row { display: flex; gap: 8px; margin-top: 4px; }
+.card-ask-row button { flex: 1; min-height: 48px; border-radius: 12px; font-size: var(--fs-body); font-weight: 650; }
+.card-save { background: var(--accent); color: var(--on-accent); }
+.card-save:disabled { opacity: 0.45; }
+.card-cancel { border: 1px solid var(--sep); color: var(--text); }
+.card-stamp { padding: 14px; border-radius: 14px; background: var(--accent-soft); color: var(--accent-text); font-size: 16px; font-weight: 600; }
+.card-edit { align-self: center; min-height: 44px; padding: 0 12px; color: var(--secondary); font-size: 15px; }
+.card-copy, .card-opt, .card-hows button { transition: background-color var(--dur-press) ease, border-color var(--dur-press) ease; }
+.card-sheet button:focus-visible, .card-portal:focus-visible, .card-ask input:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+@media (min-width: 900px) { .card-sheet { width: 480px; max-height: 88vh; } }
 
 /* Increase Contrast (iOS and macOS): darker rings, secondary text and lines. The default look is unchanged. */
 @media (prefers-contrast: more) {

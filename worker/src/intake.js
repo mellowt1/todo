@@ -10,14 +10,22 @@
  *   POST /api/intake/:code   <- { files: [{ name, media_type, data (base64) }], text? }
  *                            -> { id, record, tasks, usage }  or  { duplicate: true, id, record }
  *   GET  /api/intake/:code   ?limit=20  -> { items: [{ id, at, record, taskIds }] }  newest first
+ *   /api/intake/:code/cards, /api/intake/:code/card/:taskId   the letter action cards (src/letters.js)
  *
  * KV keys: intake:<id> (record), intake:hash:<sha256> (dedupe), intake:usage:YYYY-MM (tokens).
+ *
+ * An official letter also gets an action card (src/letters.js, D1). The card alone keeps the
+ * IBAN, payment reference and case number; the record kept in KV, the tasks and every answer
+ * here have them cut to their last four (src/mask.js). Dropping a letter read before cards
+ * existed reads it once more and fills in its card for the tasks it already made.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
-import { cleanBatch, MAX_TEXT } from './todo.js';
+import { cleanBatch, cleanOp, MAX_TEXT } from './todo.js';
+import { maskSecrets } from './mask.js';
+import { cardFromRecord, saveLetter, handleLetters } from './letters.js';
 
 export const MODEL = 'claude-opus-5-5';
 export const MAX_FILES = 10;
@@ -51,8 +59,21 @@ export const Record = z.object({
     due: z.string().nullable().describe('YYYY-MM-DD or null'),
   })).max(8),
   needs_paul: z.boolean().describe('true when a decision or a reply is needed, false when it is only a wait or nothing'),
-  quotes: z.array(z.string().max(200)).max(12).describe('the exact lines the dates and amounts were read from, in the original language'),
+  quotes: z.array(z.string().max(200)).max(16).describe('the exact lines the dates, amounts, IBAN, references and case numbers were read from, in the original language'),
   note: z.string().max(200).nullable().describe('anything Paul should know that does not fit above: an unreadable page, two clauses that disagree'),
+  official: z.boolean().describe('true when this is a letter or bill from an organisation (a government body, municipality, tax or benefits office, study finance, court, bailiff, insurer, utility or other company) that asks for something to be done'),
+  sender: z.string().max(80).nullable().describe('the organisation as named on the letterhead, e.g. "Belastingdienst", "Belastingdienst/Toeslagen", "DUO", "Gemeente Den Haag"; null when there is none'),
+  letter_date: z.string().nullable().describe('the date printed on the letter as YYYY-MM-DD, or null'),
+  want: z.string().max(90).describe('one line, imperative, English: what the sender wants done. Empty when official is false'),
+  iban: z.string().max(50).nullable().describe('the IBAN to pay to, exactly as printed, or null'),
+  reference: z.string().max(60).nullable().describe('the payment reference (betalingskenmerk, omschrijving) exactly as printed, or null'),
+  reference_label: z.string().max(40).nullable().describe('what the letter calls that reference, e.g. "Betalingskenmerk"'),
+  case_number: z.string().max(60).nullable().describe('the case, file, assessment, invoice or letter number exactly as printed (aanslagnummer, dossiernummer, kenmerk, factuurnummer), or null'),
+  case_label: z.string().max(40).nullable().describe('what the letter calls that number, e.g. "Aanslagnummer"'),
+  options: z.array(z.object({
+    title: z.string().max(60).describe('the choice in a few words, English, e.g. "Pay at once"'),
+    detail: z.string().max(120).describe('what it means and by when, as the letter says'),
+  })).max(4).describe('the choices the letter itself offers, e.g. pay at once or in instalments, object or accept; [] when it offers none'),
 });
 
 /* Frozen per deploy. Nothing that changes per request goes in here, so the prefix caches.
@@ -72,6 +93,8 @@ export const SYSTEM = [
   '4. If the pages cannot be read, set readable: false, actions: [], and say in note what is missing. Do not guess.',
   '5. Pasted text with no document is a note from Paul: extract the actions and dates it names, kind = note.',
   '6. Dates use the year of the document when the text omits it; if the year is unclear, prefer the next occurrence after today.',
+  '7. iban, reference and case_number: copy them character for character as printed and put the line each one is on in quotes. Never compose, complete, correct or guess one; null when the document does not print it. A citizen service number (BSN) on its own is never a case number.',
+  '8. options: only choices the document itself offers. Do not suggest your own.',
 ].join('\n');
 
 let client = null;
@@ -124,9 +147,9 @@ export async function readItem(env, { files, text, today }) {
 let reader = readItem;
 export function _setReader(fn) { reader = fn || readItem; }
 
-/* Pure. Turn a record into to-do upserts. Section by how soon the task is due:
- * within 2 days today, within 14 soon, else someday. No due date: soon when Paul
- * has to act, someday otherwise. */
+/* Pure. Turn a record into to-do upserts. A task with a due date goes to Today when it is
+ * due within 2 days and to Soon otherwise, never Someday (Paul, 2026-10-12). No due date:
+ * soon when Paul has to act, someday otherwise. Text is masked (src/mask.js). */
 export function toOps(record, now = Date.now(), newId = randomId) {
   if (!record || !record.readable || !Array.isArray(record.actions)) return [];
   const todayMs = Date.parse(dayOf(now));
@@ -135,13 +158,25 @@ export function toOps(record, now = Date.now(), newId = randomId) {
     let section = record.needs_paul ? 'soon' : 'someday';
     if (due) {
       const days = Math.round((Date.parse(due) - todayMs) / DAY);
-      section = days <= 2 ? 'today' : days <= 14 ? 'soon' : 'someday';
+      section = days <= 2 ? 'today' : 'soon';
     }
     const tail = (due ? ' · ' + due : '') + ' [intake]';
-    const text = String(a.text || '').trim().slice(0, MAX_TEXT - tail.length) + tail;
+    const text = maskSecrets(String(a.text || '').trim()).slice(0, MAX_TEXT - tail.length) + tail;
     return { op: 'upsert', item: { id: newId(), text, section, done: false, doneAt: null, updatedAt: now, pos: now } };
   });
 }
+
+/* Pure. What leaves this module: the record with summary, note and quotes masked and the
+ * card's values left out. The card (D1) keeps them. */
+export function maskRecord(rec) {
+  if (!rec || typeof rec !== 'object') return rec;
+  const out = { ...rec, summary: maskSecrets(rec.summary), note: maskSecrets(rec.note), want: maskSecrets(rec.want) };
+  if (Array.isArray(rec.quotes)) out.quotes = rec.quotes.map(maskSecrets);
+  if (Array.isArray(rec.actions)) out.actions = rec.actions.map((a) => ({ ...a, text: maskSecrets(a.text) }));
+  for (const k of ['iban', 'reference', 'case_number']) if (k in out) out[k] = out[k] ? maskSecrets(String(out[k])) : null;
+  return out;
+}
+const maskStored = (x) => (x && x.record ? { ...x, record: maskRecord(x.record) } : x);
 
 export function dayOf(ms, tz = 'Europe/Amsterdam') {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
@@ -187,15 +222,16 @@ async function bumpUsage(env, month, u) {
 /* The route. `list` and `json` come from worker.js so this module never reaches
  * into the Durable Object or CORS on its own. */
 export async function handleIntake(request, env, rest, url, { json, list, code: CODE }) {
-  if (rest.length !== 1 || !CODE.test(rest[0])) return json({ error: 'bad code' }, request, 400);
+  if (!rest.length || !CODE.test(rest[0])) return json({ error: 'bad code' }, request, 400);
   if (!env.TODO_CODE || rest[0] !== env.TODO_CODE) return json({ error: 'not found' }, request, 404);
+  if (rest.length > 1) return handleLetters(request, env, rest.slice(1), json);
   if (!env.ANTHROPIC_API_KEY && request.method === 'POST') return json({ error: 'not configured' }, request, 503);
 
   if (request.method === 'GET') {
     const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 20));
     const keys = await env.HUB_KV.list({ prefix: 'intake:r:' });
     const names = keys.keys.map((k) => k.name).sort().reverse().slice(0, limit);
-    const items = (await Promise.all(names.map((k) => env.HUB_KV.get(k, 'json')))).filter(Boolean);
+    const items = (await Promise.all(names.map((k) => env.HUB_KV.get(k, 'json')))).filter(Boolean).map(maskStored);
     return json({ items }, request);
   }
   if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
@@ -211,9 +247,11 @@ export async function handleIntake(request, env, rest, url, { json, list, code: 
   const today = dayOf(now);
   const hash = await sha256(input.files.map((f) => f.media_type + ':' + f.data).join('|') + '|' + input.text);
   const seen = await env.HUB_KV.get('intake:hash:' + hash, 'json');
-  if (seen) {
-    const rec = await env.HUB_KV.get('intake:r:' + seen.key, 'json');
-    return json({ duplicate: true, id: seen.id, at: seen.at, record: rec ? rec.record : null, tasks: rec ? rec.tasks : [] }, request);
+  const refill = seen ? await env.HUB_KV.get('intake:r:' + seen.key, 'json') : null;
+  // Read before cards existed: read once more to fill in the card. Anything else is a duplicate.
+  const old = refill && refill.record && refill.record.readable !== false && refill.record.official === undefined && (refill.tasks || []).length && env.HUB_DB;
+  if (seen && !old) {
+    return json({ duplicate: true, id: seen.id, at: seen.at, record: refill ? maskRecord(refill.record) : null, tasks: refill ? refill.tasks : [] }, request);
   }
 
   let read;
@@ -231,6 +269,16 @@ export async function handleIntake(request, env, rest, url, { json, list, code: 
   if (read.usage) await bumpUsage(env, month, read.usage).catch(() => {});
   if (read.error) return json({ error: read.error, detail: read.detail || null, usage: read.usage || null }, request, 502);
 
+  if (old) {
+    // No new tasks: the card is filled in for the ones this letter already made.
+    const card = cardFromRecord(read.record);
+    const taskIds = refill.tasks.map((t) => t.id);
+    if (card) await saveLetter(env, refill.id, card, taskIds, now);
+    const stored = { ...refill, record: maskRecord(read.record), refilledAt: new Date(now).toISOString() };
+    await env.HUB_KV.put('intake:r:' + seen.key, JSON.stringify(stored), { expirationTtl: KEEP_DAYS * 24 * 3600 });
+    return json({ refilled: !!card, id: refill.id, at: refill.at, record: stored.record, tasks: refill.tasks, usage: read.usage }, request);
+  }
+
   const ops = toOps(read.record, now);
   let tasks = [];
   if (ops.length) {
@@ -244,11 +292,60 @@ export async function handleIntake(request, env, rest, url, { json, list, code: 
   const id = randomId();
   // Key sorts by time so GET can list newest first without reading every record.
   const key = String(now).padStart(14, '0') + ':' + id;
-  const stored = { id, at: new Date(now).toISOString(), names: input.files.map((f) => f.name), hadText: !!input.text, record: read.record, tasks, usage: read.usage };
+  const card = tasks.length ? cardFromRecord(read.record) : null;
+  if (card) await saveLetter(env, id, card, tasks.map((t) => t.id), now);
+  const stored = { id, at: new Date(now).toISOString(), names: input.files.map((f) => f.name), hadText: !!input.text, record: maskRecord(read.record), tasks, usage: read.usage };
   const ttl = KEEP_DAYS * 24 * 3600;
   await Promise.all([
     env.HUB_KV.put('intake:r:' + key, JSON.stringify(stored), { expirationTtl: ttl }),
     env.HUB_KV.put('intake:hash:' + hash, JSON.stringify({ id, key, at: stored.at }), { expirationTtl: ttl }),
   ]);
-  return json({ id, at: stored.at, record: read.record, tasks, usage: read.usage }, request);
+  return json({ id, at: stored.at, record: stored.record, tasks, card: !!card, usage: read.usage }, request);
+}
+
+/* ---------- Once, after the deploy that brought cards (the cron runs it) ----------
+ * 1. Open intake tasks with a date that sit in Someday move to Soon (Today when due within 2 days).
+ * 2. Letters and bills read before cards existed get a card with what was on file then
+ *    (no IBAN or reference: those were never read; the card says "not on file").
+ * 3. Task texts that carry a long number or an IBAN are masked.
+ * A flag in KV makes it run once. */
+export const CATCHUP_KEY = 'intake:catchup:v1';
+const DATED = / · (\d{4}-\d{2}-\d{2}) \[intake\]$/;
+
+export async function intakeCatchUp(env, now = Date.now()) {
+  if (!env.TODO_CODE || !env.HUB_KV || (await env.HUB_KV.get(CATCHUP_KEY))) return { skip: 'done before' };
+  const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));
+  const doc = await (await stub.fetch('https://list/export')).json();
+  const todayMs = Date.parse(dayOf(now));
+  const ops = [];
+  for (const it of Object.values(doc.items || {})) {
+    if (it.done || !/\[intake\]$/.test(it.text)) continue;
+    const m = DATED.exec(it.text);
+    let section = it.section;
+    if (m && section === 'someday') section = Math.round((Date.parse(m[1]) - todayMs) / DAY) <= 2 ? 'today' : 'soon';
+    const text = maskSecrets(it.text);
+    if (section === it.section && text === it.text) continue;
+    const at = Math.max(now, it.updatedAt + 1);
+    const op = cleanOp({ op: 'upsert', item: { ...it, text, section, pos: section === it.section ? it.pos : at, updatedAt: at } }, now);
+    if (op) ops.push(op);
+  }
+  if (ops.length) {
+    const r = await stub.fetch('https://list/apply', { method: 'POST', body: JSON.stringify({ ops }), headers: { 'Content-Type': 'application/json' } });
+    if (!r.ok) throw new Error('todo apply ' + r.status);
+  }
+  let cards = 0;
+  if (env.HUB_DB) {
+    const keys = (await env.HUB_KV.list({ prefix: 'intake:r:' })).keys.map((k) => k.name);
+    for (const k of keys) {
+      const rec = await env.HUB_KV.get(k, 'json');
+      if (!rec || !rec.record || !Array.isArray(rec.tasks) || !rec.tasks.length) continue;
+      const open = rec.tasks.map((t) => t.id).filter((id) => doc.items[id] && !doc.items[id].done);
+      if (!open.length) continue;
+      const card = cardFromRecord(rec.record);
+      if (card && (await saveLetter(env, rec.id, card, open, now))) cards++;
+      if (rec.record.official === undefined) await env.HUB_KV.put(k, JSON.stringify(maskStored(rec)), { expirationTtl: KEEP_DAYS * 24 * 3600 });
+    }
+  }
+  await env.HUB_KV.put(CATCHUP_KEY, new Date(now).toISOString());
+  return { moved: ops.length, cards };
 }

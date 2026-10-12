@@ -20,7 +20,8 @@ Replace the iOS Notes to-do page with the simplest possible list: capture in one
 * No accounts or login. Access is a private link with a code, like Runway.
 * A task may carry one link, set only by the hub (`worker/src/hub.js`, 2026-10-12: a vacancy from the Defence digest becomes "Apply: ..." in Soon). The row shows a small icon that opens it; the app never edits links.
 * No AI inside the list. The list itself stays dumb and fast. Intake (a Worker route, `worker/src/intake.js`, 2026-10-11) may feed it tasks read from a PDF, a photo or pasted text; in the app that is one paper-clip button and nothing more.
-* No due dates, no repeats, no reminders or push (not now).
+* No due dates, no repeats, no reminders or push (not now). An intake task keeps its date in its text only (" · 2026-11-14 [intake]"), and goes to Soon, or Today within 2 days, never Someday (Paul, 2026-10-12).
+* A task Intake made from an official letter opens as a letter card, not the edit sheet (`worker/src/letters.js`, 2026-10-12): what they want, the deadline and days left, copy buttons for amount, IBAN, reference and case number ("not on file" when missing), the letter's options, a portal link from hub config `letter_portals`, and Done (date and how). The card only prepares: it never pays, submits or sends. Full IBANs and references show only on the card; it is fetched on open and never kept on the device.
 * No sub-tasks in v1. Ask Paul again after a month of use.
 
 ## Sections and done history

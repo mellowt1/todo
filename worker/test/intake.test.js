@@ -40,7 +40,9 @@ const record = (over = {}) => ({
   readable: true, who: 'me', kind: 'letter', summary: 'A letter that wants a reply.',
   deadline: plus(10), amount: { value: 120.5, currency: 'EUR' },
   actions: [{ text: 'Reply to the letter', due: plus(10) }, { text: 'Pay the amount', due: plus(1) }, { text: 'File it', due: null }],
-  needs_paul: true, quotes: ['uiterlijk ' + plus(10)], note: null, ...over,
+  needs_paul: true, quotes: ['uiterlijk ' + plus(10)], note: null,
+  official: false, sender: null, letter_date: null, want: '', iban: null, reference: null, reference_label: null,
+  case_number: null, case_label: null, options: [], ...over,
 });
 
 afterEach(() => _setReader(null));
@@ -68,11 +70,17 @@ test('toOps: section follows the due date, text carries the date and the [intake
   }
 });
 
-test('toOps: nothing from an unreadable record, someday when nothing is urgent', () => {
+test('toOps: nothing from an unreadable record; someday only when undated and nothing is urgent; a date is never someday', () => {
   assert.deepEqual(toOps(record({ readable: false })), []);
-  const ops = toOps(record({ needs_paul: false, actions: [{ text: 'Check the refund arrives', due: null }, { text: 'Far away', due: plus(40) }] }));
+  const ops = toOps(record({ needs_paul: false, actions: [{ text: 'Check the refund arrives', due: null }, { text: 'Far away', due: plus(40) }, { text: 'Day after tomorrow', due: plus(2) }] }));
   assert.equal(ops[0].item.section, 'someday');
-  assert.equal(ops[1].item.section, 'someday');
+  assert.equal(ops[1].item.section, 'soon');
+  assert.equal(ops[2].item.section, 'today');
+});
+
+test('toOps: an IBAN or a long reference in an action is cut to its last four', () => {
+  const ops = toOps(record({ actions: [{ text: 'Pay to NL86 INGB 0002 4455 88 with kenmerk 5123 4567 8901 2340', due: plus(5) }] }));
+  assert.equal(ops[0].item.text, `Pay to IBAN ··5588 with kenmerk ··2340 · ${plus(5)} [intake]`);
 });
 
 test('cleanInput: media types, base64 and limits', () => {

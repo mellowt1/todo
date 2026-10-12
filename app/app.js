@@ -1217,7 +1217,7 @@
     if (revealed === row) { closeReveal(); return; }
     if (e.target.closest('.circle')) { completeRow(row); return; }
     if (e.target.closest('.move-btn')) { openMenu(row, e.target.closest('.move-btn')); return; }
-    openEdit(row.dataset.id);
+    openTask(row.dataset.id);
   });
 
   list.addEventListener('contextmenu', (e) => {
@@ -1754,6 +1754,182 @@
     closeSheet($('edit'));
   });
 
+  /* ---------- Letter cards ----------
+   * A task Intake made from an official letter opens as a card instead of the edit sheet
+   * (worker/src/letters.js): what they want, the deadline and days left, copy buttons for the
+   * amount, IBAN, reference and case number ("not on file" when the letter has none), the
+   * letter's own choices, a link to the sender's portal, and Done. The card is fetched each time
+   * it opens and never kept on the device, since it holds the IBAN and references in full; only
+   * which tasks have a card is kept. It prepares and nothing more: nothing here pays, submits or
+   * sends. Done asks the date and how, and the Worker ticks the task. */
+  const CARDS_KEY = 'todo.cards.' + code;
+  let cardIds = new Set(store.get(CARDS_KEY) || []);
+  let cardId = null;
+  let card = null; // the open card, or { error } / null while it loads
+  let cardDone = null; // { date, how } while Done is asking
+  const HOWS = [['paid', 'Paid'], ['form sent', 'Form sent'], ['called', 'Called']];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const localDay = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD on this device
+  const dayText = (d) => { const t = new Date(d + 'T12:00:00Z'); return WD[t.getUTCDay()] + ' ' + t.getUTCDate() + ' ' + MON[t.getUTCMonth()]; };
+  const shortDay = (d) => +d.slice(8, 10) + ' ' + MON[+d.slice(5, 7) - 1];
+
+  async function loadCards() {
+    try {
+      const r = await fetch(API + '/api/intake/' + code + '/cards', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      if (!d || !Array.isArray(d.tasks)) return;
+      cardIds = new Set(d.tasks);
+      store.set(CARDS_KEY, d.tasks);
+    } catch (e) { /* a letter opens in the edit sheet until the list arrives */ }
+  }
+  function openTask(id) {
+    if (cardIds.has(id)) openCard(id);
+    else openEdit(id);
+  }
+  async function openCard(id) {
+    const it = items[id];
+    const row = list.querySelector('.row[data-id="' + id + '"]');
+    if (!it || leaving.has(id) || (row && gone(row))) return;
+    cardId = id;
+    card = null;
+    cardDone = null;
+    renderCard();
+    const a = document.activeElement;
+    openSheet($('card'), 0, list.contains(a) ? a : desk.matches ? row : null);
+    $('cardClose').focus({ preventScroll: true });
+    try {
+      const r = await fetch(API + '/api/intake/' + code + '/card/' + id, { cache: 'no-store' });
+      const d = await r.json().catch(() => null);
+      if (cardId !== id) return;
+      if (r.status === 404) { closeCard(() => openEdit(id)); return; } // no card after all
+      card = r.ok && d && d.card ? d.card : { error: true };
+    } catch (e) {
+      if (cardId !== id) return;
+      card = { error: true };
+    }
+    renderCard();
+  }
+  function closeCard(after) {
+    if (cardId === null) return;
+    cardId = null;
+    closeSheet($('card'), typeof after === 'function' ? after : undefined);
+  }
+
+  function money(a) {
+    try { return new Intl.NumberFormat('en-GB', { style: 'currency', currency: a.currency || 'EUR' }).format(a.value); } catch (e) { return a.value.toFixed(2) + ' ' + a.currency; }
+  }
+  // What goes on the clipboard: the way Dutch bank apps take it.
+  function copyValue(k) {
+    if (k === 'amount') return card.amount.value.toFixed(2).replace('.', ',');
+    if (k === 'iban') return card.iban.replace(/\s+/g, '');
+    if (k === 'reference') return card.reference.replace(/\s+/g, '');
+    return card.caseNumber;
+  }
+
+  function renderCard() {
+    const body = $('cardBody');
+    if (!card || card.error) {
+      $('cardFrom').textContent = 'Letter';
+      body.innerHTML = card && card.error
+        ? '<p class="card-note">Can’t load the card right now.</p><button class="card-edit" data-act="edit">Edit task</button>'
+        : '<p class="card-note">Loading…</p>';
+      return;
+    }
+    $('cardFrom').textContent = (card.sender || 'Letter') + (card.letterDate ? ' · letter of ' + shortDay(card.letterDate) : '');
+    let due = '';
+    if (card.due) {
+      const n = Math.round((Date.parse(card.due) - Date.parse(localDay())) / 864e5);
+      const left = n < 0 ? (n === -1 ? '1 day late' : -n + ' days late') : n === 0 ? 'Due today' : n === 1 ? '1 day left' : n + ' days left';
+      due = '<div class="card-due"><span>Due <b>' + esc(dayText(card.due)) + '</b></span><span class="card-left' + (n < 0 ? ' late' : '') + '">' + esc(left) + '</span></div>';
+    }
+    const facts = [
+      ['amount', 'Amount', '', card.amount ? money(card.amount) : null],
+      ['iban', 'IBAN', '', card.iban],
+      ['reference', 'Reference', card.referenceLabel, card.reference],
+      ['case', 'Case number', card.caseLabel, card.caseNumber],
+    ].map(([k, label, sub, v]) => '<div class="card-fact"><span class="card-k">' + esc(label) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>' +
+      (v ? '<span class="card-v">' + esc(v) + '</span><button class="card-copy" data-copy="' + k + '" aria-label="Copy ' + esc(label.toLowerCase()) + '">Copy</button>'
+         : '<span class="card-v none">not on file</span><span></span>') + '</div>').join('');
+    const opts = card.options.length ? '<div class="meta">The letter offers</div><div class="card-opts" role="radiogroup" aria-label="Options">' +
+      card.options.map((o, i) => '<button class="card-opt" role="radio" aria-checked="' + (card.pick === i) + '" data-pick="' + i + '"' + (card.done ? ' disabled' : '') + '>' +
+        '<span class="card-dot" aria-hidden="true"></span><span><b>' + esc(o.title) + '</b>' + (o.detail ? '<span>' + esc(o.detail) + '</span>' : '') + '</span></button>').join('') + '</div>' : '';
+    const portal = card.portal ? '<a class="card-portal" href="' + esc(card.portal.url) + '" target="_blank" rel="noopener noreferrer"><span>' + esc(card.portal.name) +
+      '<small>' + esc(card.portal.host) + '</small></span><span class="card-open">Open ›</span></a>' : '';
+    let foot;
+    if (card.done) {
+      const pick = card.pick !== null && card.options[card.pick] ? ' · ' + card.options[card.pick].title.toLowerCase() : '';
+      foot = '<div class="card-stamp">✓ Done ' + esc(shortDay(card.done.date)) + ' · ' + esc(card.done.how) + esc(pick) + '</div>';
+    } else if (cardDone) {
+      foot = '<div class="card-ask"><label class="meta" for="cardDate">When</label><input id="cardDate" type="date" max="' + localDay() + '" value="' + esc(cardDone.date) + '">' +
+        '<div class="meta">How</div><div class="card-hows" role="group" aria-label="How">' +
+        HOWS.map(([v, l]) => '<button data-how="' + v + '" aria-pressed="' + (cardDone.how === v) + '">' + l + '</button>').join('') + '</div>' +
+        '<div class="card-ask-row"><button class="card-cancel" data-act="cancel">Cancel</button><button class="card-save" data-act="save"' + (cardDone.how ? '' : ' disabled') + '>Save</button></div></div>';
+    } else {
+      foot = '<button class="card-done" data-act="done">Done</button><p class="card-note">This card only prepares. Paying or sending happens elsewhere.</p>';
+    }
+    body.innerHTML = '<p class="card-want">' + esc(card.want) + '</p>' + due + '<div class="card-facts">' + facts + '</div>' + opts + portal + foot +
+      '<button class="card-edit" data-act="edit">Edit task</button>';
+  }
+
+  async function cardPost(payload) {
+    const id = cardId;
+    const r = await fetch(API + '/api/intake/' + code + '/card/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d || !d.card) throw new Error((d && d.error) || 'status ' + r.status);
+    if (cardId === id) { card = d.card; renderCard(); }
+    return d.card;
+  }
+
+  $('cardBody').addEventListener('click', async (e) => {
+    const b = e.target.closest('button');
+    if (!b || !card) return;
+    if (card.error && b.dataset.act !== 'edit') return;
+    if (b.dataset.copy) {
+      const v = copyValue(b.dataset.copy);
+      const done = (ok) => {
+        b.textContent = ok ? 'Copied' : 'Select';
+        b.classList.toggle('ok', ok);
+        say(ok ? 'Copied' : 'Could not copy');
+        setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('ok'); }, 1400);
+        if (!ok) { const s = getSelection(); const r = document.createRange(); r.selectNodeContents(b.previousElementSibling); s.removeAllRanges(); s.addRange(r); }
+      };
+      (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => done(true), () => done(false));
+      return;
+    }
+    if (b.dataset.pick !== undefined) {
+      const i = +b.dataset.pick;
+      if (card.pick === i) return;
+      const was = card.pick;
+      card.pick = i;
+      renderCard();
+      try { await cardPost({ pick: i }); say('Saved'); } catch (err) { card.pick = was; renderCard(); toast('Couldn’t save that. Try again.'); }
+      return;
+    }
+    if (b.dataset.how) { cardDone.how = b.dataset.how; cardDone.date = $('cardDate').value || cardDone.date; renderCard(); return; }
+    const act = b.dataset.act;
+    if (act === 'edit') { const id = cardId; closeCard(() => openEdit(id)); return; }
+    if (act === 'done') { cardDone = { date: localDay(), how: null }; renderCard(); $('cardDate').focus({ preventScroll: true }); return; }
+    if (act === 'cancel') { cardDone = null; renderCard(); return; }
+    if (act === 'save') {
+      const date = $('cardDate').value;
+      if (!date || date > localDay() || !cardDone.how) return;
+      b.disabled = true;
+      try {
+        await cardPost({ done: { date, how: cardDone.how } });
+        cardDone = null;
+        renderCard();
+        poll(); // the Worker ticked the task; draw it
+        say('Done. Ticked off.');
+      } catch (err) {
+        b.disabled = false;
+        toast(navigator.onLine ? 'Couldn’t save that. Try again.' : 'Needs a connection.');
+      }
+    }
+  });
+  $('cardClose').addEventListener('click', () => closeCard());
+  $('card').querySelector('.scrim').addEventListener('click', () => closeCard());
+
   /* ---------- Keyboard (desktop) ---------- */
   function rows() { return Array.from(list.querySelectorAll(view === 'done' ? '.drow' : '.row:not(.skeleton)')); }
   const isField = (el) => !!el && (/^(input|textarea|select)$/i.test(el.tagName || '') || el.isContentEditable);
@@ -1770,12 +1946,13 @@
       if (!confirmWrap.hidden) { closeConfirm(); return; }
       if (menuOn) { closeMenu(); return; }
       if (!$('edit').hidden) { closeEdit(); return; }
+      if (!$('card').hidden) { closeCard(); return; }
       if (!$('capture').hidden) { closeCapture(); return; }
       closeReveal();
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
       const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -1817,7 +1994,7 @@
       if (menuOn) menuOpener = e.target; // Escape goes back to where M was pressed
       return;
     }
-    if (k === 'Enter' && e.target === focused) { e.preventDefault(); openEdit(focused.dataset.id); return; }
+    if (k === 'Enter' && e.target === focused) { e.preventDefault(); openTask(focused.dataset.id); return; }
     if (k === ' ' && e.target === focused) {
       e.preventDefault();
       completeRow(focused); // the render that removes it focuses the next row that stays
@@ -1916,6 +2093,8 @@
       if (!r.ok || !d) return toast((d && READ_ERRORS[d.error]) || 'Could not read it. Try again.');
       if (d.record) remember(d);
       if (d.duplicate) return toast('Already read' + (d.at ? ' ' + dayLabel(Date.parse(d.at)).toLowerCase() : '') + '.');
+      if (d.refilled !== undefined) { await loadCards(); return toast(d.refilled ? 'Letter card filled in.' : 'Read again. Nothing new for the card.'); }
+      if (d.card) loadCards();
       const rec = d.record || {};
       if (rec.readable === false) return toast('Could not read it. Try a sharper photo.');
       const tasks = Array.isArray(d.tasks) ? d.tasks : [];
@@ -2017,6 +2196,7 @@
   if (st.queue.length) scheduleFlush(300);
   startPolling();
   setTimeout(loadRecs, 1500); // after the list, never before it
+  setTimeout(loadCards, 1600);
 
   if ('serviceWorker' in navigator && (!isLocal || params.has('sw'))) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

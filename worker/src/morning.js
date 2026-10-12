@@ -35,6 +35,7 @@ import { tonightView } from './kitchen.js';
 import { germanBlock } from './german.js';
 import { eventsBlock } from './events.js';
 import { dinnerBlock } from './dinner.js';
+import { maskSecrets } from './mask.js';
 
 export const TZ = 'Europe/Amsterdam';
 const MIN = 60 * 1000;
@@ -176,7 +177,7 @@ export async function todosBlock(env, now = Date.now()) {
   const items = d.items
     .filter((i) => !i.done && i.section === 'today')
     .sort((a, b) => b.pos - a.pos)
-    .map((i) => ({ text: i.text }));
+    .map((i) => ({ text: maskSecrets(i.text) }));
   // Everything ticked off yesterday (Amsterdam), in any section, newest first. Read only.
   const yesterday = addDays(local(now).date, -1);
   const won = d.items
@@ -185,7 +186,7 @@ export async function todosBlock(env, now = Date.now()) {
   return {
     items,
     updated: d.updated || null,
-    yesterday: { count: won.length, items: won.slice(0, WINS_SHOWN).map((i) => i.text) },
+    yesterday: { count: won.length, items: won.slice(0, WINS_SHOWN).map((i) => maskSecrets(i.text)) },
   };
 }
 
@@ -1066,7 +1067,7 @@ export async function intakeBlock(env, now) {
     at: validIso(r.at) ? r.at : null,
     who: typeof r.record.who === 'string' ? r.record.who.slice(0, 12) : 'other',
     kind: typeof r.record.kind === 'string' ? r.record.kind.slice(0, 16) : 'other',
-    summary: typeof r.record.summary === 'string' ? clean(r.record.summary).slice(0, 160) : '',
+    summary: typeof r.record.summary === 'string' ? maskSecrets(clean(r.record.summary)).slice(0, 160) : '',
     tasks: Array.isArray(r.tasks) ? r.tasks.length : 0,
     needs: r.record.needs_paul === true,
   }));

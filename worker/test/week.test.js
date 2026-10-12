@@ -92,7 +92,8 @@ test('config: sunday_reset_time and quiet_hours are checked; quiet hours ship as
   assert.match((await (await set('sunday_reset_time', '6pm')).json()).error, /like "18:00"/);
   assert.equal((await set('sunday_reset_time', '18:00')).status, 200);
   const all = await (await worker.fetch(new Request('https://hub.example/api/admin/config', { headers: { Authorization: 'Bearer ' + ADMIN } }), e)).json();
-  assert.deepEqual(all.config, { dinner_window: null, sunday_reset_time: '18:00', quiet_hours: '22:00-08:00' });
+  assert.deepEqual(Object.keys(all.config), ['dinner_window', 'sunday_reset_time', 'quiet_hours', 'letter_portals']);
+  assert.deepEqual([all.config.dinner_window, all.config.sunday_reset_time, all.config.quiet_hours], [null, '18:00', '22:00-08:00']);
 });
 
 test('done this week: Monday 00:00 to now, grouped Today, Soon, Someday, newest first', async () => {
@@ -305,7 +306,7 @@ test('the cron: the Sunday reset every run, the hourly jobs only at :23', async 
   let settled;
   await worker.scheduled({ scheduledTime: Date.parse('2026-10-18T16:08:00Z') }, e, { waitUntil: (p) => { settled = p; } });
   const r = await settled;
-  assert.equal(r.length, 1);
+  assert.equal(r.length, 2); // the Sunday reset and the once-only intake catch-up
   await worker.scheduled({ scheduledTime: Date.parse('2026-10-18T16:23:00Z') }, e, { waitUntil: (p) => { settled = p; } });
-  assert.equal((await settled).length, 4);
+  assert.equal((await settled).length, 5);
 });
