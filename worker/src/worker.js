@@ -321,13 +321,14 @@ export default {
       return json({ error: 'server' }, request, 500);
     }
   },
-  /* The cron runs every 15 minutes (wrangler.toml). The hourly jobs keep their old slot, :23;
-   * the Sunday reset runs every time, so the push lands within 15 minutes of its time.
-   * Without a scheduledTime (a test) everything runs. */
+  /* Two schedules (wrangler.toml): the hourly jobs on "23 * * * *", the Sunday reset and the
+   * once-only jobs on every run of either, so the push lands within 15 minutes of its time.
+   * Without a cron string (a test) the minute decides; without either, everything runs. */
   async scheduled(event, env, ctx) {
     const jobs = [weekCron(env), intakeCatchUp(env), othersAssign(env)]; // the last two only act when there is something to do
     const t = event && event.scheduledTime;
-    if (!t || new Date(t).getUTCMinutes() === 23) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
+    const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
+    if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },
   async queue(batch, env) {

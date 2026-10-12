@@ -65,7 +65,8 @@ dead_letter_queue = "hub-events-dlq"
 #   HUB_SECRET_DAY       Hub: Day on the Mac posts dinner.away / dinner.back and reads GET /api/hub/config/day
 #   INTAKE_PEOPLE       Intake: a few lines saying who mom, dad, lucho, nick, derreck and olivia are (optional)
 
-# Every 15 minutes. Heartbeats, backups and the status line run only at :23 (once an hour, as
-# before, src/worker.js); the Sunday reset (src/week.js) runs every time.
+# Two schedules (src/worker.js). "23 * * * *": heartbeats, backups and the status line, once an hour
+# as before. "*/15 * * * *": the Sunday reset, New date wake-ups and the once-only jobs. One list
+# like "8,23,38,53" was accepted on deploy but only ever fired at :23 (2026-10-12).
 [triggers]
-crons = ["8,23,38,53 * * * *"]
+crons = ["23 * * * *", "*/15 * * * *"]
