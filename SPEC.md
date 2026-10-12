@@ -25,7 +25,8 @@ Replace the iOS Notes to-do page with the simplest possible list: capture in one
 * No sub-tasks in v1. Ask Paul again after a month of use.
 
 ## Sections and done history
-* Three sections: **Today**, **Soon**, **Someday**. The list starts empty; nothing is migrated from Notes.
+* Four sections: **Today**, **Soon**, **Someday**, **Others**. The list starts empty; nothing is migrated from Notes.
+* **Others** (Paul, 2026-10-12): tasks done for other people. Each has a person (free text, the one field besides the text); the list groups them by person. Picking a person when adding puts a task there; the edit sheet's For field moves it in or out (cleared: Soon). Hand back drafts a short message to that person in Dutch, English or Spanish (`worker/src/others.js`); it only drafts and copies, never sends, and "Mark handed back" closes the task with that status. Others never show in Morning's Today or in a push: Morning shows one line, and the list only during a weekly slot (hub config `others_slots`).
 * Done tasks are **kept forever** in a visible Done history, newest first, showing when each was done.
 * Delete is possible (from the task's edit view) but is not the normal path; done is.
 

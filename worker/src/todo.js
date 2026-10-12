@@ -5,8 +5,11 @@
  * Stored document, one KV key per list (todo:<code>):
  *   { items: { [id]: Item }, tombs: { [id]: deletedAt }, rev, updated }
  *
- * Item: { id, text, section, done, doneAt, updatedAt, pos, link? }
- *   section  "today" | "soon" | "someday" (a done task keeps the section it came from)
+ * Item: { id, text, section, done, doneAt, updatedAt, pos, link?, person?, handedBack? }
+ *   section  "today" | "soon" | "someday" | "others" (a done task keeps the section it came from)
+ *   person   who an Others task is for, free text up to MAX_PERSON (Paul, 2026-10-12). Like link, an
+ *            upsert without `person` keeps the stored one; `person: null` removes it
+ *   handedBack  true on a done Others task Paul handed back to its person instead of doing it
  *   doneAt   ms since epoch, or null while open
  *   pos      ms since epoch, sort key inside a section (newest on top)
  *   link     optional http(s) URL (a vacancy's page, set by the hub). An upsert without
@@ -18,7 +21,8 @@
  * A delete leaves a tombstone so an older device cannot bring the task back.
  */
 
-export const SECTIONS = ['today', 'soon', 'someday'];
+export const SECTIONS = ['today', 'soon', 'someday', 'others'];
+export const MAX_PERSON = 40;
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
@@ -48,6 +52,12 @@ export function cleanText(v) {
   const t = v.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || t.length > MAX_TEXT) return null;
   return t;
+}
+
+/* A person's name: cleaned like task text, at most MAX_PERSON, or null. */
+export function cleanPerson(v) {
+  const t = cleanText(v);
+  return t && t.length <= MAX_PERSON ? t : null;
 }
 
 /* An http(s) URL, at most MAX_LINK long, or null. */
@@ -88,6 +98,12 @@ export function cleanOp(raw, now = Date.now()) {
     item.link = cleanLink(it.link);
     if (item.link === null) return null;
   }
+  if (it.person === null) item.person = null;
+  else if (it.person !== undefined) {
+    item.person = cleanPerson(it.person);
+    if (item.person === null) return null;
+  }
+  if (it.handedBack === true && done) item.handedBack = true;
   return { op: 'upsert', item };
 }
 
@@ -122,6 +138,8 @@ export function applyOps(doc, ops) {
       const next = { ...item };
       if (next.link === undefined && cur && cur.link) next.link = cur.link;
       if (next.link === null) delete next.link;
+      if (next.person === undefined && cur && cur.person) next.person = cur.person;
+      if (next.person === null) delete next.person;
       doc.items[item.id] = next;
       if (tomb !== undefined) delete doc.tombs[item.id];
       changed = true;
@@ -148,12 +166,13 @@ export function pruneTombs(doc, now = Date.now()) {
   return n;
 }
 
-/* Open tasks with their section and nothing else. What Odysseus gets. */
+/* Open tasks with their section and nothing else. What Odysseus gets. An Others task carries its
+ * person in brackets: "Set up the printer (Dad)". */
 export function openView(doc) {
   return Object.values(doc.items)
     .filter((i) => !i.done)
     .sort((a, b) => SECTIONS.indexOf(a.section) - SECTIONS.indexOf(b.section) || b.pos - a.pos)
-    .map((i) => ({ text: i.text, section: i.section }));
+    .map((i) => ({ text: i.section === 'others' && i.person ? i.text + ' (' + i.person + ')' : i.text, section: i.section }));
 }
 
 export function itemList(doc) {

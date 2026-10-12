@@ -8,6 +8,8 @@
  *   quiet      open tasks untouched for 14 days or more, oldest first, minus those given a new date
  *   vacancies  tasks the digest-vacancy-todo rule made this week, with their link and state
  *   next       Day's events from next Monday to next Sunday, titles and times only
+ *   others     Others tasks (done for other people): what was done or handed back this week, by
+ *              person, and what still waits, by person. They are left out of done and quiet.
  *
  *   GET  /api/morning/:code             -> { ..., week }   on Sundays, or with ?week=1; else week is null
  *   POST /api/morning/:code/week        <- { id, action }  -> { ok, week, until? }
@@ -27,6 +29,7 @@ import { local, zoned, addDays, eventSpan, CAL_KEY } from './morning.js';
 import { ID, SECTIONS, cleanOp, cleanLink } from './todo.js';
 import { todoTaskId, vacancyTask } from './hub.js';
 import { readConfig } from './dinner.js';
+import { maskSecrets } from './mask.js';
 
 const DAY = 24 * 3600 * 1000;
 export const QUIET_DAYS = 14;
@@ -79,7 +82,7 @@ export function touchedAt(item, mark) {
 }
 
 export function doneSection(items, from) {
-  const done = items.filter((i) => i.done && Number.isFinite(i.doneAt) && i.doneAt >= from).sort((a, b) => b.doneAt - a.doneAt);
+  const done = items.filter((i) => i.done && i.section !== 'others' && Number.isFinite(i.doneAt) && i.doneAt >= from).sort((a, b) => b.doneAt - a.doneAt);
   const groups = SECTIONS.map((section) => ({
     section,
     items: done.filter((i) => i.section === section).slice(0, MAX_DONE).map((i) => ({ text: i.text, day: SHORT[local(i.doneAt).weekday] })),
@@ -90,13 +93,32 @@ export function doneSection(items, from) {
 export function quietSection(items, marks, now) {
   const out = [];
   for (const i of items) {
-    if (i.done) continue;
+    if (i.done || i.section === 'others') continue;
     const m = marks.get(i.id);
     if (m && m.kind === 'snooze') continue;
     const days = Math.floor((now - touchedAt(i, m)) / DAY);
     if (days >= QUIET_DAYS) out.push({ id: i.id, text: i.text, section: i.section, days, ...(i.link ? { link: i.link } : {}) });
   }
   return out.sort((a, b) => b.days - a.days).slice(0, MAX_QUIET);
+}
+
+/* Others: done this week (oldest first, with who and how) and still waiting, per person. */
+export function othersSection(items, from, now) {
+  const mine = items.filter((i) => i.section === 'others');
+  const done = mine.filter((i) => i.done && Number.isFinite(i.doneAt) && i.doneAt >= from).sort((a, b) => a.doneAt - b.doneAt)
+    .map((i) => ({ person: i.person || 'Someone', text: maskSecrets(i.text), day: SHORT[local(i.doneAt).weekday], handedBack: i.handedBack === true }));
+  const by = new Map();
+  for (const i of mine) {
+    if (i.done) continue;
+    const p = i.person || 'Someone';
+    const days = Math.max(0, Math.floor((now - i.pos) / DAY));
+    const g = by.get(p) || { person: p, count: 0, oldestDays: 0 };
+    g.count++;
+    g.oldestDays = Math.max(g.oldestDays, days);
+    by.set(p, g);
+  }
+  const waiting = [...by.values()].sort((a, b) => b.oldestDays - a.oldestDays || a.person.localeCompare(b.person));
+  return { done, waiting };
 }
 
 /* rows: D1 events (id, payload, at); ids: event id -> task id. */
@@ -173,6 +195,7 @@ export async function weekBlock(env, now = Date.now()) {
     done: doneSection(items, zoned(monday)),
     quiet: quietSection(items, marks, now),
     vacancies: vacancySection(vac, ids, doc, now),
+    others: othersSection(items, zoned(monday), now),
     next: {
       from: nextMon,
       to: addDays(nextMon, 6),

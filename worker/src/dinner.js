@@ -21,11 +21,13 @@
  * The same table holds the Sunday reset's settings (src/week.js): sunday_reset_time ("18:00", when
  * the Sunday push goes) and quiet_hours ("22:00-08:00", may cross midnight; no push inside it).
  * letter_portals holds the letter cards' portal links (src/letters.js); send the whole map.
+ * others_slots holds the weekly blocks for Others tasks ("Sat 10:00-12:00; Wed 19:00-20:00", src/slots.js).
  */
 
 import { safeEqual, bearer } from './todo.js';
 import { secretName, cleanDate } from './hub.js';
 import { kitchen } from './kitchen-store.js';
+import { parseSlots, formatSlots } from './slots.js';
 
 export const DINNER_ID = /^(dinner:[0-9a-f]{16}:(\d{4}-\d{2}-\d{2})):(\d{1,9})$/;
 export const AHEAD_DAYS = 7;
@@ -62,6 +64,11 @@ export const CONFIG = {
     if (!m) return null;
     return m[1] + m[2] !== m[3] + m[4] ? v.trim() : null; // may cross midnight; never empty
   },
+  /* "Sat 10:00-12:00; Wed 19:00-20:00": the Others slots (src/slots.js), stored tidied. */
+  others_slots(v) {
+    const s = parseSlots(v);
+    return s ? formatSlots(s) : null;
+  },
   /* { "Sender name": "https://portal" }, as JSON text or an object. https only, at most 40. */
   letter_portals(v) {
     let o = v;
@@ -84,6 +91,7 @@ const HINTS = {
   sunday_reset_time: 'like "18:00"',
   quiet_hours: 'like "22:00-08:00", start and end not the same',
   letter_portals: 'an object like { "DUO": "https://mijn.duo.nl" }, https links, at most 40',
+  others_slots: 'like "Sat 10:00-12:00; Wed 19:00-20:00", the end after the start on the same day',
 };
 // Which keys a sender may read with its own secret.
 export const READERS = { day: ['dinner_window'] };

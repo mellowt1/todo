@@ -62,6 +62,10 @@
  * Backups: once a day the cron also copies the to-do list and the kitchen into KV
  * (backup:todo, backup:kitchen, backup:at) for the PC's weekly backup.
  *
+ * Others (src/others.js): tasks done for other people, To-do's fourth section, each with a person.
+ *   POST /api/others/:code/draft     <- { id, lang: "nl" | "en" | "es" }  -> { text }  a hand-back draft; never sent
+ *   Morning gets `others`: { waiting, inSlot, next, groups } (groups only during a slot, hub config others_slots).
+ *
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
@@ -101,6 +105,7 @@ import { adminRules, consume } from './hub.js';
 import { adminConfig, handleHub } from './dinner.js';
 import { weekForMorning, handleWeek, weekCron } from './week.js';
 import { intakeCatchUp } from './intake.js';
+import { othersBlock, handleOthers, othersAssign } from './others.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -293,13 +298,14 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning }, routes: { week: handleWeek } }),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, others: othersBlock }, routes: { week: handleWeek } }),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   health: (request, env, rest) => handleHealth(request, env, rest, json),
   intake: (request, env, rest, url) => handleIntake(request, env, rest, url, { json, list, code: CODE }),
   event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
   hub: (request, env, rest, url) => handleHub(request, env, rest, url, json),
+  others: (request, env, rest) => handleOthers(request, env, rest, json),
   admin: handleAdmin,
 };
 
@@ -319,7 +325,7 @@ export default {
    * the Sunday reset runs every time, so the push lands within 15 minutes of its time.
    * Without a scheduledTime (a test) everything runs. */
   async scheduled(event, env, ctx) {
-    const jobs = [weekCron(env), intakeCatchUp(env)]; // the catch-up runs once, then skips
+    const jobs = [weekCron(env), intakeCatchUp(env), othersAssign(env)]; // the last two only act when there is something to do
     const t = event && event.scheduledTime;
     if (!t || new Date(t).getUTCMinutes() === 23) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
