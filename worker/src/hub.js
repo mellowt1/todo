@@ -132,6 +132,12 @@ async function hex(s) {
   return Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 }
 
+/* The to-do task id for a vacancy event: derived, so a retry never makes a second task, and
+ * Morning's Week view can find the task an event made (src/week.js). */
+export async function todoTaskId(eventId) {
+  return (await hex('todo:' + eventId)).slice(0, 24);
+}
+
 /* Pure: a vacancy payload in, the task out, or { skip } when it can never become one. */
 export function vacancyTask(payload, id, now) {
   const title = typeof payload.title === 'string' ? clean(payload.title, 200) : '';
@@ -152,7 +158,7 @@ const TARGETS = {
   async todo(env, msg, now) {
     if (msg.type !== 'vacancy.found') return { skip: 'no todo reaction for ' + msg.type };
     if (!env.TODO_CODE) throw new Error('TODO_CODE missing');
-    const id = (await hex('todo:' + msg.event_id)).slice(0, 24);
+    const id = await todoTaskId(msg.event_id);
     const t = vacancyTask(msg.payload || {}, id, now);
     if (t.skip) return t;
     const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));

@@ -15,6 +15,10 @@
  *   GET  /api/morning/:code          -> { now, todos, calendar, fixed, weather, arsenal, bins, ..., projects }
  *                                    every block loads on its own; a failed one is { error }
  *   POST /api/morning/:code/parked   <- { id, action: "today" | "done" | "drop" | "undo" }  the Parked buttons
+ *   POST /api/morning/:code/week     <- { id, action: "soon" | "later1" | "later2" | "later4" | "delete" | "undo" }
+ *                                    the Week view's buttons; the answer carries the new week block
+ *   On Sundays the answer also has `week` (src/week.js): done this week, gone quiet, new vacancies,
+ *   next week. Other days it is null (?week=1 asks for it anyway).
  *   POST /api/morning/calendar       Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                    <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                    -> { ok: true, count }   (Odysseus, every 15 minutes)
@@ -54,6 +58,9 @@
  * Backups: once a day the cron also copies the to-do list and the kitchen into KV
  * (backup:todo, backup:kitchen, backup:at) for the PC's weekly backup.
  *
+ * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
+ * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
+ *
  * Status (src/status.js): every hour the cron reads what the hub holds and writes one line
  * (hub:status); once a day after 06:00 Claude adds a two-sentence summary. Morning shows it.
  *
@@ -64,8 +71,8 @@
  *   GET  /api/admin/kitchen/export      -> every kitchen record, tombstones included
  *   GET  /api/admin/rules               -> { rules: [{ id, source, type, target, fields, enabled }] }
  *   POST /api/admin/rules/:id           <- { enabled: true | false }  -> { ok: true, rule }
- *   GET  /api/admin/config              -> { config: { dinner_window } }
- *   POST /api/admin/config/:key         <- { value: "18:00-21:00" | null }  (src/dinner.js)
+ *   GET  /api/admin/config              -> { config: { dinner_window, sunday_reset_time, quiet_hours } }
+ *   POST /api/admin/config/:key         <- { value: "18:00-21:00" | "18:00" | null }  (src/dinner.js)
  *   POST /api/admin/morning/projects    <-{ projects: [{ name, status, next }], parked: [{ text, from }] }
  *                                       -> { ok: true, projects, parked }  replaces the whole block
  *
@@ -88,6 +95,7 @@ import { handleEvent } from './events.js';
 import { refreshStatus } from './status.js';
 import { adminRules, consume } from './hub.js';
 import { adminConfig, handleHub } from './dinner.js';
+import { weekForMorning, handleWeek, weekCron } from './week.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -280,7 +288,7 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning }, routes: { week: handleWeek } }),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   health: (request, env, rest) => handleHealth(request, env, rest, json),
@@ -302,8 +310,14 @@ export default {
       return json({ error: 'server' }, request, 500);
     }
   },
+  /* The cron runs every 15 minutes (wrangler.toml). The hourly jobs keep their old slot, :23;
+   * the Sunday reset runs every time, so the push lands within 15 minutes of its time.
+   * Without a scheduledTime (a test) everything runs. */
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(Promise.allSettled([checkHealth(env), snapshot(env), refreshStatus(env)]));
+    const jobs = [weekCron(env)];
+    const t = event && event.scheduledTime;
+    if (!t || new Date(t).getUTCMinutes() === 23) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
+    ctx.waitUntil(Promise.allSettled(jobs));
   },
   async queue(batch, env) {
     await consume(batch, env);

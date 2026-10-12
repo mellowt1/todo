@@ -1,7 +1,11 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, rotas, news, kitchen, projects, german, repos, intake, events, status, dinner, links }
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, rotas, news, kitchen, projects, german, repos, intake, events, status, dinner, links, week }
  *   POST /api/morning/:code/parked <- { id, action: "today" | "done" | "drop" | "undo" } -> { ok, projects }
+ *   POST /api/morning/:code/week   <- { id, action }  the Week view's buttons (src/week.js)
+ *
+ * Blocks and routes that live in other files (week) come in through `more` from worker.js,
+ * so this file never imports them and no import goes round in a circle.
  *   POST /api/morning/calendar     Authorization: Bearer <CALENDAR_PUSH_TOKEN>
  *                                  <- { sent, events: [{ title, start, end, allDay, location }] }
  *                                  -> { ok: true, count }
@@ -1108,13 +1112,15 @@ export async function kitchenBlock(env, now = Date.now()) {
 
 const block = (fn, message) => Promise.resolve().then(fn).catch(() => ({ error: message }));
 
-export async function handleMorning(request, env, rest, json, now = Date.now()) {
+export async function handleMorning(request, env, rest, json, now = Date.now(), more = {}) {
   if (rest.length === 1 && rest[0] === 'calendar') return pushCalendar(request, env, json);
   const parkedRoute = rest.length === 2 && rest[1] === 'parked';
-  if (rest.length !== 1 && !parkedRoute) return json({ error: 'not found' }, request, 404);
+  const otherRoute = rest.length === 2 && more.routes && Object.hasOwn(more.routes, rest[1]) ? more.routes[rest[1]] : null;
+  if (rest.length !== 1 && !parkedRoute && !otherRoute) return json({ error: 'not found' }, request, 404);
   const code = rest[0];
   if (!CODE.test(code)) return json({ error: 'bad code' }, request, 400);
   if (!env.TODO_CODE || !safeEqual(code, env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
+  if (otherRoute) return otherRoute(request, env, json, now);
   if (parkedRoute) {
     if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
     const text = await request.text();
@@ -1127,6 +1133,8 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
   }
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
+  const extra = Object.entries(more.blocks || {});
+  const extras = Promise.all(extra.map(([k, fn]) => block(() => fn(env, now, request), `The ${k} block can't load right now`)));
   const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german, repos, intake, events, status, dinner] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),
@@ -1146,6 +1154,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     block(() => statusBlock(env), "The status can't load right now"),
     block(() => dinnerBlock(env, now), "Out for dinner can't load right now"),
   ]);
+  const extraOut = Object.fromEntries((await extras).map((v, i) => [extra[i][0], v]));
   return json({
     now: new Date(now).toISOString(),
     todos,
@@ -1166,5 +1175,6 @@ export async function handleMorning(request, env, rest, json, now = Date.now()) 
     status,
     dinner,
     links: linksBlock(env.LINKS),
+    ...extraOut,
   }, request);
 }

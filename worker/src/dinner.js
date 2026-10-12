@@ -17,6 +17,9 @@
  *   GET  /api/hub/config/day          Bearer HUB_SECRET_DAY  -> { dinner_window: "18:00-21:00" | null }
  *   GET  /api/admin/config            ADMIN_TOKEN            -> { config: { key: value } }
  *   POST /api/admin/config/:key       ADMIN_TOKEN            <- { value: "18:00-21:00" | null }
+ *
+ * The same table holds the Sunday reset's settings (src/week.js): sunday_reset_time ("18:00", when
+ * the Sunday push goes) and quiet_hours ("22:00-08:00", may cross midnight; no push inside it).
  */
 
 import { safeEqual, bearer } from './todo.js';
@@ -39,6 +42,7 @@ export function parseDinnerId(id) {
 
 const HHMM = '([01]\\d|2[0-3]):([0-5]\\d)';
 const WINDOW = new RegExp('^' + HHMM + '-' + HHMM + '$');
+const TIME = new RegExp('^' + HHMM + '$');
 
 /* Pure: what each key may hold. A value that fails is refused, never stored. */
 export const CONFIG = {
@@ -49,11 +53,24 @@ export const CONFIG = {
     const to = +m[3] * 60 + +m[4];
     return to > from ? v.trim() : null; // same evening only; never across midnight
   },
+  sunday_reset_time(v) {
+    return typeof v === 'string' && TIME.test(v.trim()) ? v.trim() : null;
+  },
+  quiet_hours(v) {
+    const m = typeof v === 'string' ? WINDOW.exec(v.trim()) : null;
+    if (!m) return null;
+    return m[1] + m[2] !== m[3] + m[4] ? v.trim() : null; // may cross midnight; never empty
+  },
+};
+const HINTS = {
+  dinner_window: 'like "18:00-21:00", the end after the start',
+  sunday_reset_time: 'like "18:00"',
+  quiet_hours: 'like "22:00-08:00", start and end not the same',
 };
 // Which keys a sender may read with its own secret.
 export const READERS = { day: ['dinner_window'] };
 
-async function readConfig(env, keys) {
+export async function readConfig(env, keys) {
   const out = Object.fromEntries(keys.map((k) => [k, null]));
   if (!keys.length) return out;
   const { results } = await env.HUB_DB.prepare(`SELECT key, value FROM config WHERE key IN (${keys.map(() => '?').join(',')})`).bind(...keys).all();
@@ -91,7 +108,7 @@ export async function adminConfig(request, env, rest, json, readBody, now = Date
     return json({ ok: true, key, value: null }, request);
   }
   const value = CONFIG[key](v);
-  if (value === null) return json({ error: key + ': like "18:00-21:00", the end after the start' }, request, 400);
+  if (value === null) return json({ error: key + ': ' + HINTS[key] }, request, 400);
   await env.HUB_DB.prepare('INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
     .bind(key, value, new Date(now).toISOString()).run();
   return json({ ok: true, key, value }, request);

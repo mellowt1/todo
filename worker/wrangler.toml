@@ -65,6 +65,7 @@ dead_letter_queue = "hub-events-dlq"
 #   HUB_SECRET_DAY       Hub: Day on the Mac posts dinner.away / dinner.back and reads GET /api/hub/config/day
 #   INTAKE_PEOPLE       Intake: a few lines saying who mom, dad, lucho, nick, derreck and olivia are (optional)
 
-# Heartbeats: once an hour, alert on ntfy when a job that runs on its own has gone quiet (src/health.js).
+# Every 15 minutes. Heartbeats, backups and the status line run only at :23 (once an hour, as
+# before, src/worker.js); the Sunday reset (src/week.js) runs every time.
 [triggers]
-crons = ["23 * * * *"]
+crons = ["8,23,38,53 * * * *"]
