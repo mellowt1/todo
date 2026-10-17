@@ -38,6 +38,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { anthropic, MODEL } from './intake.js';
 import { noDashes } from './mask.js';
 import { mirrorFor } from './mirror.js';
+import { grantWeek } from './hiscores.js';
 
 const DAY = 24 * 3600 * 1000;
 export const QUIET_DAYS = 14;
@@ -252,6 +253,9 @@ export async function actOnWeek(env, body, now = Date.now()) {
       await db.prepare("INSERT INTO week_marks (task_id, kind, until, prev, at) VALUES (?, 'snooze', ?, NULL, ?) ON CONFLICT(task_id) DO UPDATE SET kind = 'snooze', until = excluded.until, prev = NULL, at = excluded.at")
         .bind(id, out.until, now).run();
     }
+  }
+  if (action !== 'undo') {
+    try { await grantWeek(env, id, action, item && item.text, now); } catch (e) { /* XP never blocks the button */ }
   }
   return { ...out, week: await weekBlock(env, now) };
 }

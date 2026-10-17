@@ -118,6 +118,7 @@ import { adminRules, consume } from './hub.js';
 import { adminConfig, handleHub } from './dinner.js';
 import { weekForMorning, handleWeek, weekCron } from './week.js';
 import { mirrorCron } from './mirror.js';
+import { hiscoresCron, hiscoresForMorning, handleHiscores } from './hiscores.js';
 import { intakeCatchUp } from './intake.js';
 import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
@@ -315,7 +316,8 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning }, routes: { week: handleWeek } }),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning }, routes: { week: handleWeek } }),
+  hiscores: (request, env, rest) => handleHiscores(request, env, rest, json),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   health: (request, env, rest) => handleHealth(request, env, rest, json),
@@ -345,7 +347,7 @@ export default {
    * once-only jobs on every run of either, so the push lands within 15 minutes of its time.
    * Without a cron string (a test) the minute decides; without either, everything runs. */
   async scheduled(event, env, ctx) {
-    const jobs = [weekCron(env), mirrorCron(env), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), mirrorCron(env).then(() => hiscoresCron(env)), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
