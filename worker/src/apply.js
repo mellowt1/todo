@@ -30,7 +30,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { CODE, ID, safeEqual, bearer } from './todo.js';
 import { anthropic, MODEL, bumpUsage, dayOf } from './intake.js';
-import { noDashes } from './others.js';
+import { noDashes } from './mask.js';
 import { putEvent } from './events.js';
 
 export const CVS_KEY = 'apply:cvs';

@@ -18,3 +18,15 @@ export function maskSecrets(s) {
   if (typeof s !== 'string' || !s) return s;
   return s.replace(IBAN, (m) => 'IBAN ··' + last4(m)).replace(LONG, (m) => '··' + last4(m));
 }
+
+/* Pure: dashes used as punctuation become commas; hyphens inside words stay. Paul's drafts
+ * (Desk, applications, the Sunday paragraph) never use dashes between words or clauses. */
+export function noDashes(s) {
+  return String(s)
+    .replace(/\s*[–—]\s*/g, ', ')
+    .replace(/\s+-\s+/g, ', ')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*([.!?])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

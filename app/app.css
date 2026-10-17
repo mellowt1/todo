@@ -132,9 +132,16 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 }
 .row .text {
   flex: 1; min-width: 0; font-size: var(--fs-body); line-height: 1.35; overflow-wrap: anywhere; cursor: default;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: flex; align-items: baseline; gap: 8px;
   transition: color var(--dur-press) ease;
 }
+.row .text .tname { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* A date and the Apply tag sit at the right of the name, small (app.js textHtml). */
+.tmeta { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 6px; }
+.dtext .tmeta { margin-left: 8px; }
+.ttag { padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-text); font-size: 12px; font-weight: 600; letter-spacing: .01em; }
+.tdue { color: var(--secondary); font-size: var(--fs-meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tdue.near { color: var(--danger); font-weight: 600; }
 /* A link the hub set (a vacancy's page): a quiet icon with a 44px target that keeps the row's height. */
 .row .link {
   flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;
@@ -248,7 +255,6 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 .seg { position: relative; display: flex; gap: 4px; height: 44px; padding: 4px; border-radius: 12px; background: var(--surface); --i: 0; }
 .seg:has(> :nth-child(2):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 1; }
 .seg:has(> :nth-child(3):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 2; }
-.seg:has(> :nth-child(4):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 3; }
 .seg::before {
   content: ""; position: absolute; top: 4px; left: 4px; height: 36px; width: calc((100% - 16px) / 3); border-radius: 9px;
   background: var(--accent); transform: translateX(calc(var(--i) * (100% + 4px)));
@@ -419,36 +425,6 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .edit-sheet .grow { flex: 0 0 8px; }
   .edit-sheet .sheet-head { margin-top: -6px; }
 }
-
-/* ---------- Others: four sections, person headings, Hand back ---------- */
-.seg.four::before { width: calc((100% - 20px) / 4); }
-.seg.four button { font-size: 15px; }
-.whohead { display: flex; gap: 6px; align-items: baseline; }
-.whohead span { font-weight: 500; opacity: .7; }
-.hb-btn { flex-shrink: 0; height: 32px; padding: 0 12px; margin-left: 6px; border: 1px solid var(--sep); border-radius: 99px; font-size: 13px; font-weight: 600; color: var(--text); }
-.for-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 4px; }
-.for-chips:empty { display: none; }
-.inline-add:has(.inline-for:not(:empty)) { flex-wrap: wrap; }
-.inline-for { flex-basis: 100%; padding: 0 0 10px 36px; }
-.for-chip { min-height: 34px; padding: 0 12px; border: 1.5px solid var(--sep); border-radius: 99px; font-size: 14px; font-weight: 600; color: var(--text); }
-.for-chip[aria-pressed="true"] { border-color: var(--accent-text); background: var(--accent-soft); color: var(--accent-text); }
-.for-name { min-height: 34px; width: 140px; padding: 0 12px; border: 1px solid var(--sep); border-radius: 99px; background: var(--field); font-size: 15px; outline: none; }
-.for-name:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
-.for-input { min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--field); font-size: var(--fs-body); outline: none; margin-top: -8px; }
-.for-input:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 0; }
-.edit-sheet > label.meta { margin-bottom: -8px; }
-.handback-sheet { gap: 14px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
-.hb-task { margin: 0; font-size: 20px; font-weight: 650; line-height: 1.25; }
-.hb-draft { margin: 0; min-height: 96px; padding: 14px; border-radius: 12px; background: var(--field); font-size: 16px; line-height: 1.45; user-select: text; -webkit-user-select: text; }
-.hb-draft.wait { color: var(--secondary); }
-.hb-btns { display: flex; gap: 8px; }
-.hb-btns button { flex: 1; min-height: 48px; border-radius: 12px; font-size: var(--fs-body); font-weight: 650; }
-.hb-copy { border: 1px solid var(--sep); color: var(--text); }
-.hb-copy:disabled { opacity: .45; }
-.hb-mark { background: var(--accent); color: var(--on-accent); }
-.hb-note { margin: 0; font-size: var(--fs-meta); color: var(--secondary); text-align: center; }
-.hb-again { color: var(--accent-text); font-size: var(--fs-meta); font-weight: 600; min-height: 32px; padding: 0 4px; }
-.hb-btn:focus-visible, .for-chip:focus-visible, .hb-btns button:focus-visible, .hb-again:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 
 /* ---------- Letter cards (app.js, Letter cards) ---------- */
 .card-sheet { max-height: 92vh; max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; gap: 14px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }

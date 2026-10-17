@@ -46,16 +46,16 @@ const PLAN = {
 
 afterEach(() => _setDesker(null));
 
-test('toActions: at most three, others needs a person, drafts lose their dashes', () => {
+test('toActions: at most three, an unknown section is soon, drafts lose their dashes', () => {
   const acts = toActions({ actions: [
-    { kind: 'todo', text: ' Fix  the bike ', section: 'others', person: null },
-    { kind: 'todo', text: 'Print the form', section: 'others', person: 'Dad' },
+    { kind: 'todo', text: ' Fix  the bike ', section: 'others' },
+    { kind: 'todo', text: 'Dad: print the form', section: 'someday' },
     { kind: 'draft', text: 'Hi — see you soon', to: 'Kim', lang: 'xx' },
     { kind: 'todo', text: 'A fourth one', section: 'today' },
   ] });
   assert.equal(acts.length, 3);
-  assert.deepEqual(acts[0], { kind: 'todo', text: 'Fix the bike', section: 'soon', person: null, state: 'ready' });
-  assert.equal(acts[1].person, 'Dad');
+  assert.deepEqual(acts[0], { kind: 'todo', text: 'Fix the bike', section: 'soon', state: 'ready' });
+  assert.deepEqual([acts[1].text, acts[1].section], ['Dad: print the form', 'someday']);
   assert.equal(acts[2].text, 'Hi, see you soon');
   assert.equal(acts[2].lang, 'en');
   assert.deepEqual(toActions({ actions: [{ kind: 'todo', text: '   ' }] }), []);

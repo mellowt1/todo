@@ -10,9 +10,9 @@
 (() => {
   'use strict';
 
-  const SECTIONS = ['today', 'soon', 'someday', 'others'];
-  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', others: 'Others', done: 'Done' };
-  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.', others: 'Nothing waiting for anyone.' };
+  const SECTIONS = ['today', 'soon', 'someday'];
+  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done' };
+  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.' };
   const MAX_TEXT = 500;
   const MAX_BATCH = 200;
   const MAX_BODY = 150000;
@@ -177,9 +177,6 @@
       id: it.id, text: it.text, section: it.section, done: !!it.done,
       doneAt: it.done ? it.doneAt : null, pos: it.pos, updatedAt: stamp(),
       ...(it.link ? { link: it.link } : {}), // set by the hub (a vacancy's page); the app only keeps it
-      // Others: who it is for. null clears it on the Worker; leaving it out would keep the old one.
-      ...(it.person ? { person: it.person } : { person: null }),
-      ...(it.done && it.handedBack ? { handedBack: true } : {}),
     } });
   }
 
@@ -197,11 +194,7 @@
     if (!text) return;
     const id = newId();
     justAdded.add(id);
-    // Picking a person puts it in Others; "Me" in the Others view puts it in Today.
-    const person = addPerson;
-    const section = person ? 'others' : ui.section === 'others' ? 'today' : ui.section;
-    upsert({ id, text, section, person, done: false, doneAt: null, pos: now() });
-    if (person) rememberPerson(person);
+    upsert({ id, text, section: ui.section, done: false, doneAt: null, pos: now() });
   }
 
   function markDone(id) {
@@ -212,15 +205,12 @@
     toast('Done.', () => upsert(prev), id);
   }
 
-  // Out of Others the task is Paul's own again, so its person goes. Into Others without a person,
-  // the edit sheet opens on For to ask who it is for.
   function moveTo(id, section, withToast = true) {
     const it = items[id];
     if (!it || it.section === section) return;
     const prev = Object.assign({}, it);
-    upsert(Object.assign({}, it, { section, pos: now(), person: section === 'others' ? it.person || null : null }));
+    upsert(Object.assign({}, it, { section, pos: now() }));
     if (withToast) toast('Moved to ' + LABEL[section] + '.', () => upsert(prev), id);
-    if (section === 'others' && !it.person && editId !== id) setTimeout(() => openEdit(id, true), 420);
   }
 
   function reopen(id) {
@@ -428,10 +418,33 @@
   // A task Intake wrote ends in "[intake]". It shows as a small clip, not as the mark.
   const INTAKE_MARK = /\s*\[intake\]$/;
   const isIntake = (it) => INTAKE_MARK.test(it.text);
+  // The name stays clean (Paul, 2026-10-17): a date at the end (" · 2026-11-01") shows as a small
+  // label at the right, red from two days before; "Apply:" in front shows as a tag. The text
+  // itself is unchanged, so the edit sheet still shows and changes both.
+  const DUE = /\s*·\s*(\d{4}-\d{2}-\d{2})$/;
+  const APPLY_TAG = /^Apply:\s*/i;
+  function nameParts(it) {
+    let name = it.text.replace(INTAKE_MARK, '');
+    const m = name.match(DUE);
+    if (m) name = name.slice(0, m.index);
+    const apply = APPLY_TAG.test(name);
+    if (apply) name = name.replace(APPLY_TAG, '');
+    return { name: name || it.text, due: m ? m[1] : null, apply };
+  }
+  function dueLabel(d) {
+    const t = new Date(d + 'T12:00:00');
+    const today = new Date();
+    const diff = Math.round((new Date(t.getFullYear(), t.getMonth(), t.getDate()) - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
+    const words = diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : diff === -1 ? 'Yesterday' : t.getDate() + ' ' + MONTHS[t.getMonth()];
+    return { words, near: diff <= 2 };
+  }
   function textHtml(it) {
-    if (!isIntake(it)) return esc(it.text);
-    return esc(it.text.replace(INTAKE_MARK, '')) +
-      '<svg class="ic clipmark" width="14" height="14" role="img" aria-label="from a letter"><use href="#i-clip"/></svg>';
+    const p = nameParts(it);
+    const clip = isIntake(it) ? '<svg class="ic clipmark" width="14" height="14" role="img" aria-label="from a letter"><use href="#i-clip"/></svg>' : '';
+    let meta = '';
+    if (p.apply) meta += '<span class="ttag">Apply</span>';
+    if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (d.near && !it.done ? ' near' : '') + '" title="' + p.due + '">' + d.words + '</span>'; }
+    return '<span class="tname">' + esc(p.name) + clip + '</span>' + (meta ? '<span class="tmeta">' + meta + '</span>' : '');
   }
 
   function dayLabel(t) {
@@ -466,7 +479,6 @@
       '<button class="circle" aria-label="Mark done" aria-describedby="t-' + it.id + '"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></button>' +
       '<div class="text" id="t-' + it.id + '" role="button">' + textHtml(it) + '</div>' +
       linkHtml(it) +
-      (it.section === 'others' && it.person ? '<button class="hb-btn" aria-describedby="t-' + it.id + '">Hand back</button>' : '') +
       '<button class="move-btn" aria-label="Move task" aria-describedby="t-' + it.id + '" aria-haspopup="menu" aria-expanded="false"><svg class="ic" width="20" height="20"><use href="#i-move"/></svg></button>' +
       '</div></li>';
   }
@@ -486,16 +498,10 @@
       html += '<li class="drow" data-id="' + it.id + '">' +
         '<button class="dbtn" aria-label="Reopen ' + esc(it.text) + '" aria-describedby="ds-' + it.id + ' dt-' + it.id + '">' +
         '<span class="dcheck" aria-hidden="true"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span>' +
-        '<span class="dbody"><span class="dtext">' + textHtml(it) + '</span><span class="meta" id="ds-' + it.id + '">' + esc(doneMeta(it)) + '</span></span>' +
+        '<span class="dbody"><span class="dtext">' + textHtml(it) + '</span><span class="meta" id="ds-' + it.id + '">' + LABEL[it.section] + '</span></span>' +
         '<span class="meta dtime" id="dt-' + it.id + '">' + pad(t.getHours()) + ':' + pad(t.getMinutes()) + '</span></button></li>';
     }
     return html;
-  }
-  // Done history under each task: its section, or for whom (and whether it went back to them).
-  function doneMeta(it) {
-    if (it.section !== 'others') return LABEL[it.section];
-    const p = it.person || 'someone';
-    return it.handedBack ? 'Handed back to ' + p : 'For ' + p;
   }
   // I7: a task from Today finished since local midnight.
   const ALL_DONE = 'All done for today.';
@@ -536,7 +542,7 @@
       const c = b.querySelector('.count');
       if (c) { const n = openIn(b.dataset.section).length; c.textContent = n ? String(n) : ''; }
     }
-    if ($('capture').hidden) $('capLabel').textContent = addLabel(false);
+    if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
     $('install').hidden = !(view === 'list' && showInstall());
   }
 
@@ -570,21 +576,9 @@
       key = 'skeleton';
       html = [1, 2, 3].map(() => '<li class="row skeleton" aria-hidden="true"><div class="row-inner"><span class="circle-static"></span><div class="bar"></div></div></li>').join('');
     } else if (view === 'list') {
-      let rows = openIn(ui.section);
+      const rows = openIn(ui.section);
       ids = new Set(rows.map((it) => it.id));
-      if (ui.section === 'others') {
-        // Grouped by person, names in order, newest first inside each, with a small heading.
-        rows = rows.slice().sort((a, b) => (a.person || '').localeCompare(b.person || '', undefined, { sensitivity: 'base' }) || b.pos - a.pos);
-        let last = null;
-        html = rows.map((it) => {
-          const p = it.person || 'Someone';
-          const head = p !== last ? '<li class="dhead whohead">' + esc(p) + ' <span>' + rows.filter((x) => (x.person || 'Someone') === p).length + '</span></li>' : '';
-          last = p;
-          return head + rowHtml(it, justAdded.has(it.id));
-        }).join('');
-      } else {
-        html = rows.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
-      }
+      html = rows.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
       if (!rows.length) {
         emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
           : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];
@@ -1246,7 +1240,6 @@
     if (revealed === row) { closeReveal(); return; }
     if (e.target.closest('.circle')) { completeRow(row); return; }
     if (e.target.closest('.move-btn')) { openMenu(row, e.target.closest('.move-btn')); return; }
-    if (e.target.closest('.hb-btn')) { openHandback(row.dataset.id); return; }
     openTask(row.dataset.id);
   });
 
@@ -1537,9 +1530,6 @@
   function openAdd() {
     if (view !== 'list') setSection(ui.section);
     closeReveal();
-    addPerson = ui.section === 'others' ? lastPerson() : null;
-    otherName = false;
-    renderFor();
     if (desk.matches) return showInline();
     capInput.value = '';
     capAdded = [];
@@ -1585,7 +1575,7 @@
   // The label crossfades only when its words change.
   function capLabel() {
     const l = $('capLabel');
-    const t = addLabel(capAdded.length > 0);
+    const t = (capAdded.length ? 'Added to ' : 'Adds to ') + LABEL[ui.section];
     if (l.textContent === t) return;
     l.textContent = t;
     if (!$('capture').hidden) play(l, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
@@ -1609,7 +1599,7 @@
       capAdded.push(v);
       addCapLine(v);
       capInput.value = '';
-      say(addLabel(true) + '.');
+      say('Added to ' + LABEL[ui.section] + '.');
     } else if (e.key === 'Escape') {
       e.stopPropagation();
       closeCapture();
@@ -1626,7 +1616,6 @@
   let inlineOn = false;
   function showInline() {
     const shut = $('inlineAdd').hidden;
-    if (shut) { addPerson = ui.section === 'others' ? lastPerson() : null; otherName = false; renderFor(); }
     rest(inlineSlot); // one on its way out comes back
     $('inlineAdd').hidden = false;
     inlineOn = true;
@@ -1649,7 +1638,7 @@
   inlineInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
-      if (cleanText(inlineInput.value)) say(addLabel(true) + '.');
+      if (cleanText(inlineInput.value)) say('Added to ' + LABEL[ui.section] + '.');
       addTask(inlineInput.value);
       inlineInput.value = '';
     } else if (e.key === 'Escape') {
@@ -1657,79 +1646,14 @@
       hideInline();
     }
   });
-  inlineInput.addEventListener('blur', () => { if (!inlineInput.value.trim()) setTimeout(() => { if (document.activeElement !== inlineInput && !$('inlineAdd').contains(document.activeElement)) hideInline(); }, 150); });
-
-  /* ---------- Who a new task is for (Others) ----------
-   * Under the field: Me, the people Paul has had Others tasks for (most recent first, then a few
-   * to start with), and Someone else (a name). Picking a person puts the task in Others. */
-  const SEED_PEOPLE = ['Nick', 'Mom', 'Dad', 'Grandpa'];
-  let addPerson = null;   // null is Paul himself
-  let otherName = false;  // the Someone else field is showing
-  function people() {
-    const used = Object.values(items).filter((i) => i.person).sort((a, b) => b.updatedAt - a.updatedAt).map((i) => i.person);
-    const out = [];
-    for (const p of used.concat(ui.people || [], SEED_PEOPLE)) if (p && !out.some((x) => x.toLowerCase() === p.toLowerCase())) out.push(p);
-    return out.slice(0, 8);
-  }
-  function lastPerson() {
-    const used = Object.values(items).filter((i) => i.person && i.section === 'others').sort((a, b) => b.updatedAt - a.updatedAt);
-    return used.length ? used[0].person : (ui.people || [])[0] || null;
-  }
-  function rememberPerson(p) {
-    ui.people = [p].concat((ui.people || []).filter((x) => x.toLowerCase() !== p.toLowerCase())).slice(0, 8);
-    saveUi();
-  }
-  function addLabel(added) {
-    const section = addPerson ? 'others' : ui.section === 'others' ? 'today' : ui.section;
-    return (added ? 'Added to ' : 'Adds to ') + LABEL[section] + (addPerson ? ' · ' + addPerson : '');
-  }
-  function renderFor() {
-    const ps = people();
-    const chip = (label, on, extra) => '<button type="button" class="for-chip"' + extra + ' aria-pressed="' + on + '">' + esc(label) + '</button>';
-    const custom = addPerson && !ps.some((p) => p.toLowerCase() === addPerson.toLowerCase());
-    const html = chip('Me', !addPerson && !otherName, ' data-for=""') +
-      ps.map((p) => chip(p, !!addPerson && addPerson.toLowerCase() === p.toLowerCase() && !otherName, ' data-for="' + esc(p) + '"')).join('') +
-      chip('Someone else', otherName || custom, ' data-for-other="1"') +
-      (otherName ? '<input class="for-name" type="text" maxlength="40" placeholder="Name" autocapitalize="words" aria-label="Who is it for" value="' + esc(custom ? addPerson : '') + '">' : '');
-    for (const box of [$('capFor'), $('inlineFor')]) if (box) box.innerHTML = html;
-    capLabel();
-  }
-  function onForClick(e) {
-    const b = e.target.closest('.for-chip');
-    if (!b) return;
-    if (b.dataset.forOther) { otherName = true; addPerson = null; renderFor(); const f = e.currentTarget.querySelector('.for-name'); if (f) f.focus(); return; }
-    otherName = false;
-    addPerson = b.dataset.for || null;
-    renderFor();
-    (desk.matches ? inlineInput : capInput).focus({ preventScroll: true });
-  }
-  function onForInput(e) {
-    if (!e.target.classList.contains('for-name')) return;
-    addPerson = cleanText(e.target.value).slice(0, 40) || null;
-    capLabel();
-  }
-  function onForKey(e) {
-    if (!e.target.classList.contains('for-name') || e.key !== 'Enter') return;
-    e.preventDefault();
-    otherName = false;
-    renderFor();
-    (desk.matches ? inlineInput : capInput).focus({ preventScroll: true });
-  }
-  for (const box of [$('capFor'), $('inlineFor')]) {
-    if (!box) continue;
-    // A chip tap keeps the keyboard up: the field keeps focus.
-    box.addEventListener('pointerdown', (e) => { if (e.target.closest('.for-chip')) e.preventDefault(); });
-    box.addEventListener('click', onForClick);
-    box.addEventListener('input', onForInput);
-    box.addEventListener('keydown', onForKey);
-  }
+  inlineInput.addEventListener('blur', () => { if (!inlineInput.value.trim()) setTimeout(() => { if (document.activeElement !== inlineInput) hideInline(); }, 150); });
 
   /* ---------- Edit ---------- */
   const editText = $('editText');
   let editId = null;
   let editFrom = null; // { id, section, pos } when the sheet opened
   let editTimer = 0;
-  function openEdit(id, askFor) {
+  function openEdit(id) {
     const it = items[id];
     const row = list.querySelector('.row[data-id="' + id + '"]');
     if (!it || leaving.has(id) || (row && gone(row))) return; // a task about to leave does not open
@@ -1738,9 +1662,6 @@
     editText.value = it.text.replace(INTAKE_MARK, ''); // the mark stays on the task, not in the box
     showFrom(it);
     $('editApply').hidden = !isApply(it);
-    $('editFor').value = it.person || '';
-    $('editFor').placeholder = it.section === 'others' ? 'Who is it for?' : 'Me';
-    $('peopleList').innerHTML = people().map((p) => '<option value="' + esc(p) + '"></option>').join('');
     const seg = $('editSeg');
     seg.classList.add('instant');
     paintEditSeg(it.section);
@@ -1749,30 +1670,9 @@
     // The thumb takes its place in this frame; it glides again from the next one.
     void seg.offsetWidth;
     requestAnimationFrame(() => seg.classList.remove('instant'));
-    if (askFor) $('editFor').focus();
-    else if (desk.matches) { editText.focus(); editText.setSelectionRange(editText.value.length, editText.value.length); }
+    if (desk.matches) { editText.focus(); editText.setSelectionRange(editText.value.length, editText.value.length); }
     else $('editClose').focus({ preventScroll: true }); // on the phone the keyboard waits for a tap in the text
   }
-  // For: a name puts the task in Others for that person; an empty field makes it Paul's own (Soon).
-  function saveFor() {
-    const it = items[editId];
-    if (!it) return;
-    const p = cleanText($('editFor').value).slice(0, 40);
-    if ((p || null) === (it.person || null) && (p ? it.section === 'others' : it.section !== 'others')) return;
-    if (p) {
-      upsert(Object.assign({}, it, { person: p, section: 'others', pos: it.section === 'others' ? it.pos : now() }));
-      rememberPerson(p);
-    } else {
-      upsert(Object.assign({}, it, { person: null, section: it.section === 'others' ? 'soon' : it.section, pos: now() }));
-    }
-    paintEditSeg(items[editId].section);
-    $('editFor').placeholder = items[editId].section === 'others' ? 'Who is it for?' : 'Me';
-  }
-  $('editFor').addEventListener('change', saveFor);
-  $('editFor').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); saveFor(); $('editFor').blur(); }
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEdit(); }
-  });
   function paintEditSeg(section) {
     for (const b of document.querySelectorAll('#editSeg button')) {
       const on = b.dataset.section === section;
@@ -1800,7 +1700,6 @@
   function closeEdit(after) {
     if (editId === null) return; // already closing
     saveEditText();
-    if (document.activeElement === $('editFor')) saveFor();
     editText.blur();
     editId = null;
     const from = editFrom;
@@ -1830,13 +1729,6 @@
     b.addEventListener('click', () => {
       const it = items[editId];
       if (!it || it.section === b.dataset.section) return;
-      // Others needs a person: ask in the For field first.
-      if (b.dataset.section === 'others' && !it.person && !cleanText($('editFor').value)) {
-        $('editFor').placeholder = 'Who is it for?';
-        $('editFor').focus();
-        return;
-      }
-      if (b.dataset.section === 'others' && !it.person) { saveFor(); return; }
       saveEditText();
       // Where focus goes on close if the row has left by then (only when it came from the row).
       const back = modals.get($('edit'));
@@ -2063,59 +1955,6 @@
   $('cardClose').addEventListener('click', () => closeCard());
   $('card').querySelector('.scrim').addEventListener('click', () => closeCard());
 
-  /* ---------- Hand back (Others) ----------
-   * Claude drafts a short, friendly message handing the task back to its person, in Dutch,
-   * English or Spanish (worker/src/others.js). It is only a draft: Copy puts it on the clipboard,
-   * and "Mark handed back" closes the task with that status. Nothing is ever sent from here.
-   * The language last used for each person is remembered. */
-  const LANGS = ['nl', 'en', 'es'];
-  let hbId = null;
-  let hbLang = 'en';
-  const hbDrafts = new Map(); // id|lang -> text, so switching back costs nothing
-  function openHandback(id) {
-    const it = items[id];
-    if (!it || it.done || it.section !== 'others' || !it.person) return;
-    hbId = id;
-    hbLang = (ui.hbLang && ui.hbLang[it.person.toLowerCase()]) || 'en';
-    $('hbHead').textContent = 'Hand back to ' + it.person;
-    $('hbTask').textContent = it.text.replace(INTAKE_MARK, '');
-    paintHb();
-    const a = document.activeElement;
-    openSheet($('handback'), 0, list.contains(a) ? a : null);
-    $('hbClose').focus({ preventScroll: true });
-    loadDraft(false);
-  }
-  function paintHb() {
-    for (const b of document.querySelectorAll('#hbLang button')) {
-      const on = b.dataset.lang === hbLang;
-      b.setAttribute('aria-checked', String(on));
-      b.tabIndex = on ? 0 : -1;
-    }
-  }
-  async function loadDraft(fresh) {
-    const id = hbId;
-    const lang = hbLang;
-    const key = id + '|' + lang;
-    const box = $('hbDraft');
-    $('hbCopy').disabled = true;
-    if (!fresh && hbDrafts.has(key)) { box.textContent = hbDrafts.get(key); box.classList.remove('wait'); $('hbCopy').disabled = false; return; }
-    box.textContent = 'Writing a draft…';
-    box.classList.add('wait');
-    try {
-      const r = await fetch(API + '/api/others/' + code + '/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, lang }) });
-      const d = await r.json().catch(() => null);
-      if (hbId !== id || hbLang !== lang) return;
-      if (!r.ok || !d || !d.text) throw new Error('no draft');
-      hbDrafts.set(key, d.text);
-      box.textContent = d.text;
-      box.classList.remove('wait');
-      $('hbCopy').disabled = false;
-    } catch (e) {
-      if (hbId !== id || hbLang !== lang) return;
-      box.textContent = navigator.onLine ? 'Couldn’t write a draft. Try New draft.' : 'Needs a connection to write a draft.';
-      box.classList.remove('wait');
-    }
-  }
   /* ---------- Applications: an "Apply: ..." task, prepared on Paul's PC ----------
    * The edit sheet of an Apply task (from the defence digest, with its vacancy link) offers
    * Prepare on the PC. That queues it (POST /api/apply/:code/:taskId); the PC builds a folder with
@@ -2216,53 +2055,6 @@
   $('apply').querySelector('.scrim').addEventListener('click', closeApply);
   $('editApply').addEventListener('click', () => { const id = editId; closeEdit(() => openApply(id)); });
 
-  function closeHandback() {
-    if (hbId === null) return;
-    hbId = null;
-    closeSheet($('handback'));
-  }
-  for (const b of document.querySelectorAll('#hbLang button')) {
-    b.addEventListener('click', () => {
-      if (b.dataset.lang === hbLang) return;
-      hbLang = b.dataset.lang;
-      const it = items[hbId];
-      if (it && it.person) { ui.hbLang = Object.assign({}, ui.hbLang, { [it.person.toLowerCase()]: hbLang }); saveUi(); }
-      paintHb();
-      loadDraft(false);
-    });
-  }
-  $('hbLang').addEventListener('keydown', (e) => {
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-    if (!step) return;
-    e.preventDefault();
-    const bs = Array.from($('hbLang').querySelectorAll('button'));
-    const b = bs[(LANGS.indexOf(hbLang) + step + bs.length) % bs.length];
-    b.focus();
-    b.click();
-  });
-  $('hbCopy').addEventListener('click', () => {
-    const text = $('hbDraft').textContent;
-    const b = $('hbCopy');
-    const done = (ok) => {
-      b.textContent = ok ? 'Copied' : 'Select it';
-      say(ok ? 'Draft copied' : 'Could not copy');
-      if (!ok) { const s = getSelection(); const r = document.createRange(); r.selectNodeContents($('hbDraft')); s.removeAllRanges(); s.addRange(r); }
-      setTimeout(() => { b.textContent = 'Copy'; }, 1400);
-    };
-    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => done(true), () => done(false));
-  });
-  $('hbAgain').addEventListener('click', () => loadDraft(true));
-  $('hbMark').addEventListener('click', () => {
-    const it = items[hbId];
-    if (!it) return;
-    const prev = Object.assign({}, it);
-    upsert(Object.assign({}, it, { done: true, doneAt: now(), handedBack: true }));
-    closeHandback();
-    toast('Handed back to ' + it.person + '.', () => upsert(prev), it.id);
-  });
-  $('hbClose').addEventListener('click', closeHandback);
-  $('handback').querySelector('.scrim').addEventListener('click', closeHandback);
-
   /* ---------- Keyboard (desktop) ---------- */
   function rows() { return Array.from(list.querySelectorAll(view === 'done' ? '.drow' : '.row:not(.skeleton)')); }
   const isField = (el) => !!el && (/^(input|textarea|select)$/i.test(el.tagName || '') || el.isContentEditable);
@@ -2280,14 +2072,13 @@
       if (menuOn) { closeMenu(); return; }
       if (!$('edit').hidden) { closeEdit(); return; }
       if (!$('card').hidden) { closeCard(); return; }
-      if (!$('handback').hidden) { closeHandback(); return; }
       if (!$('apply').hidden) { closeApply(); return; }
       if (!$('capture').hidden) { closeCapture(); return; }
       closeReveal();
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('handback')) || shown($('apply')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
       const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -2308,7 +2099,7 @@
     }
     const k = e.key;
     if (k === 'n' || k === 'N') { e.preventDefault(); openAdd(); return; }
-    if (k === '1' || k === '2' || k === '3' || k === '4') { setSection(SECTIONS[Number(k) - 1]); say(LABEL[SECTIONS[Number(k) - 1]]); return; }
+    if (k === '1' || k === '2' || k === '3') { setSection(SECTIONS[Number(k) - 1]); say(LABEL[SECTIONS[Number(k) - 1]]); return; }
     if (k === 'ArrowDown' || k === 'ArrowUp') {
       const rs = rows();
       if (!rs.length) return;

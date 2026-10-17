@@ -7,7 +7,7 @@
  *        "copied" (a draft was copied), "skip"
  *
  * An item is { id, at, text, answer, actions: [...] }. An action is
- *   { kind: "todo", text, section, person, state, taskId? }  or
+ *   { kind: "todo", text, section, state, taskId? }  or
  *   { kind: "draft", to, lang, text, state }
  * and its state is "ready", "approved", "copied" or "skipped".
  *
@@ -25,12 +25,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
-import { CODE, ID, safeEqual, cleanOp, cleanPerson, MAX_TEXT } from './todo.js';
+import { CODE, ID, SECTIONS, safeEqual, cleanOp, MAX_TEXT } from './todo.js';
 import { anthropic, MODEL, randomId, bumpUsage, dayOf } from './intake.js';
 import { maskSecrets } from './mask.js';
 import { local, CAL_KEY, inWindow, PROJECTS_KEY } from './morning.js';
 import { listEvents } from './events.js';
-import { noDashes } from './others.js';
+import { noDashes } from './mask.js';
 
 export const MAX_LINE = 1000;
 export const MAX_ACTIONS = 3;
@@ -47,8 +47,7 @@ export const Plan = z.object({
   actions: z.array(z.object({
     kind: z.enum(['todo', 'draft']),
     text: z.string().max(600).describe('todo: the task, imperative, short, in the language Paul typed it in. draft: the whole message'),
-    section: z.enum(['today', 'soon', 'someday', 'others']).nullable().describe('todo only'),
-    person: z.string().max(40).nullable().describe('todo in others: who it is for. draft: null'),
+    section: z.enum(['today', 'soon', 'someday']).nullable().describe('todo only'),
     to: z.string().max(40).nullable().describe('draft only: who the message is for'),
     lang: z.enum(['nl', 'en', 'es']).nullable().describe('draft only'),
   })).max(MAX_ACTIONS),
@@ -58,7 +57,7 @@ export const Plan = z.object({
 export const SYSTEM = [
   'You are Desk, a helper inside Paul\'s own apps. Paul types one line on his PC. You prepare things for him to approve; you never act yourself.',
   'You can prepare two kinds of action, three at most, and give one short answer:',
-  '1. todo: a task for his to-do list. Sections: today (must happen today or tomorrow), soon (this week or two, or has a date), someday (no pressure), others (a task Paul does for someone else; then person is that person, e.g. Mom, Dad, Nick, Olivia).',
+  '1. todo: a task for his to-do list. Sections: today (must happen today or tomorrow), soon (this week or two, or has a date), someday (no pressure). A task Paul does for someone else starts with their name, e.g. "Dad: set up the printer".',
   '   Write the task short and imperative, the way Paul would write it himself, in the language he typed. When he gives a date, end the text with " · YYYY-MM-DD".',
   '   Do not add a task that is already open in his list; mention it in the answer instead.',
   '2. draft: a message for Paul to copy and send himself (text, WhatsApp or email). Write as Paul, warm and plain, two to four sentences, in the language he asks for or the language that person is usually written to (Dutch for Dutch services and Dutch friends, Spanish for family when he says so, English otherwise).',
@@ -78,7 +77,7 @@ export async function gatherContext(env, now = Date.now()) {
   const [todos, parked, calendar, events] = await Promise.all([
     part((async () => {
       const d = await (await stub(env).fetch('https://list/read')).json();
-      return (d.items || []).filter((i) => !i.done).slice(0, 200).map((i) => ({ text: maskSecrets(i.text), section: i.section, ...(i.person ? { person: i.person } : {}) }));
+      return (d.items || []).filter((i) => !i.done).slice(0, 200).map((i) => ({ text: maskSecrets(i.text), section: i.section }));
     })()),
     part((async () => {
       const p = await env.HUB_KV.get(PROJECTS_KEY, 'json');
@@ -123,7 +122,7 @@ let preparer = prepare;
 export function _setDesker(fn) { preparer = fn || prepare; }
 
 /* Pure: Claude's plan becomes the item's actions. Anything that would not make a valid
- * task or draft is dropped; others without a person falls back to soon. */
+ * task or draft is dropped; an unknown section is soon. */
 export function toActions(plan) {
   const out = [];
   for (const a of Array.isArray(plan && plan.actions) ? plan.actions : []) {
@@ -131,9 +130,8 @@ export function toActions(plan) {
     const text = String((a && a.text) || '').replace(/\s+/g, ' ').trim();
     if (!text) continue;
     if (a.kind === 'todo') {
-      const person = a.section === 'others' ? cleanPerson(a.person) : null;
-      const section = a.section === 'others' && !person ? 'soon' : ['today', 'soon', 'someday', 'others'].includes(a.section) ? a.section : 'soon';
-      out.push({ kind: 'todo', text: maskSecrets(text).slice(0, MAX_TEXT), section, person: section === 'others' ? person : null, state: 'ready' });
+      const section = SECTIONS.includes(a.section) ? a.section : 'soon';
+      out.push({ kind: 'todo', text: maskSecrets(text).slice(0, MAX_TEXT), section, state: 'ready' });
     } else if (a.kind === 'draft') {
       out.push({ kind: 'draft', to: String(a.to || '').trim().slice(0, 40) || null, lang: LANGS[a.lang] ? a.lang : 'en', text: noDashes(text).slice(0, 1200), state: 'ready' });
     }
@@ -184,10 +182,7 @@ function edited(a, edit) {
   const out = { ...a };
   if (typeof edit.text === 'string' && edit.text.trim()) out.text = edit.text.replace(/\s+/g, ' ').trim().slice(0, a.kind === 'todo' ? MAX_TEXT : 1200);
   if (a.kind === 'todo') {
-    if (['today', 'soon', 'someday', 'others'].includes(edit.section)) out.section = edit.section;
-    if (edit.person !== undefined) out.person = cleanPerson(edit.person);
-    if (out.section !== 'others') out.person = null;
-    else if (!out.person) out.section = 'soon';
+    if (SECTIONS.includes(edit.section)) out.section = edit.section;
   }
   return out;
 }
@@ -207,7 +202,7 @@ export async function act(env, item, idx, action, edit, now = Date.now()) {
   if (action === 'approve') {
     if (next.kind !== 'todo') return { error: 'only a task can be approved; a draft is copied', status: 400 };
     const taskId = randomId().slice(0, 14) + 'dk';
-    const op = cleanOp({ op: 'upsert', item: { id: taskId, text: next.text, section: next.section, ...(next.person ? { person: next.person } : {}), done: false, doneAt: null, updatedAt: now, pos: now } }, now);
+    const op = cleanOp({ op: 'upsert', item: { id: taskId, text: next.text, section: next.section, done: false, doneAt: null, updatedAt: now, pos: now } }, now);
     if (!op) return { error: 'that task does not fit the list', status: 400 };
     await apply(env, [op]);
     item.actions[idx] = { ...next, state: 'approved', taskId };

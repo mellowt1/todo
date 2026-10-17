@@ -1,7 +1,6 @@
 /* The Morning Screen module: everything the page shows, in one answer.
  *
- *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, rotas, news, kitchen, projects, german, repos, intake, events, status, dinner, links, week, others }
- *   others: { waiting, slots, inSlot, next, groups } (src/others.js). Others tasks are never in todos.
+ *   GET  /api/morning/:code        -> { now, todos, calendar, fixed, weather, arsenal, bins, birthdays, rotas, news, kitchen, projects, german, repos, intake, events, status, dinner, links, week }
  *   POST /api/morning/:code/parked <- { id, action: "today" | "done" | "drop" | "undo" } -> { ok, projects }
  *   POST /api/morning/:code/week   <- { id, action }  the Week view's buttons (src/week.js)
  *
@@ -1136,7 +1135,7 @@ export async function handleMorning(request, env, rest, json, now = Date.now(), 
   if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
 
   const extra = Object.entries(more.blocks || {});
-  const extras = Promise.all(extra.map(([k, fn]) => block(() => fn(env, now, request, local(now)), `The ${k} block can't load right now`)));
+  const extras = Promise.all(extra.map(([k, fn]) => block(() => fn(env, now, request), `The ${k} block can't load right now`)));
   const [todos, calendar, weatherB, arsenalB, binsB, fixed, birthdays, rotas, newsB, kitchenB, projects, german, repos, intake, events, status, dinner] = await Promise.all([
     block(() => todosBlock(env, now), "To-dos can't load right now"),
     block(() => calendarBlock(env, now), "Calendar can't load right now"),

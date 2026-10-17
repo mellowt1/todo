@@ -62,10 +62,6 @@
  * Backups: once a day the cron also copies the to-do list and the kitchen into KV
  * (backup:todo, backup:kitchen, backup:at) for the PC's weekly backup.
  *
- * Others (src/others.js): tasks done for other people, To-do's fourth section, each with a person.
- *   POST /api/others/:code/draft     <- { id, lang: "nl" | "en" | "es" }  -> { text }  a hand-back draft; never sent
- *   Morning gets `others`: { waiting, inSlot, next, groups } (groups only during a slot, hub config others_slots).
- *
  * Desk (src/desk.js; the to-do's code): Paul types one line on Morning, Claude prepares up to three
  * tasks or drafts and a short answer; nothing reaches the list until he approves, drafts are never sent.
  *   GET  /api/desk/:code        -> { items }  the last 10 lines
@@ -118,9 +114,9 @@ import { adminRules, consume } from './hub.js';
 import { adminConfig, handleHub } from './dinner.js';
 import { weekForMorning, handleWeek, weekCron } from './week.js';
 import { intakeCatchUp } from './intake.js';
-import { othersBlock, handleOthers, othersAssign } from './others.js';
 import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
+import { retireOthers } from './retire.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -313,14 +309,13 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, others: othersBlock }, routes: { week: handleWeek } }),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning }, routes: { week: handleWeek } }),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   health: (request, env, rest) => handleHealth(request, env, rest, json),
   intake: (request, env, rest, url) => handleIntake(request, env, rest, url, { json, list, code: CODE }),
   event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
   hub: (request, env, rest, url) => handleHub(request, env, rest, url, json),
-  others: (request, env, rest) => handleOthers(request, env, rest, json),
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
   apply: (request, env, rest) => handleApply(request, env, rest, json),
   admin: handleAdmin,
@@ -343,7 +338,7 @@ export default {
    * once-only jobs on every run of either, so the push lands within 15 minutes of its time.
    * Without a cron string (a test) the minute decides; without either, everything runs. */
   async scheduled(event, env, ctx) {
-    const jobs = [weekCron(env), intakeCatchUp(env), othersAssign(env)]; // the last two only act when there is something to do
+    const jobs = [weekCron(env), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
