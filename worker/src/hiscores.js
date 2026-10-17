@@ -5,6 +5,7 @@
  * taken back, as in the game. Levels follow the real OSRS XP table; the XP per action is set so
  * an ordinary month gets a skill to about 30, and 99 stays years away.
  *
+ *   strength      a gym visit, once a day (POST .../gym)  1000  st:<date>
  *   woodcutting   a to-do ticked off                      100   wc:<task id>
  *   slayer        an "Apply:" to-do ticked off           4000   sl:<task id>
  *   cooking       Paul's Kitchen dinner, once the day is over: a recipe 800, a pizza night 500;
@@ -19,7 +20,8 @@
  * The first scan back-fills everything the sources still hold. After that the cron scans every
  * run, and a read scans first when the last scan is a minute old, so a tick shows right away.
  *
- *   GET /api/hiscores/:code   -> { skills: [{ id, name, xp, level, at, next, today }], total, totalXp, log, at }
+ *   GET  /api/hiscores/:code      -> { skills: [{ id, name, xp, level, at, next, today }], total, totalXp, log, at }
+ *   POST /api/hiscores/:code/gym  -> { ok, added, level, xp, say }   a gym visit today (Strength)
  *   Morning's block (hiscoresForMorning) is the same without the long log.
  */
 
@@ -32,6 +34,7 @@ import { maskSecrets } from './mask.js';
 import { moodsOf, dinnersByDay, isoWeekDate } from './mirror.js';
 
 export const SKILLS = [ // the order of the OSRS skills tab, read across
+  { id: 'strength', name: 'Strength', from: 'Gym visits' },
   { id: 'ranged', name: 'Ranged', from: 'Archery evenings' },
   { id: 'cooking', name: 'Cooking', from: 'Kitchen dinners' },
   { id: 'prayer', name: 'Prayer', from: 'Feeling faces' },
@@ -41,7 +44,7 @@ export const SKILLS = [ // the order of the OSRS skills tab, read across
   { id: 'slayer', name: 'Slayer', from: 'Applications' },
   { id: 'construction', name: 'Construction', from: 'Sunday resets' },
 ];
-export const XP = { task: 100, apply: 4000, recipe: 800, pizza: 500, face: 450, archery: 3300, call: 600, callMinute: 50, desk: 450, week: 600 };
+export const XP = { gym: 1000, task: 100, apply: 4000, recipe: 800, pizza: 500, face: 450, archery: 3300, call: 600, callMinute: 50, desk: 450, week: 600 };
 export const ARCHERY = /archery|handboog|boogschiet|sebasti/i;
 export const SCAN_KEY = 'hiscores:scanAt';
 const SCAN_EVERY = 60 * 1000;
@@ -251,11 +254,26 @@ export async function hiscoresForMorning(env, now = Date.now()) {
   return readBoard(env, now, 5);
 }
 
+/* Strength: a gym visit, once a day. The Hiscores page's button and an iPhone Shortcuts
+ * automation (arrive at the gym) both POST here. `say` is one line a Shortcut can show. */
+export async function logGym(env, now = Date.now()) {
+  const date = local(now).date;
+  const added = await grant(env, [{ id: 'st:' + date, skill: 'strength', xp: XP.gym, at: iso(now), what: 'Gym visit' }]);
+  const b = await readBoard(env, now, 0);
+  const s = b.skills.find((x) => x.id === 'strength');
+  return { added: added > 0, level: s.level, xp: s.xp, say: added ? `Strength +${XP.gym.toLocaleString('en-GB')} XP. Level ${s.level}.` : `Already logged today. Strength level ${s.level}.` };
+}
+
 export async function handleHiscores(request, env, rest, json, now = Date.now()) {
-  if (rest.length !== 1 || !CODE.test(rest[0])) return json({ error: 'bad code' }, request, 400);
+  if (!rest.length || rest.length > 2 || !CODE.test(rest[0])) return json({ error: 'bad code' }, request, 400);
   if (!env.TODO_CODE || !safeEqual(rest[0], env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
-  if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
   if (!env.HUB_DB) return json({ error: 'not configured' }, request, 503);
+  if (rest.length === 2) {
+    if (rest[1] !== 'gym') return json({ error: 'not found' }, request, 404);
+    if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
+    return json({ ok: true, ...(await logGym(env, now)) }, request);
+  }
+  if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
   await fresh(env, now);
   return json(await readBoard(env, now), request);
 }

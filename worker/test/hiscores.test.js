@@ -122,9 +122,9 @@ test('the board: levels, next level, today, total', () => {
   const wc = b.skills.find((s) => s.id === 'woodcutting');
   assert.deepEqual([wc.level, wc.at, wc.next, wc.today], [30, 13363, 14833, 200]);
   assert.equal(b.skills.find((s) => s.id === 'cooking').level, 1);
-  assert.equal(b.skills.length, 8);
-  assert.equal(b.total, 30 + 7);
-  assert.deepEqual(b.skills.map((s) => s.id), ['ranged', 'cooking', 'prayer', 'crafting', 'magic', 'woodcutting', 'slayer', 'construction']);
+  assert.equal(b.skills.length, 9);
+  assert.equal(b.total, 30 + 8);
+  assert.deepEqual(b.skills.map((s) => s.id), ['strength', 'ranged', 'cooking', 'prayer', 'crafting', 'magic', 'woodcutting', 'slayer', 'construction']);
 });
 
 test('a scan back-fills every source once; scanning again adds nothing', async () => {
@@ -168,13 +168,29 @@ test('the route: code checked, scans first, then the board; a read within a minu
   assert.equal((await handleHiscores(req, e, ['bad'], json, SAT)).status, 400);
   const res = await handleHiscores(req, e, [CODE], json, SAT);
   const body = await res.json();
-  assert.equal(body.skills.length, 8);
+  assert.equal(body.skills.length, 9);
   assert.ok(body.total >= 8);
   assert.equal(await e.HUB_KV.get(SCAN_KEY), new Date(SAT).toISOString());
   await hiscoresForMorning(e, SAT + 30e3);
   assert.equal(await e.HUB_KV.get(SCAN_KEY), new Date(SAT).toISOString()); // no second scan
   const m = await hiscoresForMorning(e, SAT + 120e3);
   assert.equal(m.log.length <= 5, true);
+});
+
+test('Strength: a gym visit pays once a day, by POST only', async () => {
+  const e = env();
+  const post = (path, method = 'POST') => handleHiscores(new Request('https://x/api/hiscores/' + path, { method }), e, path.split('/'), json, SAT);
+  const first = await (await post(CODE + '/gym')).json();
+  assert.deepEqual(first, { ok: true, added: true, level: 9, xp: 1000, say: 'Strength +1,000 XP. Level 9.' });
+  const again = await (await post(CODE + '/gym')).json();
+  assert.equal(again.added, false);
+  assert.equal(again.say, 'Already logged today. Strength level 9.');
+  assert.equal((await post(CODE + '/gym', 'GET')).status, 405);
+  assert.equal((await post(CODE + '/nope')).status, 404);
+  assert.equal((await post('wrongcode1234567/gym')).status, 404);
+  const b = await readBoard(e, SAT);
+  assert.equal(b.skills[0].today, 1000);
+  assert.equal(b.log[0].what, 'Gym visit');
 });
 
 test('Construction: the Sunday reset buttons pay once per task per kind per week', async () => {
