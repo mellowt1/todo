@@ -75,6 +75,10 @@
  *   POST /api/apply/:code/:taskId   -> { state: "queued" }
  *   GET  /api/apply/pc/queue        POST /api/apply/pc/:taskId/draft   POST /api/apply/pc/:taskId/ready
  *
+ * Tidy (src/tidy.js; the to-do's code): a task as typed comes back clean, its day or date as the
+ * " · YYYY-MM-DD" ending. Writes nothing; the app writes it and offers Undo.
+ *   POST /api/tidy/:code   <- { text }  -> { text, changed }
+ *
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
@@ -117,6 +121,7 @@ import { intakeCatchUp } from './intake.js';
 import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
+import { handleTidy } from './tidy.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -318,6 +323,7 @@ const MODULES = {
   hub: (request, env, rest, url) => handleHub(request, env, rest, url, json),
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
   apply: (request, env, rest) => handleApply(request, env, rest, json),
+  tidy: (request, env, rest) => handleTidy(request, env, rest, json),
   admin: handleAdmin,
 };
 

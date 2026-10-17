@@ -195,6 +195,23 @@
     const id = newId();
     justAdded.add(id);
     upsert({ id, text, section: ui.section, done: false, doneAt: null, pos: now() });
+    tidyLater(id, text);
+  }
+
+  /* Tidy (Paul, 2026-10-17): the task goes in as typed, then Claude cleans it up a second later
+   * (typos, a short task, its day or date as the date label; POST /api/tidy/:code). The tidy
+   * text replaces it only when nobody has touched the task since, with Undo in the toast.
+   * Offline, it stays as typed. */
+  async function tidyLater(id, typed) {
+    if (!navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/tidy/' + code, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: typed }) });
+      const d = r.ok ? await r.json() : null;
+      const it = items[id];
+      if (!d || !d.changed || !d.text || !it || it.done || it.text !== typed) return;
+      upsert(Object.assign({}, it, { text: d.text }));
+      toast('Tidied.', () => { const cur = items[id]; if (cur) upsert(Object.assign({}, cur, { text: typed })); }, id);
+    } catch (e) { /* stays as typed */ }
   }
 
   function markDone(id) {
