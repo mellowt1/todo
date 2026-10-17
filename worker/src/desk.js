@@ -31,6 +31,7 @@ import { maskSecrets } from './mask.js';
 import { local, CAL_KEY, inWindow, PROJECTS_KEY } from './morning.js';
 import { listEvents } from './events.js';
 import { noDashes } from './mask.js';
+import { keptFor, lessonsText, deskSignal, logFeedback } from './lessons.js';
 
 export const MAX_LINE = 1000;
 export const MAX_ACTIONS = 3;
@@ -98,10 +99,14 @@ export async function gatherContext(env, now = Date.now()) {
 /* ---------- The call ---------- */
 
 export async function prepare(env, { text, context }) {
+  // Paul's kept rules (src/lessons.js) go in a second block: the first stays cached across weeks.
+  const rules = lessonsText(await keptFor(env, 'desk'));
+  const system = [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }];
+  if (rules) system.push({ type: 'text', text: rules, cache_control: { type: 'ephemeral' } });
   const res = await anthropic(env).beta.messages.parse({
     model: MODEL,
     max_tokens: 4000,
-    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    system,
     messages: [{ role: 'user', content: `Context (JSON):\n${JSON.stringify(context)}\n\nPaul's line:\n${text}` }],
     output_config: { effort: 'medium', format: zodOutputFormat(Plan) },
     fallbacks: 'default',
@@ -233,8 +238,11 @@ export async function handleDesk(request, env, rest, json, now = Date.now()) {
     if (typeof body.id !== 'string' || !ID.test(body.id) || !Number.isInteger(body.idx)) return json({ error: 'id and idx required' }, request, 400);
     const item = await env.HUB_KV.get(itemKey(body.id), 'json');
     if (!item) return json({ error: 'gone' }, request, 404);
+    const was = item.actions[body.idx] ? { ...item.actions[body.idx] } : null;
     const out = await act(env, item, body.idx, body.action, body.edit, now);
     if (out.error) return json({ error: out.error }, request, out.status);
+    const signal = deskSignal(was, out.item.actions[body.idx], body.action);
+    if (signal) await logFeedback(env, { app: 'desk', ...signal, note: item.text }, now);
     await saveItem(env, out.item);
     await logItem(env, out.item);
     return json({ item: out.item }, request);

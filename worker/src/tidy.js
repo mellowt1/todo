@@ -18,6 +18,7 @@ import { anthropic, bumpUsage, dayOf } from './intake.js';
 export const TIDY_MODEL = 'claude-haiku-5-5';
 import { local, addDays } from './morning.js';
 import { noDashes } from './mask.js';
+import { keptFor, lessonsText } from './lessons.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DUE_END = /\s*·\s*(\d{4}-\d{2}-\d{2})$/;
@@ -46,10 +47,11 @@ export async function tidyLine(env, text, now) {
   const l = local(now);
   // Haiku (Paul chose it for cost, 2026-10-17): a one-line tidy needs no more. Haiku has no
   // server-side refusal fallback; a refusal just leaves the task as typed.
+  const rules = lessonsText(await keptFor(env, 'tidy')); // Paul's kept rules, src/lessons.js
   const res = await anthropic(env).messages.parse({
     model: TIDY_MODEL,
     max_tokens: 2000,
-    system: SYSTEM,
+    system: rules ? SYSTEM + '\n' + rules : SYSTEM,
     messages: [{ role: 'user', content: `Today is ${WEEKDAY[l.weekday]} ${l.date}.\nThe line: ${text}` }],
     output_config: { effort: 'low', format: zodOutputFormat(Tidy) },
   });

@@ -82,6 +82,12 @@
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
+ * Lessons (src/lessons.js): Paul's corrections of Desk and Tidy go into D1 feedback; on Sundays
+ * Claude proposes short rules from them, Paul keeps or drops each on Morning's Week view, and the
+ * kept ones go into Desk's and Tidy's prompts.
+ *   POST /api/lessons/:code/feedback   <- { app: "tidy", kind: "undone" | "edited", before, after }
+ *   POST /api/morning/:code/lesson     <- { id, action: "keep" | "drop" | "undo" }  -> { lessons }
+ *
  * Status (src/status.js): every hour the cron reads what the hub holds and writes one line
  * (hub:status); once a day after 06:00 Claude adds a two-sentence summary. Morning shows it.
  *
@@ -124,6 +130,7 @@ import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
 import { handleTidy } from './tidy.js';
+import { handleLessons, handleLesson, weekLessons } from './lessons.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -316,7 +323,7 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning }, routes: { week: handleWeek } }),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
   hiscores: (request, env, rest) => handleHiscores(request, env, rest, json),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
@@ -327,6 +334,7 @@ const MODULES = {
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
   apply: (request, env, rest) => handleApply(request, env, rest, json),
   tidy: (request, env, rest) => handleTidy(request, env, rest, json),
+  lessons: (request, env, rest) => handleLessons(request, env, rest, json),
   admin: handleAdmin,
 };
 
@@ -349,7 +357,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

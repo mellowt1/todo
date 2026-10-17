@@ -210,8 +210,17 @@
       const it = items[id];
       if (!d || !d.changed || !d.text || !it || it.done || it.text !== typed) return;
       upsert(Object.assign({}, it, { text: d.text }));
-      toast('Tidied.', () => { const cur = items[id]; if (cur) upsert(Object.assign({}, cur, { text: typed })); }, id);
+      tidied[id] = d.text;
+      toast('Tidied.', () => { const cur = items[id]; if (cur) { upsert(Object.assign({}, cur, { text: typed })); teach('undone', d.text, typed); } delete tidied[id]; }, id);
     } catch (e) { /* stays as typed */ }
+  }
+
+  /* Lessons (worker/src/lessons.js): an Undo of a tidy, or an edit of a tidied task, tells the hub
+   * what Paul wanted instead. On Sundays Claude turns those into rules he keeps or drops on Morning. */
+  const tidied = {};
+  function teach(kind, before, after) {
+    if (!navigator.onLine || !before || !after || before === after) return;
+    fetch(API + '/api/lessons/' + code + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app: 'tidy', kind, before, after }) }).catch(() => {});
   }
 
   function markDone(id) {
@@ -1723,7 +1732,11 @@
     editFrom = null;
     // A changed text is tidied like a new task (Paul, 2026-10-17), once the sheet is closed.
     const edited = from && items[from.id];
-    if (edited && !edited.done && edited.text !== from.text) tidyLater(edited.id, edited.text);
+    if (edited && !edited.done && edited.text !== from.text) {
+      if (tidied[edited.id] === from.text) teach('edited', from.text, edited.text);
+      delete tidied[edited.id];
+      tidyLater(edited.id, edited.text);
+    }
     // Focus goes back to the row it opened from. A task that ended up in another section says
     // where it went, once, however many times the section was changed.
     closeSheet($('edit'), () => {

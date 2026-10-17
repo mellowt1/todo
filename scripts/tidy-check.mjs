@@ -17,6 +17,7 @@ for (const [name, viewport] of [['tidy-phone', { width: 390, height: 844 }], ['t
   page.on('pageerror', (e) => errors.push(e.message));
   const items = {};
   const asked = [];
+  const taught = [];
   await page.route('**/api/**', async (r) => {
     const h = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' };
     const q = r.request();
@@ -29,6 +30,7 @@ for (const [name, viewport] of [['tidy-phone', { width: 390, height: 844 }], ['t
       const text = /jan/i.test(typed) ? 'Email Jan about the meeting · 2026-10-22' : 'Call the gemeente about the parking permit · 2026-10-23';
       return r.fulfill({ json: { text, changed: true }, headers: h });
     }
+    if (p === `/api/lessons/${CODE}/feedback`) { taught.push(q.postDataJSON()); return r.fulfill({ json: { ok: true }, headers: h }); }
     if (p === `/api/todo/${CODE}/ops`) for (const o of q.postDataJSON().ops) items[o.item.id] = o.item;
     if (p.startsWith(`/api/todo/${CODE}`)) return r.fulfill({ json: { items: Object.values(items), rev: 1, updated: new Date().toISOString(), rejected: [] }, headers: h });
     if (p === `/api/intake/${CODE}/cards`) return r.fulfill({ json: { tasks: [] }, headers: h });
@@ -50,6 +52,8 @@ for (const [name, viewport] of [['tidy-phone', { width: 390, height: 844 }], ['t
   await page.click('#toast button');
   await page.waitForFunction(() => [...document.querySelectorAll('.row .tname')].some((e) => e.textContent === 'call gemeente abt parking permit frday'), null, { timeout: 3000 });
   check(true, name + ': Undo puts the typed text back');
+  await page.waitForTimeout(300);
+  check(taught.length === 1 && taught[0].kind === 'undone' && taught[0].before.startsWith('Call the gemeente') && taught[0].after === 'call gemeente abt parking permit frday', name + ': Undo tells the hub (lessons)');
 
   // Editing: opening and closing without a change asks nothing; a changed text is tidied on close.
   const messy = page.locator('.row', { hasText: 'call gemeente abt parking permit frday' });
@@ -64,6 +68,14 @@ for (const [name, viewport] of [['tidy-phone', { width: 390, height: 844 }], ['t
   await page.click('#editClose');
   await page.waitForFunction(() => [...document.querySelectorAll('.row .tname')].some((e) => e.textContent === 'Email Jan about the meeting'), null, { timeout: 5000 });
   check(asked[1] === 'emial jan abt teh meeting thursday', name + ': the edited text is tidied on close');
+  check(taught.length === 1, name + ': editing an untidied task tells the hub nothing');
+  // Editing a tidied task tells the hub what Paul changed.
+  await page.locator('.row', { hasText: 'Email Jan about the meeting' }).locator('.text').click();
+  await page.waitForSelector('#edit:not([hidden])');
+  await page.fill('#editText', 'Email Jan and Kim about the meeting');
+  await page.click('#editClose');
+  await page.waitForTimeout(600);
+  check(taught.length === 2 && taught[1].kind === 'edited' && taught[1].before === 'Email Jan about the meeting · 2026-10-22' && taught[1].after === 'Email Jan and Kim about the meeting', name + ': editing a tidied task tells the hub ' + JSON.stringify(taught[1]));
   check(errors.length === 0, name + ': no page errors ' + errors.join('; '));
   await ctx.close();
 }
