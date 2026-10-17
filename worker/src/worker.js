@@ -72,6 +72,13 @@
  *   POST /api/desk/:code        <- { text }   -> { item }
  *   POST /api/desk/:code/act    <- { id, idx, action: "approve" | "undo" | "copied" | "skip", edit? }  -> { item }
  *
+ * Apply (src/apply.js): an "Apply: ..." task is queued from To-do (the to-do's code) and prepared on
+ * Paul's PC (Bearer <APPLY_PC_TOKEN>): the PC reads the vacancy, this Worker writes the draft from his
+ * CV versions (KV apply:cvs), the PC builds the folder and reports it ready.
+ *   GET  /api/apply/:code/:taskId   -> { state, queuedAt?, folder?, draft? }
+ *   POST /api/apply/:code/:taskId   -> { state: "queued" }
+ *   GET  /api/apply/pc/queue        POST /api/apply/pc/:taskId/draft   POST /api/apply/pc/:taskId/ready
+ *
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
@@ -113,6 +120,7 @@ import { weekForMorning, handleWeek, weekCron } from './week.js';
 import { intakeCatchUp } from './intake.js';
 import { othersBlock, handleOthers, othersAssign } from './others.js';
 import { handleDesk } from './desk.js';
+import { handleApply } from './apply.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -314,6 +322,7 @@ const MODULES = {
   hub: (request, env, rest, url) => handleHub(request, env, rest, url, json),
   others: (request, env, rest) => handleOthers(request, env, rest, json),
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
+  apply: (request, env, rest) => handleApply(request, env, rest, json),
   admin: handleAdmin,
 };
 
@@ -326,6 +335,7 @@ export default {
     try {
       return await MODULES[parts[1]](request, env, parts.slice(2), url);
     } catch (e) {
+      console.error(parts[1], e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)); // wrangler tail shows it
       return json({ error: 'server' }, request, 500);
     }
   },

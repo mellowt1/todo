@@ -494,6 +494,37 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 .card-sheet button:focus-visible, .card-portal:focus-visible, .card-ask input:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 @media (min-width: 900px) { .card-sheet { width: 480px; max-height: 88vh; } }
 
+/* Applications: an Apply task's vacancy against the CV. The sheet reuses the letter card's parts. */
+.apply-open { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 56px; padding: 8px 14px; border-radius: 12px; background: var(--field); color: var(--text); font-size: var(--fs-body); text-align: left; }
+.apply-open[hidden] { display: none; }
+.apply-open small { display: block; font-size: var(--fs-meta); color: var(--secondary); }
+.apply-open:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.ap-wait, .ap-say { margin: 0; font-size: var(--fs-body); line-height: 1.4; color: var(--secondary); }
+.ap-text { min-height: 140px; padding: 12px 14px; border: 0; border-radius: 12px; background: var(--field); color: var(--text); font: inherit; font-size: 16px; line-height: 1.4; resize: vertical; }
+.ap-text:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 0; }
+.ap-fit { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); }
+.ap-fit b { font-size: 20px; font-weight: 650; color: var(--accent-text); }
+.ap-fit span { font-size: 15px; line-height: 1.4; }
+.ap-fit small { font-size: var(--fs-meta); color: var(--secondary); }
+.ap-fit.fit-fair { background: var(--amber-bg); }
+.ap-fit.fit-fair b { color: var(--amber-ink); }
+.ap-fit.fit-weak { background: var(--late-bg); }
+.ap-fit.fit-weak b { color: var(--danger); }
+.ap-gaps { margin: -6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.4; }
+.ap-letter { white-space: pre-wrap; font-size: 15px; }
+.ap-fit.fit-queued { background: var(--field); }
+.ap-fit.fit-queued b { color: var(--text); font-size: 18px; }
+.ap-folder { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--sep); }
+.ap-folder b { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.ap-folder small { font-size: var(--fs-meta); color: var(--secondary); }
+.ap-more { display: flex; flex-direction: column; gap: 10px; }
+.ap-more > summary { min-height: 44px; display: flex; align-items: center; font-size: var(--fs-body); font-weight: 600; color: var(--accent-text); cursor: pointer; list-style: none; }
+.ap-more > summary::-webkit-details-marker { display: none; }
+.ap-more > summary::after { content: '›'; margin-left: 8px; }
+.ap-more[open] > summary::after { content: '⌄'; margin-left: 8px; }
+.ap-more[open] > .hb-draft { margin-bottom: 10px; }
+#apBody button:focus-visible, #apBody a:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
 /* Increase Contrast (iOS and macOS): darker rings, secondary text and lines. The default look is unchanged. */
 @media (prefers-contrast: more) {
   :root { --ring: #6E6E73; --secondary: #545458; --sep: #C6C6C8; }

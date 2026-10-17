@@ -1737,6 +1737,7 @@
     editFrom = { id, section: it.section, pos: it.pos };
     editText.value = it.text.replace(INTAKE_MARK, ''); // the mark stays on the task, not in the box
     showFrom(it);
+    $('editApply').hidden = !isApply(it);
     $('editFor').value = it.person || '';
     $('editFor').placeholder = it.section === 'others' ? 'Who is it for?' : 'Me';
     $('peopleList').innerHTML = people().map((p) => '<option value="' + esc(p) + '"></option>').join('');
@@ -1796,7 +1797,7 @@
     if (it && t && isIntake(it) && !INTAKE_MARK.test(t)) t = cleanText(t + ' [intake]') || t;
     if (it && t && t !== it.text) upsert(Object.assign({}, it, { text: t }));
   }
-  function closeEdit() {
+  function closeEdit(after) {
     if (editId === null) return; // already closing
     saveEditText();
     if (document.activeElement === $('editFor')) saveFor();
@@ -1807,6 +1808,7 @@
     // Focus goes back to the row it opened from. A task that ended up in another section says
     // where it went, once, however many times the section was changed.
     closeSheet($('edit'), () => {
+      if (typeof after === 'function') { after(); return; }
       const it = from && items[from.id];
       if (!it || it.done || it.section === from.section) return;
       toast('Moved to ' + LABEL[it.section] + '.', () => {
@@ -2114,6 +2116,106 @@
       box.classList.remove('wait');
     }
   }
+  /* ---------- Applications: an "Apply: ..." task, prepared on Paul's PC ----------
+   * The edit sheet of an Apply task (from the defence digest, with its vacancy link) offers
+   * Prepare on the PC. That queues it (POST /api/apply/:code/:taskId); the PC builds a folder with
+   * the right CV, the letter in Word, the vacancy text and a checklist (PAUL AGENTS/applications,
+   * every morning at 07:30 or from the Desktop), then reports it. The sheet shows where it stands,
+   * and once ready the fit, the gaps and the letter. Nothing is sent to an employer. */
+  let apId = null;
+  let ap = null; // { loading } | { state: 'none' | 'queued' | 'ready', ... } | { error }
+  const isApply = (it) => !!it && !it.done && /^Apply:/i.test(it.text);
+  const FIT = (n) => (n >= 7 ? 'good' : n >= 5 ? 'fair' : 'weak');
+  const WHEN = 'every morning at 07:30, or now with Prepare applications on the PC’s Desktop';
+
+  function openApply(id) {
+    const it = items[id];
+    if (!isApply(it)) return;
+    apId = id;
+    ap = { loading: true };
+    renderApply();
+    openSheet($('apply'), 0, null);
+    $('apClose').focus({ preventScroll: true });
+    loadApply(id);
+  }
+  async function apFetch(id, post) {
+    const r = await fetch(API + '/api/apply/' + code + '/' + id, post ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' } : { cache: 'no-store' });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d || !d.state) throw new Error((d && d.error) || 'status ' + r.status);
+    return d;
+  }
+  async function loadApply(id) {
+    try {
+      const d = await apFetch(id);
+      if (apId === id) ap = d;
+    } catch (e) {
+      if (apId === id) ap = { error: navigator.onLine ? 'Couldn’t reach the hub. Try again.' : 'Needs a connection.' };
+    }
+    if (apId === id) renderApply();
+  }
+  async function queueApply(id) {
+    ap = { loading: true };
+    renderApply();
+    try {
+      const d = await apFetch(id, true);
+      if (apId === id) { ap = d; say('Queued for your PC'); }
+    } catch (e) {
+      if (apId === id) ap = { error: navigator.onLine ? 'Couldn’t queue it. Try again.' : 'Needs a connection.' };
+    }
+    if (apId === id) renderApply();
+  }
+  const clock = (iso) => { const d = new Date(iso); return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); };
+  function renderApply() {
+    const body = $('apBody');
+    const it = items[apId];
+    const task = it ? it.text.replace(/^Apply:\s*/i, '').replace(INTAKE_MARK, '') : '';
+    const head = '<p class="card-want">' + esc(task) + '</p>';
+    const link = it && it.link ? '<a class="card-portal" href="' + esc(it.link) + '" target="_blank" rel="noopener noreferrer"><span>Vacancy<small>' + esc(hostOf(it.link)) + '</small></span><span class="card-open">Open ›</span></a>' : '';
+    if (!ap || ap.loading) { body.innerHTML = head + '<p class="ap-wait">Loading…</p>'; return; }
+    if (ap.error) { body.innerHTML = head + '<p class="ap-say">' + esc(ap.error) + '</p><button class="card-done" data-act="reload">Try again</button>'; return; }
+    if (ap.state === 'none') {
+      body.innerHTML = head + '<p class="ap-say">Your PC builds a folder for this vacancy: the CV version that fits, the letter in Word in your own voice, the vacancy text and a checklist with the fit and the gaps.</p>' +
+        '<button class="card-done" data-act="queue">Prepare on the PC</button>' + link +
+        '<p class="card-note">It runs ' + WHEN + '. Nothing is sent.</p>';
+      return;
+    }
+    if (ap.state === 'queued') {
+      body.innerHTML = head + '<div class="ap-fit fit-queued"><b>Queued for your PC</b><span>Since ' + esc(clock(ap.queuedAt)) + '. The folder appears in Documents › Applications after the next run.</span><small>Runs ' + esc(WHEN) + '.</small></div>' + link;
+      return;
+    }
+    const d = ap.draft;
+    const folder = String(ap.folder || '').split(/[\\/]/).pop();
+    const gaps = d.gaps.length ? '<div class="meta">Gaps to cover</div><ul class="ap-gaps">' + d.gaps.map((g) => '<li>' + esc(g) + '</li>').join('') + '</ul>' : '';
+    body.innerHTML = head +
+      '<div class="ap-fit fit-' + FIT(d.fit) + '"><b>Fit ' + d.fit + '/10</b><span>' + esc(d.fitLine) + '</span><small>Uses your ' + esc(d.cvLabel) + ' CV' + (d.deadline ? ' · closes ' + esc(d.deadline) : '') + '</small></div>' +
+      '<div class="ap-folder"><span class="meta">Folder ready on your PC</span><b>' + esc(folder) + '</b><small>Documents › Paul - Job Search &amp; Career › Applications</small></div>' +
+      gaps +
+      '<details class="ap-more"><summary>Letter · ' + (d.lang === 'nl' ? 'Dutch' : 'English') + '</summary><p class="hb-draft ap-letter">' + esc(d.letter) + '</p>' +
+      '<div class="hb-btns"><button class="hb-copy" data-act="copy">Copy letter</button></div></details>' +
+      link +
+      '<p class="hb-note">Nothing is sent. Check the folder, then apply on the site yourself. <button class="hb-again" data-act="queue">Prepare again</button></p>';
+  }
+  const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return ''; } };
+  function closeApply() {
+    if (apId === null) return;
+    apId = null;
+    closeSheet($('apply'));
+  }
+  $('apBody').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || apId === null) return;
+    const act = b.dataset.act;
+    if (act === 'queue') queueApply(apId);
+    else if (act === 'reload') { ap = { loading: true }; renderApply(); loadApply(apId); }
+    else if (act === 'copy' && ap && ap.draft) {
+      const done = (ok) => { b.textContent = ok ? 'Copied' : 'Select it and copy'; say(ok ? 'Copied' : 'Could not copy'); setTimeout(() => { b.textContent = 'Copy letter'; }, 1400); };
+      (navigator.clipboard ? navigator.clipboard.writeText(ap.draft.letter) : Promise.reject()).then(() => done(true), () => done(false));
+    }
+  });
+  $('apClose').addEventListener('click', closeApply);
+  $('apply').querySelector('.scrim').addEventListener('click', closeApply);
+  $('editApply').addEventListener('click', () => { const id = editId; closeEdit(() => openApply(id)); });
+
   function closeHandback() {
     if (hbId === null) return;
     hbId = null;
@@ -2179,12 +2281,13 @@
       if (!$('edit').hidden) { closeEdit(); return; }
       if (!$('card').hidden) { closeCard(); return; }
       if (!$('handback').hidden) { closeHandback(); return; }
+      if (!$('apply').hidden) { closeApply(); return; }
       if (!$('capture').hidden) { closeCapture(); return; }
       closeReveal();
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('handback')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('handback')) || shown($('apply')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
       const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

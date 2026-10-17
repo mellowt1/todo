@@ -158,6 +158,7 @@
       <p id="editFromSummary"></p>
       <ul id="editFromQuotes"></ul>
     </div>
+    <button id="editApply" class="apply-open" hidden><span>Prepare on the PC<small>CV, letter in Word and a checklist, in a folder</small></span><span class="card-open">Open ›</span></button>
     <div class="grow"></div>
     <button id="editDelete" class="danger-btn">Delete task</button>
   </div>
@@ -197,6 +198,19 @@
       <button id="cardClose" class="text-btn">Close</button>
     </div>
     <div id="cardBody" class="card-body"></div>
+  </div>
+</div>
+
+<!-- An application: an "Apply: ..." task's vacancy against Paul's CV (app.js, Applications). Nothing is sent. -->
+<div id="apply" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet" role="dialog" aria-labelledby="apHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="apHead" class="meta">Application</span>
+      <button id="apClose" class="text-btn">Close</button>
+    </div>
+    <div id="apBody" class="card-body" aria-live="polite"></div>
   </div>
 </div>
 
