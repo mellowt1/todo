@@ -36,6 +36,12 @@ database_name = "hub"
 database_id = "949cfb9d-fe2e-4fe8-8a06-51e6336fcf56"
 migrations_dir = "migrations"
 
+# The Mirror (src/mirror.js) reads Paul's own mood faces from the Feeling circle relay. A Worker
+# cannot fetch another workers.dev Worker on the same account by URL, so it goes through a binding.
+[[services]]
+binding = "FEELING"
+service = "feeling-circle"
+
 # Reactions to typed events. 5 attempts (1 + 4 retries), then the dead letter queue.
 [[queues.producers]]
 binding = "HUB_QUEUE"

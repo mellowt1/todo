@@ -117,6 +117,7 @@ import { refreshStatus } from './status.js';
 import { adminRules, consume } from './hub.js';
 import { adminConfig, handleHub } from './dinner.js';
 import { weekForMorning, handleWeek, weekCron } from './week.js';
+import { mirrorCron } from './mirror.js';
 import { intakeCatchUp } from './intake.js';
 import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
@@ -344,7 +345,7 @@ export default {
    * once-only jobs on every run of either, so the push lands within 15 minutes of its time.
    * Without a cron string (a test) the minute decides; without either, everything runs. */
   async scheduled(event, env, ctx) {
-    const jobs = [weekCron(env), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), mirrorCron(env), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));

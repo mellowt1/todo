@@ -11,6 +11,8 @@
  *   paragraph  three sentences Claude writes once each Sunday from the sections above and Desk's
  *              log (src/desk.js): what got done, what slipped, one suggestion. Read only; null
  *              until the first cron run after 06:00 on Sunday has written it (KV week:paragraph:<monday>).
+ *   mirror     the Mirror's card (src/mirror.js): one finding from Paul's days, this week's
+ *              experiment and how last week's went; null until written on Sunday.
  *
  *   GET  /api/morning/:code             -> { ..., week }   on Sundays, or with ?week=1; else week is null
  *   POST /api/morning/:code/week        <- { id, action }  -> { ok, week, until? }
@@ -35,6 +37,7 @@ import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { anthropic, MODEL } from './intake.js';
 import { noDashes } from './mask.js';
+import { mirrorFor } from './mirror.js';
 
 const DAY = 24 * 3600 * 1000;
 export const QUIET_DAYS = 14;
@@ -162,7 +165,7 @@ export async function weekBlock(env, now = Date.now()) {
   const today = local(now).date;
   const monday = mondayOf(today);
   const nextMon = addDays(monday, 7);
-  const [doc, marks, vac, cal, para] = await Promise.all([
+  const [doc, marks, vac, cal, para, mirror] = await Promise.all([
     exportList(env),
     env.HUB_DB ? readMarks(env) : new Map(),
     env.HUB_DB
@@ -171,6 +174,7 @@ export async function weekBlock(env, now = Date.now()) {
       : [],
     env.HUB_KV.get(CAL_KEY, 'json'),
     env.HUB_KV.get(PARA_PREFIX + monday, 'json'),
+    mirrorFor(env, monday),
   ]);
   const items = Object.values(doc.items);
   const ids = new Map(await Promise.all(vac.map(async (r) => [r.id, await todoTaskId(r.id)])));
@@ -190,6 +194,7 @@ export async function weekBlock(env, now = Date.now()) {
       stale: !Number.isFinite(received) || now - received > 3600000,
     },
     paragraph: para && typeof para.text === 'string' ? para.text : null,
+    mirror,
   };
 }
 

@@ -62,6 +62,13 @@ export const CONFIG = {
     if (!m) return null;
     return m[1] + m[2] !== m[3] + m[4] ? v.trim() : null; // may cross midnight; never empty
   },
+  /* The Mirror (src/mirror.js): Paul in one Feeling circle, { "code": "<circle code>", "id": "<his device id>" }. */
+  mirror_feeling(v) {
+    let o = v;
+    if (typeof v === 'string') { try { o = JSON.parse(v); } catch (e) { return null; } }
+    if (!o || typeof o !== 'object' || !/^[a-z0-9]{6,12}$/.test(o.code) || !/^[a-z0-9]{1,32}$/i.test(o.id)) return null;
+    return JSON.stringify({ code: o.code, id: o.id });
+  },
   /* { "Sender name": "https://portal" }, as JSON text or an object. https only, at most 40. */
   letter_portals(v) {
     let o = v;
