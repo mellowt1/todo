@@ -221,6 +221,25 @@ test('cleanOp: every type, ids per type, and anything off contract is dropped', 
   assert.equal(dough({ tweaks: { butter: 5 } }), null);
   assert.equal(dough({ tweaks: { toString: 5 } }), null);
   assert.equal(dough({ night: null, tweaks: null }).item.night, null);
+  // toppings: each night's list, cleaned; none given is two empty lists
+  assert.deepEqual(dough({}).item.toppings, { pizza: [], flammkuchen: [] });
+  const tp = dough({ toppings: { pizza: [{ qty: 250.00001, unit: ' g ', item: ' Mozzarella ', aisle: 'dairy', junk: 1 }, { qty: null, unit: '', item: 'Basil', aisle: 'produce' }] } }).item.toppings;
+  assert.deepEqual(tp, { pizza: [{ qty: 250, unit: 'g', item: 'Mozzarella', aisle: 'dairy' }, { qty: null, unit: '', item: 'Basil', aisle: 'produce' }], flammkuchen: [] });
+  assert.equal(dough({ toppings: { calzone: [] } }), null);
+  assert.equal(dough({ toppings: { pizza: [{ item: 'Ham', aisle: 'deli' }] } }), null);
+  assert.equal(dough({ toppings: { pizza: [{ item: '', aisle: 'meat' }] } }), null);
+  assert.equal(dough({ toppings: { pizza: [{ qty: -1, item: 'Ham', aisle: 'meat' }] } }), null);
+  assert.equal(dough({ toppings: { pizza: Array.from({ length: LIMITS.toppings + 1 }, () => ({ item: 'Ham', aisle: 'meat' })) } }), null);
+  assert.equal(dough({ toppings: [] }), null);
+
+  // staples: a line's key, on or off, in every week
+  assert.equal(cleanOp(up('staple', { id: 'i:garlic', on: true }), NOW).item.on, true);
+  assert.equal(cleanOp(up('staple', { id: 'i:salt', on: false }), NOW).item.on, false);
+  assert.equal(cleanOp(up('staple', { id: 'i:a|b', on: true }), NOW), null);
+  assert.equal(cleanOp(up('staple', { id: ' i:garlic', on: true }), NOW), null);
+  assert.equal(cleanOp(up('staple', { id: 'i:garlic', on: 1 }), NOW), null);
+  assert.ok(!validId('staple', ''));
+  assert.ok(!validId('staple', 'k'.repeat(LIMITS.key + 1)));
 
   assert.ok(cleanOp(up('recipe', { id: 'rrrrrrrr', ...recipe() }), NOW));
   assert.equal(cleanOp(up('recipe', { id: 'RRRRRRRR', ...recipe() }), NOW), null);

@@ -2,7 +2,7 @@
  *
  * Pure functions only, so they can be tested in Node without a Worker runtime.
  *
- * Five record types, each merged on its own (newest updatedAt wins, deletes leave a
+ * Six record types, each merged on its own (newest updatedAt wins, deletes leave a
  * tombstone), so two phones editing different things never lose each other's work:
  *
  *   recipe  { id, title, servings, time, veg, ingredients: [{ qty, unit, item, aisle, group? }], steps: [text], notes }
@@ -11,13 +11,15 @@
  *           each had a plan) is still accepted, so a phone on the old page keeps working.
  *   extra   { id, week, text, qty, aisle }         a free item on the shopping list of one week
  *   tick    { id: "<YYYY-Www>|<item key>", on }     a ticked line on that week's list
- *   dough   { id: "dough", size, count, thickness, gf, night, tweaks }   one settings record
+ *   dough   { id: "dough", size, count, thickness, gf, night, tweaks, toppings }   one settings record;
+ *           toppings { pizza: [{ qty, unit, item, aisle }], flammkuchen: [...] } go on the list each such night
+ *   staple  { id: "<item key>", on }                in the house as a rule: off the list in every week
  *
  * Every record also carries updatedAt (ms since epoch) and its type. An op is
  *   { op: "upsert", type, item }   or   { op: "delete", type, item: { id, updatedAt } }
  */
 
-export const TYPES = ['recipe', 'day', 'extra', 'tick', 'dough'];
+export const TYPES = ['recipe', 'day', 'extra', 'tick', 'dough', 'staple'];
 // The shop's order. app/logic.js has the same list; keep the two identical.
 export const AISLES = ['produce', 'bread', 'dairy', 'meat', 'vegetarian', 'pasta', 'tins', 'baking', 'spices', 'frozen', 'drinks', 'household', 'other'];
 export const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -33,10 +35,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const LIMITS = {
   title: 200, time: 40, unit: 20, item: 120, group: 60, step: 1000, steps: 40, ingredients: 80,
   notes: 4000, dayText: 200, extraText: 200, qty: 40, key: 120, servings: 50,
-  recipeBytes: 60000, ops: 200, rows: 20000,
+  recipeBytes: 60000, ops: 200, rows: 20000, toppings: 30,
 };
 // Baker's percentages the dough may be tweaked to, in percent of the flour.
 export const TWEAKS = { water: [40, 100], yeast: [0, 5], salt: [0, 6], sugar: [0, 10], oil: [0, 15], gfWater: [40, 110] };
+// The nights that bring their own toppings to the shopping list. app/logic.js has the same.
+export const TOPPING_NIGHTS = ['pizza', 'flammkuchen'];
 export const TOMB_DAYS = 90;
 const DAY_MS = 24 * 3600 * 1000;
 const MIN_TIME = Date.UTC(2020, 0, 1);
@@ -269,8 +273,36 @@ function cleanDough(it) {
     if (typeof v !== 'number' || !Number.isFinite(v) || v < range[0] || v > range[1]) return bad('tweaks');
     tweaks[k] = Math.round(v * 100) / 100;
   }
-  return { value: { size: it.size, count: it.count, thickness: it.thickness, gf: it.gf, night, tweaks } };
+  const toppings = cleanToppings(it.toppings);
+  if (!toppings) return bad('toppings');
+  return { value: { size: it.size, count: it.count, thickness: it.thickness, gf: it.gf, night, tweaks, toppings } };
 }
+
+// { pizza: [{ qty, unit, item, aisle }], flammkuchen: [...] }, each list optional. null when bad.
+function cleanToppings(raw) {
+  const out = { pizza: [], flammkuchen: [] };
+  if (raw === undefined || raw === null) return out;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return null;
+  for (const [k, list] of Object.entries(raw)) {
+    if (!TOPPING_NIGHTS.includes(k) || !Array.isArray(list) || list.length > LIMITS.toppings) return null;
+    for (const g of list) {
+      if (!g || typeof g !== 'object' || Array.isArray(g)) return null;
+      let qty = g.qty === undefined ? null : g.qty;
+      if (qty !== null) {
+        if (typeof qty !== 'number' || !Number.isFinite(qty) || qty <= 0 || qty > 100000) return null;
+        qty = Math.round(qty * 1000) / 1000;
+      }
+      const unit = g.unit === undefined || g.unit === null ? '' : cleanLine(g.unit, LIMITS.unit, true);
+      const item = cleanLine(g.item, LIMITS.item);
+      if (unit === null || item === null || !AISLES.includes(g.aisle)) return null;
+      out[k].push({ qty, unit, item, aisle: g.aisle });
+    }
+  }
+  return out;
+}
+
+// A shopping line's key, as ticks and staples name it: "i:garlic".
+const validKey = (key) => key.length > 0 && key.length <= LIMITS.key && !/[|\u0000-\u001f\u007f]/.test(key) && key.trim() === key;
 
 export function validId(type, id) {
   if (typeof id !== 'string') return false;
@@ -286,9 +318,10 @@ export function validId(type, id) {
     case 'tick': {
       const i = id.indexOf('|');
       if (i < 0) return false;
-      const key = id.slice(i + 1);
-      return validWeek(id.slice(0, i)) && key.length > 0 && key.length <= LIMITS.key && !/[|\u0000-\u001f\u007f]/.test(key) && key.trim() === key;
+      return validWeek(id.slice(0, i)) && validKey(id.slice(i + 1));
     }
+    case 'staple':
+      return validKey(id);
     case 'dough':
       return id === 'dough';
     default:
@@ -316,7 +349,7 @@ export function cleanOp(raw, now = Date.now()) {
   if (type === 'recipe') out = cleanRecipe(it);
   else if (type === 'day') out = cleanDay(it);
   else if (type === 'extra') out = cleanExtra(it);
-  else if (type === 'tick') out = typeof it.on === 'boolean' ? { value: { on: it.on } } : bad('on');
+  else if (type === 'tick' || type === 'staple') out = typeof it.on === 'boolean' ? { value: { on: it.on } } : bad('on');
   else out = cleanDough(it);
   if (out.error) return null;
   return { op: 'upsert', type, item: { type, id: it.id, ...out.value, updatedAt } };
