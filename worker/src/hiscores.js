@@ -5,6 +5,14 @@
  * taken back, as in the game. Levels follow the real OSRS XP table; the XP per action is set so
  * an ordinary month gets a skill to about 30, and 99 stays years away.
  *
+ *   attack        a to-do done 14+ days after it went up   1500  at:<task id>
+ *   hitpoints     not stored: level 10 plus a third of the combat skills' XP, as in OSRS
+ *   mining        a letter or file Intake read (hourly)    900   mi:<record id>
+ *   smithing      a git commit, sent by the PC's chores    25    sm:<hash>
+ *   defence       an Intake task ticked off                1200  df:<task id>
+ *   herblore      the first night a recipe was cooked      1500  hb:<recipe id>
+ *   fishing       a vacancy the defence digest caught      1000  fi:<event id>
+ *   hunter        an Arsenal ticket drop alert (hourly)    800   hu:<event id>
  *   strength      a gym visit, once a day (POST .../gym)  1000  st:<date>
  *   woodcutting   a to-do ticked off                      100   wc:<task id>
  *   slayer        an "Apply:" to-do ticked off           4000   sl:<task id>
@@ -22,19 +30,27 @@
  *
  *   GET  /api/hiscores/:code      -> { skills: [{ id, name, xp, level, at, next, today }], total, totalXp, log, at }
  *   POST /api/hiscores/:code/gym  -> { ok, added, level, xp, say }   a gym visit today (Strength)
+ *   POST /api/hiscores/commits    Bearer BEAT_TOKEN, { commits: [{ hash, repo, at, subject }] } -> { ok, added, seen }
  *   Morning's block (hiscoresForMorning) is the same without the long log.
  */
 
 import { local, zoned, addDays, eventSpan, CAL_KEY } from './morning.js';
 import { kitchen } from './kitchen-store.js';
 import { readConfig } from './dinner.js';
-import { safeEqual, CODE } from './todo.js';
+import { safeEqual, bearer, CODE } from './todo.js';
 import { GERMAN_KEY } from './german.js';
 import { maskSecrets } from './mask.js';
 import { moodsOf, dinnersByDay, isoWeekDate } from './mirror.js';
 
 export const SKILLS = [ // the order of the OSRS skills tab, read across
+  { id: 'attack', name: 'Attack', from: 'Old to-dos finally done' },
+  { id: 'hitpoints', name: 'Hitpoints', from: 'A third of your combat XP' },
+  { id: 'mining', name: 'Mining', from: 'Letters Intake read' },
   { id: 'strength', name: 'Strength', from: 'Gym visits' },
+  { id: 'smithing', name: 'Smithing', from: 'Git commits' },
+  { id: 'defence', name: 'Defence', from: 'Letter tasks done' },
+  { id: 'herblore', name: 'Herblore', from: 'New recipes cooked' },
+  { id: 'fishing', name: 'Fishing', from: 'Vacancies caught' },
   { id: 'ranged', name: 'Ranged', from: 'Archery evenings' },
   { id: 'cooking', name: 'Cooking', from: 'Kitchen dinners' },
   { id: 'prayer', name: 'Prayer', from: 'Feeling faces' },
@@ -43,8 +59,16 @@ export const SKILLS = [ // the order of the OSRS skills tab, read across
   { id: 'woodcutting', name: 'Woodcutting', from: 'To-dos ticked' },
   { id: 'slayer', name: 'Slayer', from: 'Applications' },
   { id: 'construction', name: 'Construction', from: 'Sunday resets' },
+  { id: 'hunter', name: 'Hunter', from: 'Arsenal ticket drops' },
 ];
-export const XP = { gym: 1000, task: 100, apply: 4000, recipe: 800, pizza: 500, face: 450, archery: 3300, call: 600, callMinute: 50, desk: 450, week: 600 };
+/* Hitpoints is not in the ledger: as in OSRS it starts at level 10 and grows by a third of the
+ * XP earned in the combat skills. */
+export const COMBAT = ['attack', 'strength', 'defence', 'ranged', 'magic'];
+export const XP = {
+  gym: 1000, task: 100, apply: 4000, recipe: 800, pizza: 500, face: 450, archery: 3300, call: 600, callMinute: 50, desk: 450, week: 600,
+  oldTask: 1500, letterTask: 1200, letterRead: 900, vacancy: 1000, newRecipe: 1500, ticketDrop: 800, commit: 25,
+};
+export const OLD_DAYS = 14;
 export const ARCHERY = /archery|handboog|boogschiet|sebasti/i;
 export const SCAN_KEY = 'hiscores:scanAt';
 const SCAN_EVERY = 60 * 1000;
@@ -78,9 +102,50 @@ export function taskRows(items) {
   for (const i of Object.values(items || {})) {
     if (!i || !i.done || !Number.isFinite(i.doneAt) || typeof i.text !== 'string') continue;
     const apply = /^apply:/i.test(i.text);
+    const text = i.text.replace(/\s*\[intake\]$/, '').replace(/\s·\s\d{4}-\d{2}-\d{2}$/, '');
     out.push(apply
-      ? { id: 'sl:' + i.id, skill: 'slayer', xp: XP.apply, at: iso(i.doneAt), what: line(i.text.replace(/^apply:\s*/i, '').replace(/\s·\s\d{4}-\d{2}-\d{2}$/, '')) }
-      : { id: 'wc:' + i.id, skill: 'woodcutting', xp: XP.task, at: iso(i.doneAt), what: line(i.text.replace(/\s·\s\d{4}-\d{2}-\d{2}$/, '')) });
+      ? { id: 'sl:' + i.id, skill: 'slayer', xp: XP.apply, at: iso(i.doneAt), what: line(text.replace(/^apply:\s*/i, '')) }
+      : { id: 'wc:' + i.id, skill: 'woodcutting', xp: XP.task, at: iso(i.doneAt), what: line(text) });
+    // Attack: a task that waited two weeks or more (pos is when it last went to the top of a section)
+    if (Number.isFinite(i.pos) && i.doneAt - i.pos >= OLD_DAYS * 864e5) {
+      out.push({ id: 'at:' + i.id, skill: 'attack', xp: XP.oldTask, at: iso(i.doneAt), what: line(`${text}, after ${Math.floor((i.doneAt - i.pos) / 864e5)} days`) });
+    }
+    // Defence: a task Intake made from a letter
+    if (/\[intake\]$/.test(i.text)) out.push({ id: 'df:' + i.id, skill: 'defence', xp: XP.letterTask, at: iso(i.doneAt), what: line(text) });
+  }
+  return out;
+}
+
+/* Fishing: vacancies the defence digest caught (D1 events). */
+export function fishingRows(rows) {
+  return (rows || []).map((r) => {
+    let p = {};
+    try { p = JSON.parse(r.payload) || {}; } catch (e) { /* a title is enough */ }
+    const what = [p.title, p.organisation && `(${p.organisation})`].filter(Boolean).join(' ') || r.summary || 'A vacancy';
+    return { id: 'fi:' + r.id, skill: 'fishing', xp: XP.vacancy, at: r.at, what: line(what) };
+  });
+}
+
+/* Hunter: Arsenal ticket drops the Mac watcher reported (KV events, source arsenal-watch). */
+export function hunterRows(events) {
+  return (events || []).filter((e) => e && e.source === 'arsenal-watch' && e.id && /drop/i.test(e.text || ''))
+    .map((e) => ({ id: 'hu:' + e.id, skill: 'hunter', xp: XP.ticketDrop, at: e.at, what: line((e.text || '').replace(/^arsenal drop:\s*/i, '')) }));
+}
+
+/* Mining: every letter or file Intake read (KV intake:r:). */
+export function miningRows(records) {
+  return (records || []).filter((r) => r && r.id && r.at).map((r) => ({
+    id: 'mi:' + r.id, skill: 'mining', xp: XP.letterRead, at: r.at,
+    what: line((r.record && (r.record.sender || r.record.want)) || (r.names && r.names[0]) || 'A letter', 60),
+  }));
+}
+
+/* Smithing: commits the PC's daily chores send (POST /api/hiscores/commits). */
+export function smithingRows(commits) {
+  const out = [];
+  for (const c of Array.isArray(commits) ? commits.slice(0, 2000) : []) {
+    if (!c || !/^[0-9a-f]{7,40}$/.test(c.hash || '') || !Number.isFinite(Date.parse(c.at))) continue;
+    out.push({ id: 'sm:' + c.hash.slice(0, 16), skill: 'smithing', xp: XP.commit, at: new Date(Date.parse(c.at)).toISOString(), what: line(`${String(c.repo || '').slice(0, 30)}: ${c.subject || ''}`, 90) });
   }
   return out;
 }
@@ -96,10 +161,14 @@ export function cookingRows(data, today) {
     const m = /^(\d{4}-W\d{2}):([a-z]{3}):paul:dinner$/.exec(r.id || '');
     const date = m && isoWeekDate(m[1], m[2]);
     if (!date || date >= today || days[date] !== r.kind) continue; // "out" replaced it
-    if (r.kind === 'recipe') out.push({ id: 'ck:' + date, skill: 'cooking', xp: XP.recipe, at: iso(zoned(date, '20:00')), what: line(titles.get(r.recipeId) || 'A recipe') });
+    if (r.kind === 'recipe') out.push({ id: 'ck:' + date, skill: 'cooking', xp: XP.recipe, at: iso(zoned(date, '20:00')), what: line(titles.get(r.recipeId) || 'A recipe'), recipeId: r.recipeId });
     else if (r.kind === 'pizza') out.push({ id: 'ck:' + date, skill: 'cooking', xp: XP.pizza, at: iso(zoned(date, '20:00')), what: line(r.text || 'Pizza night') });
   }
-  return out;
+  // Herblore: the first night each recipe was cooked
+  const first = new Map();
+  for (const c of out.filter((x) => x.recipeId).sort((a, b) => (a.at < b.at ? -1 : 1))) if (!first.has(c.recipeId)) first.set(c.recipeId, c);
+  for (const [rid, c] of first) out.push({ id: 'hb:' + rid, skill: 'herblore', xp: XP.newRecipe, at: c.at, what: c.what });
+  return out.map(({ recipeId, ...r }) => r);
 }
 
 export function prayerRows(moods, today, now) {
@@ -172,7 +241,7 @@ export async function grantWeek(env, taskId, action, text, now = Date.now()) {
 }
 
 /* Read every source; one failing source never stops the others. */
-export async function scan(env, now = Date.now()) {
+export async function scan(env, now = Date.now(), { slow = false } = {}) {
   const today = local(now).date;
   const jobs = {
     tasks: async () => {
@@ -208,7 +277,20 @@ export async function scan(env, now = Date.now()) {
       const { results } = await env.HUB_DB.prepare('SELECT id, at, text, outcome, updated_at FROM desk_log').all();
       return craftingRows(results || []);
     },
+    fishing: async () => {
+      const { results } = await env.HUB_DB.prepare("SELECT id, summary, payload, at FROM events WHERE source = 'defence-digest' AND type = 'vacancy.found'").all();
+      return fishingRows(results || []);
+    },
   };
+  // KV listings are counted per day on the free plan, so these two run only in the hourly cron.
+  if (slow) {
+    const readAll = async (prefix) => {
+      const keys = (await env.HUB_KV.list({ prefix, limit: 1000 })).keys.map((k) => k.name);
+      return (await Promise.all(keys.map((k) => env.HUB_KV.get(k, 'json')))).filter(Boolean);
+    };
+    jobs.hunter = async () => hunterRows(await readAll('event:'));
+    jobs.mining = async () => miningRows(await readAll('intake:r:'));
+  }
   const names = Object.keys(jobs);
   const got = await Promise.allSettled(names.map((n) => jobs[n]()));
   const rows = [], failed = [];
@@ -224,10 +306,12 @@ export async function scan(env, now = Date.now()) {
 
 /* Pure: the skills tab from per-skill totals and today's gains. */
 export function board(totals, todays) {
+  const third = (m) => Math.floor(COMBAT.reduce((n, id) => n + (m[id] || 0), 0) / 3);
   const skills = SKILLS.map((s) => {
-    const xp = totals[s.id] || 0;
+    const hp = s.id === 'hitpoints';
+    const xp = hp ? LEVEL_XP[10] + third(totals) : totals[s.id] || 0;
     const level = levelOf(xp);
-    return { id: s.id, name: s.name, from: s.from, xp, level, at: LEVEL_XP[level], next: level < 99 ? LEVEL_XP[level + 1] : null, today: todays[s.id] || 0 };
+    return { id: s.id, name: s.name, from: s.from, xp, level, at: LEVEL_XP[level], next: level < 99 ? LEVEL_XP[level + 1] : null, today: hp ? third(todays) : todays[s.id] || 0 };
   });
   return { skills, total: skills.reduce((n, s) => n + s.level, 0), totalXp: skills.reduce((n, s) => n + s.xp, 0) };
 }
@@ -265,6 +349,7 @@ export async function logGym(env, now = Date.now()) {
 }
 
 export async function handleHiscores(request, env, rest, json, now = Date.now()) {
+  if (rest.length === 1 && rest[0] === 'commits') return env.HUB_DB ? postCommits(request, env, json) : json({ error: 'not configured' }, request, 503);
   if (!rest.length || rest.length > 2 || !CODE.test(rest[0])) return json({ error: 'bad code' }, request, 400);
   if (!env.TODO_CODE || !safeEqual(rest[0], env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
   if (!env.HUB_DB) return json({ error: 'not configured' }, request, 503);
@@ -278,7 +363,23 @@ export async function handleHiscores(request, env, rest, json, now = Date.now())
   return json(await readBoard(env, now), request);
 }
 
-export async function hiscoresCron(env, now = Date.now()) {
+export async function hiscoresCron(env, now = Date.now(), slow = false) {
   if (!env.HUB_DB || !env.TODO_CODE) return { skip: 'not configured' };
-  return scan(env, now);
+  return scan(env, now, { slow });
+}
+
+/* POST /api/hiscores/commits  Authorization: Bearer <BEAT_TOKEN>  <- { commits: [{ hash, repo, at, subject }] }
+ * The PC's daily chores (morning-projects/chores.mjs --commits) send the last days' commits. */
+export async function postCommits(request, env, json) {
+  if (!env.BEAT_TOKEN || !safeEqual(bearer(request), env.BEAT_TOKEN)) return json({ error: 'unauthorized' }, request, 401);
+  if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
+  const text = await request.text();
+  if (text.length > 512 * 1024) return json({ error: 'too large' }, request, 413);
+  let body;
+  try { body = JSON.parse(text); } catch (e) { return json({ error: 'bad json' }, request, 400); }
+  const rows = smithingRows(body && body.commits);
+  const { results } = await env.HUB_DB.prepare("SELECT id FROM xp_log WHERE skill = 'smithing'").all();
+  const have = new Set((results || []).map((r) => r.id));
+  const added = await grant(env, rows.filter((r) => !have.has(r.id)));
+  return json({ ok: true, added, seen: rows.length }, request);
 }

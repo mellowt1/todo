@@ -347,9 +347,9 @@ export default {
    * once-only jobs on every run of either, so the push lands within 15 minutes of its time.
    * Without a cron string (a test) the minute decides; without either, everything runs. */
   async scheduled(event, env, ctx) {
-    const jobs = [weekCron(env), mirrorCron(env).then(() => hiscoresCron(env)), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
+    const jobs = [weekCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env)]; // the last two run once, then skip
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

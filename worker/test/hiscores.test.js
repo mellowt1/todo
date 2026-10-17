@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  LEVEL_XP, levelOf, taskRows, cookingRows, prayerRows, rangedRows, magicRows, craftingRows,
+  LEVEL_XP, levelOf, taskRows, cookingRows, prayerRows, rangedRows, magicRows, craftingRows, fishingRows, hunterRows, miningRows, smithingRows,
   board, scan, grantWeek, readBoard, handleHiscores, hiscoresForMorning, XP, SCAN_KEY,
 } from '../src/hiscores.js';
 import { actOnWeek } from '../src/week.js';
@@ -94,7 +94,7 @@ test('cooking: only days that are over, none on a night out, pizza pays less', (
   const e = env();
   return e.KITCHEN_STORE.get().fetch().then((r) => r.json()).then((data) => {
     const rows = cookingRows(data, '2026-10-17');
-    assert.deepEqual(rows.map((r) => [r.id, r.xp, r.what]), [
+    assert.deepEqual(rows.filter((r) => r.skill === 'cooking').map((r) => [r.id, r.xp, r.what]), [
       ['ck:2026-10-12', 800, 'Seco De Pollo'],
       ['ck:2026-10-13', 500, 'Pizza night'],
     ]); // Wed was out, Saturday is today
@@ -122,9 +122,13 @@ test('the board: levels, next level, today, total', () => {
   const wc = b.skills.find((s) => s.id === 'woodcutting');
   assert.deepEqual([wc.level, wc.at, wc.next, wc.today], [30, 13363, 14833, 200]);
   assert.equal(b.skills.find((s) => s.id === 'cooking').level, 1);
-  assert.equal(b.skills.length, 9);
-  assert.equal(b.total, 30 + 8);
-  assert.deepEqual(b.skills.map((s) => s.id), ['strength', 'ranged', 'cooking', 'prayer', 'crafting', 'magic', 'woodcutting', 'slayer', 'construction']);
+  assert.equal(b.skills.length, 17);
+  assert.equal(b.total, 30 + 10 + 15); // Hitpoints starts at 10
+  assert.deepEqual(b.skills.map((s) => s.id), ['attack', 'hitpoints', 'mining', 'strength', 'smithing', 'defence', 'herblore', 'fishing', 'ranged', 'cooking', 'prayer', 'crafting', 'magic', 'woodcutting', 'slayer', 'construction', 'hunter']);
+  // Hitpoints: 1154 plus a third of the combat XP, today too
+  const c = board({ strength: 3000, ranged: 3000, magic: 0, woodcutting: 9000 }, { strength: 300 });
+  const hp = c.skills.find((s) => s.id === 'hitpoints');
+  assert.deepEqual([hp.xp, hp.level, hp.today], [1154 + 2000, levelOf(3154), 100]);
 });
 
 test('a scan back-fills every source once; scanning again adds nothing', async () => {
@@ -137,8 +141,8 @@ test('a scan back-fills every source once; scanning again adds nothing', async (
   const r = await scan(e, SAT);
   assert.deepEqual(r.failed, []);
   const ids = e.HUB_DB.db.prepare('SELECT id FROM xp_log ORDER BY id').all().map((x) => x.id);
-  assert.deepEqual(ids, ['ck:2026-10-12', 'ck:2026-10-13', 'cr:desk1:0', 'mg:call1', 'pr:2026-10-10', 'pr:2026-10-16', 'pr:2026-10-17', 'rg:2026-10-12', 'sl:task00000002', 'wc:task00000001']);
-  assert.equal(r.added, 10);
+  assert.deepEqual(ids, ['ck:2026-10-12', 'ck:2026-10-13', 'cr:desk1:0', 'hb:rec1', 'mg:call1', 'pr:2026-10-10', 'pr:2026-10-16', 'pr:2026-10-17', 'rg:2026-10-12', 'sl:task00000002', 'wc:task00000001']);
+  assert.equal(r.added, 11);
   assert.equal((await scan(e, SAT + 60e3)).added, 0);
 
   const b = await readBoard(e, SAT);
@@ -168,7 +172,7 @@ test('the route: code checked, scans first, then the board; a read within a minu
   assert.equal((await handleHiscores(req, e, ['bad'], json, SAT)).status, 400);
   const res = await handleHiscores(req, e, [CODE], json, SAT);
   const body = await res.json();
-  assert.equal(body.skills.length, 9);
+  assert.equal(body.skills.length, 17);
   assert.ok(body.total >= 8);
   assert.equal(await e.HUB_KV.get(SCAN_KEY), new Date(SAT).toISOString());
   await hiscoresForMorning(e, SAT + 30e3);
@@ -189,7 +193,7 @@ test('Strength: a gym visit pays once a day, by POST only', async () => {
   assert.equal((await post(CODE + '/nope')).status, 404);
   assert.equal((await post('wrongcode1234567/gym')).status, 404);
   const b = await readBoard(e, SAT);
-  assert.equal(b.skills[0].today, 1000);
+  assert.equal(b.skills.find((x) => x.id === 'strength').today, 1000);
   assert.equal(b.log[0].what, 'Gym visit');
 });
 
@@ -203,4 +207,63 @@ test('Construction: the Sunday reset buttons pay once per task per kind per week
   const rows = e.HUB_DB.db.prepare("SELECT id, xp, what FROM xp_log WHERE skill = 'construction'").all();
   assert.deepEqual(rows.map((r) => [r.id, r.xp, r.what]), [['cn:task00000003:later:2026-10-12', 600, 'New date: Fix the hallway light']]);
   assert.equal(await grantWeek(e, 'task00000009', 'undo', 'x', SUN), 0);
+});
+
+test('Attack and Defence from to-dos; Herblore once per recipe', () => {
+  const DAY = 864e5;
+  const rows = taskRows({
+    a: { id: 'old1', text: 'Sort the tax papers', done: true, doneAt: SAT, pos: SAT - 20 * DAY },
+    b: { id: 'new1', text: 'Buy milk', done: true, doneAt: SAT, pos: SAT - DAY },
+    c: { id: 'let1', text: 'Pay the water bill · 2026-10-20 [intake]', done: true, doneAt: SAT, pos: SAT - DAY },
+  });
+  assert.deepEqual(rows.map((r) => [r.id, r.what]), [
+    ['wc:old1', 'Sort the tax papers'], ['at:old1', 'Sort the tax papers, after 20 days'],
+    ['wc:new1', 'Buy milk'],
+    ['wc:let1', 'Pay the water bill'], ['df:let1', 'Pay the water bill'],
+  ]);
+  const cook = cookingRows({ items: [
+    { type: 'recipe', id: 'r1', title: 'Stew' },
+    { type: 'day', id: '2026-W41:mon:paul:dinner', kind: 'recipe', recipeId: 'r1' },
+    { type: 'day', id: '2026-W42:mon:paul:dinner', kind: 'recipe', recipeId: 'r1' },
+  ], away: [] }, '2026-10-17');
+  assert.deepEqual(cook.filter((r) => r.skill === 'herblore').map((r) => [r.id, r.at.slice(0, 10)]), [['hb:r1', '2026-10-05']]);
+  assert.ok(cook.every((r) => !('recipeId' in r)));
+});
+
+test('Fishing, Hunter, Mining and Smithing rows', () => {
+  assert.deepEqual(fishingRows([{ id: 'v1', summary: 's', payload: '{"title":"Analyst","organisation":"A ministry"}', at: '2026-10-15T08:00:00Z' }]).map((r) => [r.id, r.what, r.xp]), [['fi:v1', 'Analyst (A ministry)', 1000]]);
+  assert.deepEqual(hunterRows([
+    { id: 'e1', source: 'arsenal-watch', text: 'Arsenal drop: Spurs tickets on sale', at: '2026-10-10T09:00:00Z' },
+    { id: 'e2', source: 'feeling', text: 'Nick checked in', at: '2026-10-10T09:00:00Z' },
+    { id: 'e3', source: 'arsenal-watch', text: 'Watcher restarted', at: '2026-10-10T09:00:00Z' },
+  ]).map((r) => [r.id, r.what]), [['hu:e1', 'Spurs tickets on sale']]);
+  assert.deepEqual(miningRows([{ id: 'i1', at: '2026-10-12T10:00:00Z', record: { sender: 'Gemeente Den Haag' } }, { id: 'i2', at: '2026-10-13T10:00:00Z', names: ['scan.pdf'] }, { at: 'x' }]).map((r) => [r.id, r.what]), [['mi:i1', 'Gemeente Den Haag'], ['mi:i2', 'scan.pdf']]);
+  assert.deepEqual(smithingRows([{ hash: 'abcdef1234567890ff', repo: 'todo', at: '2026-10-17T20:00:00+02:00', subject: 'Hiscores' }, { hash: 'nothex', at: '2026-10-17' }]).map((r) => [r.id, r.what, r.at]), [['sm:abcdef1234567890', 'todo: Hiscores', '2026-10-17T18:00:00.000Z']]);
+});
+
+test('the hourly scan adds Hunter and Mining from KV; the quick one does not list KV', async () => {
+  const e = env();
+  await e.HUB_KV.put('event:00000000000001:e1', JSON.stringify({ id: 'e1', source: 'arsenal-watch', text: 'Arsenal drop: Cup tickets', at: '2026-10-10T09:00:00Z' }));
+  await e.HUB_KV.put('intake:r:00000000000001:i1', JSON.stringify({ id: 'i1', at: '2026-10-12T10:00:00Z', record: { sender: 'DUO' } }));
+  let listed = 0;
+  const list = e.HUB_KV.list;
+  e.HUB_KV.list = async ({ prefix }) => { listed++; return { keys: [...e.HUB_KV.m.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })) }; };
+  await scan(e, SAT);
+  assert.equal(listed, 0);
+  await scan(e, SAT, { slow: true });
+  assert.equal(listed, 2);
+  const ids = e.HUB_DB.db.prepare("SELECT id FROM xp_log WHERE skill IN ('hunter', 'mining') ORDER BY id").all().map((x) => x.id);
+  assert.deepEqual(ids, ['hu:e1', 'mi:i1']);
+  e.HUB_KV.list = list;
+});
+
+test('commits: the beat token, then each commit once', async () => {
+  const e = { ...env(), BEAT_TOKEN: 'beat-secret' };
+  const send = (token, body) => handleHiscores(new Request('https://x/api/hiscores/commits', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: JSON.stringify(body) }), e, ['commits'], json, SAT);
+  const commits = [{ hash: 'a'.repeat(40), repo: 'todo', at: '2026-10-17T10:00:00Z', subject: 'One' }, { hash: 'b'.repeat(40), repo: 'morning', at: '2026-10-17T11:00:00Z', subject: 'Two' }];
+  assert.equal((await send('wrong', { commits })).status, 401);
+  assert.deepEqual(await (await send('beat-secret', { commits })).json(), { ok: true, added: 2, seen: 2 });
+  assert.deepEqual(await (await send('beat-secret', { commits })).json(), { ok: true, added: 0, seen: 2 });
+  const b = await readBoard(e, SAT);
+  assert.equal(b.skills.find((s) => s.id === 'smithing').xp, 50);
 });
