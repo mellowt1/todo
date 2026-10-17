@@ -77,8 +77,14 @@ test('GET /api/event and the Morning block: newest first, only the last days, pe
   assert.equal(b.events.length, 3);
   assert.deepEqual(b.sources, { 'plan-regreso': new Date(NOW - 60000).toISOString(), feeling: new Date(NOW - 3600000).toISOString(), runway: new Date(NOW - 2 * DAY).toISOString() });
   assert.equal(await eventsBlock(env(), NOW), null, 'hidden until the first event');
-  const r = await get(e, '?days=10');
+  // The route reads the real clock, so its events are placed relative to it.
+  const live = env();
+  const at = (ms, text) => live.HUB_KV.m.set('event:' + String(ms).padStart(14, '0') + ':pcxxxx', JSON.stringify({ id: 'id' + ms, source: 'pc', kind: 'note', who: '', text, at: new Date(ms).toISOString() }));
+  at(Date.now() - 12 * DAY, 'too old');
+  at(Date.now() - 5 * DAY, 'in the window');
+  at(Date.now() - 60000, 'just now');
+  const r = await get(live, '?days=10');
   assert.equal(r.status, 200);
-  assert.equal((await r.json()).events.length, 4);
+  assert.deepEqual((await r.json()).events.map((x) => x.text), ['just now', 'in the window']);
   assert.equal((await worker.fetch(new Request('https://hub.example/api/event/x', { headers: { Authorization: 'Bearer ' + TOKEN } }), e)).status, 404);
 });
