@@ -210,8 +210,8 @@ export function cleanInput(body) {
   return { files, text };
 }
 
-async function bumpUsage(env, month, u) {
-  const key = 'intake:usage:' + month;
+export async function bumpUsage(env, month, u, prefix = 'intake') {
+  const key = prefix + ':usage:' + month;
   const cur = (await env.HUB_KV.get(key, 'json')) || { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   cur.calls += 1;
   cur.input += u.input; cur.output += u.output; cur.cacheRead += u.cacheRead; cur.cacheWrite += u.cacheWrite;

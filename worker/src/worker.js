@@ -66,6 +66,12 @@
  *   POST /api/others/:code/draft     <- { id, lang: "nl" | "en" | "es" }  -> { text }  a hand-back draft; never sent
  *   Morning gets `others`: { waiting, inSlot, next, groups } (groups only during a slot, hub config others_slots).
  *
+ * Desk (src/desk.js; the to-do's code): Paul types one line on Morning, Claude prepares up to three
+ * tasks or drafts and a short answer; nothing reaches the list until he approves, drafts are never sent.
+ *   GET  /api/desk/:code        -> { items }  the last 10 lines
+ *   POST /api/desk/:code        <- { text }   -> { item }
+ *   POST /api/desk/:code/act    <- { id, idx, action: "approve" | "undo" | "copied" | "skip", edit? }  -> { item }
+ *
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
@@ -106,6 +112,7 @@ import { adminConfig, handleHub } from './dinner.js';
 import { weekForMorning, handleWeek, weekCron } from './week.js';
 import { intakeCatchUp } from './intake.js';
 import { othersBlock, handleOthers, othersAssign } from './others.js';
+import { handleDesk } from './desk.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -306,6 +313,7 @@ const MODULES = {
   event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
   hub: (request, env, rest, url) => handleHub(request, env, rest, url, json),
   others: (request, env, rest) => handleOthers(request, env, rest, json),
+  desk: (request, env, rest) => handleDesk(request, env, rest, json),
   admin: handleAdmin,
 };
 
