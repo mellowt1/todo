@@ -1675,7 +1675,7 @@
     const row = list.querySelector('.row[data-id="' + id + '"]');
     if (!it || leaving.has(id) || (row && gone(row))) return; // a task about to leave does not open
     editId = id;
-    editFrom = { id, section: it.section, pos: it.pos };
+    editFrom = { id, section: it.section, pos: it.pos, text: it.text };
     editText.value = it.text.replace(INTAKE_MARK, ''); // the mark stays on the task, not in the box
     showFrom(it);
     $('editApply').hidden = !isApply(it);
@@ -1721,6 +1721,9 @@
     editId = null;
     const from = editFrom;
     editFrom = null;
+    // A changed text is tidied like a new task (Paul, 2026-10-17), once the sheet is closed.
+    const edited = from && items[from.id];
+    if (edited && !edited.done && edited.text !== from.text) tidyLater(edited.id, edited.text);
     // Focus goes back to the row it opened from. A task that ended up in another section says
     // where it went, once, however many times the section was changed.
     closeSheet($('edit'), () => {
