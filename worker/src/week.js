@@ -10,6 +10,9 @@
  *   next       Day's events from next Monday to next Sunday, titles and times only
  *   others     Others tasks (done for other people): what was done or handed back this week, by
  *              person, and what still waits, by person. They are left out of done and quiet.
+ *   paragraph  three sentences Claude writes once each Sunday from the sections above and Desk's
+ *              log (src/desk.js): what got done, what slipped, one suggestion. Read only; null
+ *              until the first cron run after 06:00 on Sunday has written it (KV week:paragraph:<monday>).
  *
  *   GET  /api/morning/:code             -> { ..., week }   on Sundays, or with ?week=1; else week is null
  *   POST /api/morning/:code/week        <- { id, action }  -> { ok, week, until? }
@@ -30,6 +33,10 @@ import { ID, SECTIONS, cleanOp, cleanLink } from './todo.js';
 import { todoTaskId, vacancyTask } from './hub.js';
 import { readConfig } from './dinner.js';
 import { maskSecrets } from './mask.js';
+import { z } from 'zod';
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { anthropic, MODEL } from './intake.js';
+import { noDashes } from './others.js';
 
 const DAY = 24 * 3600 * 1000;
 export const QUIET_DAYS = 14;
@@ -176,7 +183,7 @@ export async function weekBlock(env, now = Date.now()) {
   const today = local(now).date;
   const monday = mondayOf(today);
   const nextMon = addDays(monday, 7);
-  const [doc, marks, vac, cal] = await Promise.all([
+  const [doc, marks, vac, cal, para] = await Promise.all([
     exportList(env),
     env.HUB_DB ? readMarks(env) : new Map(),
     env.HUB_DB
@@ -184,6 +191,7 @@ export async function weekBlock(env, now = Date.now()) {
         .bind(new Date(zoned(monday)).toISOString()).all().then((r) => r.results || [])
       : [],
     env.HUB_KV.get(CAL_KEY, 'json'),
+    env.HUB_KV.get(PARA_PREFIX + monday, 'json'),
   ]);
   const items = Object.values(doc.items);
   const ids = new Map(await Promise.all(vac.map(async (r) => [r.id, await todoTaskId(r.id)])));
@@ -203,6 +211,7 @@ export async function weekBlock(env, now = Date.now()) {
       sent: cal ? cal.sent : null,
       stale: !Number.isFinite(received) || now - received > 3600000,
     },
+    paragraph: para && typeof para.text === 'string' ? para.text : null,
   };
 }
 
@@ -341,7 +350,87 @@ export async function sundayPush(env, now = Date.now(), fetcher = fetch) {
   return { sent: m };
 }
 
+/* ---------- The paragraph: Claude, once each Sunday, from the week's facts ---------- */
+
+export const PARA_PREFIX = 'week:paragraph:';
+export const PARA_HOUR = 6;
+export const MAX_PARA = 480;
+
+const PARA_SYSTEM = [
+  "You write the short paragraph at the top of Paul's Sunday review, from a JSON of his own week: tasks done, tasks gone quiet, vacancies, things he did for other people, next week's calendar, and what he typed into Desk (a box where he asks for tasks and drafts; skipped lines show what he did not want).",
+  'Exactly three sentences, under 450 characters, plain English, warm and direct, written to Paul as "you". No greeting, no markdown, no lists, no praise inflation.',
+  '1. What got done, naming one or two real tasks. 2. What slipped or has gone quiet, naming one; if nothing slipped, say what took most of the week. 3. One concrete suggestion for next week, tied to a task or a day on next week\'s calendar.',
+  'Use only names, tasks and numbers in the facts; never invent. Never use dashes as punctuation; use commas or full stops.',
+].join('\n');
+const Paragraph = z.object({ paragraph: z.string().max(MAX_PARA) });
+
+/* Pure: what Claude sees. Short texts only, masked already by the sections. */
+export function paragraphFacts(block, desk) {
+  const done = [];
+  for (const g of block.done.groups || []) for (const x of g.items) done.push(x.text);
+  return {
+    week: block.week,
+    done: { count: block.done.count, tasks: done.slice(0, 30) },
+    goneQuiet: block.quiet.slice(0, 12).map((q) => ({ task: q.text, days: q.days })),
+    vacancies: block.vacancies.map((v) => ({ task: v.text, state: v.state })),
+    forOthers: block.others,
+    nextWeek: block.next.events.slice(0, 25).map((e) => ({ day: e.day, title: e.title, time: e.time || null })),
+    desk,
+  };
+}
+
+async function deskWeek(env, from) {
+  if (!env.HUB_DB) return null;
+  try {
+    const { results } = await env.HUB_DB.prepare('SELECT text, kinds, outcome FROM desk_log WHERE at >= ? ORDER BY at').bind(new Date(from).toISOString()).all();
+    const rows = results || [];
+    const count = {};
+    for (const r of rows) for (const o of JSON.parse(r.outcome || '[]')) count[o] = (count[o] || 0) + 1;
+    return { lines: rows.length, outcomes: count, typed: rows.slice(-15).map((r) => maskSecrets(r.text).slice(0, 160)) };
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function writeParagraph(env, facts) {
+  if (!env.ANTHROPIC_API_KEY) return null;
+  const res = await anthropic(env).beta.messages.parse({
+    model: MODEL,
+    max_tokens: 2000,
+    system: PARA_SYSTEM,
+    messages: [{ role: 'user', content: 'Paul\'s week (JSON):\n' + JSON.stringify(facts) }],
+    output_config: { effort: 'medium', format: zodOutputFormat(Paragraph) },
+    fallbacks: 'default',
+    betas: ['server-side-fallback-2026-07-01'],
+  });
+  if (res.stop_reason === 'refusal' || !res.parsed_output) return null;
+  return String(res.parsed_output.paragraph || '') || null;
+}
+
+let paraWriter = writeParagraph;
+export function _setParagrapher(fn) { paraWriter = fn || writeParagraph; }
+
+/* Sundays from 06:00, once: the week is reserved before the call, so a failure waits a week. */
+export async function weekParagraph(env, now = Date.now()) {
+  const l = local(now);
+  if (l.weekday !== 0) return { skip: 'not Sunday' };
+  if (l.minutes < PARA_HOUR * 60) return { skip: 'too early' };
+  if (!env.TODO_CODE) return { skip: 'not configured' };
+  const monday = mondayOf(l.date);
+  const key = PARA_PREFIX + monday;
+  if (await env.HUB_KV.get(key)) return { skip: 'written' };
+  const ttl = { expirationTtl: 60 * 24 * 3600 };
+  await env.HUB_KV.put(key, JSON.stringify({ at: new Date(now).toISOString(), text: null }), ttl);
+  const block = await weekBlock(env, now);
+  const facts = paragraphFacts(block, await deskWeek(env, zoned(monday)));
+  let text = null;
+  try { text = await paraWriter(env, facts); } catch (e) { text = null; }
+  text = text ? noDashes(text).slice(0, MAX_PARA) || null : null;
+  await env.HUB_KV.put(key, JSON.stringify({ at: new Date(now).toISOString(), text }), ttl);
+  return text ? { written: text.length } : { skip: 'no paragraph' };
+}
+
 export async function weekCron(env, now = Date.now(), fetcher = fetch) {
-  const [wake, push] = await Promise.allSettled([wakeSnoozes(env, now), sundayPush(env, now, fetcher)]);
-  return { wake: wake.value || String(wake.reason), push: push.value || String(push.reason) };
+  const [wake, push, para] = await Promise.allSettled([wakeSnoozes(env, now), sundayPush(env, now, fetcher), weekParagraph(env, now)]);
+  return { wake: wake.value || String(wake.reason), push: push.value || String(push.reason), para: para.value || String(para.reason) };
 }
