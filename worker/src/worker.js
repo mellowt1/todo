@@ -136,6 +136,7 @@ import { retireOthers } from './retire.js';
 import { handleTidy } from './tidy.js';
 import { handleTalk } from './talk.js';
 import { handleLessons, handleLesson, weekLessons } from './lessons.js';
+import { handleLift, liftForMorning } from './lift.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -328,8 +329,9 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
   hiscores: (request, env, rest) => handleHiscores(request, env, rest, json),
+  lift: (request, env, rest) => handleLift(request, env, rest, json),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   health: (request, env, rest) => handleHealth(request, env, rest, json),
