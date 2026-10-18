@@ -79,6 +79,10 @@
  * " · YYYY-MM-DD" ending. Writes nothing; the app writes it and offers Undo.
  *   POST /api/tidy/:code   <- { text }  -> { text, changed }
  *
+ * Talk points (src/talk.js; the to-do's code): Feeling sends the entries since the last session when
+ * Paul taps "Write with Claude"; short sections to read at the psychologist come back. Stores no text.
+ *   POST /api/talk/:code   <- { range, entries: [{ day, time, mood, text, bring }] }  -> { sections }
+ *
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
@@ -130,6 +134,7 @@ import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
 import { handleTidy } from './tidy.js';
+import { handleTalk } from './talk.js';
 import { handleLessons, handleLesson, weekLessons } from './lessons.js';
 
 export { TodoList } from './list.js';
@@ -334,6 +339,7 @@ const MODULES = {
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
   apply: (request, env, rest) => handleApply(request, env, rest, json),
   tidy: (request, env, rest) => handleTidy(request, env, rest, json),
+  talk: (request, env, rest) => handleTalk(request, env, rest, json),
   lessons: (request, env, rest) => handleLessons(request, env, rest, json),
   admin: handleAdmin,
 };
