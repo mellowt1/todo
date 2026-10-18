@@ -183,9 +183,15 @@ export async function todosBlock(env, now = Date.now()) {
   const won = d.items
     .filter((i) => i.done && Number.isFinite(i.doneAt) && local(i.doneAt).date === yesterday)
     .sort((a, b) => b.doneAt - a.doneAt);
+  // Ticked off today, for the progress bar and the struck-through rows on Morning.
+  const today = local(now).date;
+  const doneToday = d.items
+    .filter((i) => i.done && Number.isFinite(i.doneAt) && local(i.doneAt).date === today)
+    .sort((a, b) => b.doneAt - a.doneAt);
   return {
     items,
     updated: d.updated || null,
+    doneToday: { count: doneToday.length, items: doneToday.slice(0, WINS_SHOWN).map((i) => maskSecrets(i.text)) },
     yesterday: { count: won.length, items: won.slice(0, WINS_SHOWN).map((i) => maskSecrets(i.text)) },
   };
 }
