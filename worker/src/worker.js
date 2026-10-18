@@ -136,7 +136,7 @@ import { retireOthers } from './retire.js';
 import { handleTidy } from './tidy.js';
 import { handleTalk } from './talk.js';
 import { handleLessons, handleLesson, weekLessons } from './lessons.js';
-import { handleLift, liftForMorning } from './lift.js';
+import { handleLift, handleLiftDay, liftForMorning } from './lift.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -337,7 +337,7 @@ const MODULES = {
   health: (request, env, rest) => handleHealth(request, env, rest, json),
   intake: (request, env, rest, url) => handleIntake(request, env, rest, url, { json, list, code: CODE }),
   event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
-  hub: (request, env, rest, url) => handleHub(request, env, rest, url, json),
+  hub: (request, env, rest, url) => (rest.join('/') === 'lift/day' ? handleLiftDay(request, env, json) : handleHub(request, env, rest, url, json)),
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
   apply: (request, env, rest) => handleApply(request, env, rest, json),
   tidy: (request, env, rest) => handleTidy(request, env, rest, json),

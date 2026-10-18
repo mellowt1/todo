@@ -8,6 +8,7 @@
  *   GET  /api/lift/:code         -> { summary, at, backupAt, backupSize }
  *   GET  /api/lift/:code/backup  -> the backup as the phone sent it
  *   Morning's block (liftForMorning) -> { next, nextDay, today, week, last, at }
+ *   GET  /api/hub/lift/day       Bearer HUB_SECRET_DAY -> { plan: { name, date } | null, workouts: [{ id, name, start, end }], at }  for Day's gym blocks
  *
  * summary = {
  *   next: { name, items: [{ name, sets, range, kg, up }] } | null,   today's weights for the routine due next
@@ -18,7 +19,7 @@
  * KV: lift:state { summary, at }, lift:backup (the phone's export, at most 4 MB), lift:fed:<id> (30 days).
  * The code is the to-do's (TODO_CODE), as for Morning and Hiscores. */
 
-import { safeEqual, CODE } from './todo.js';
+import { safeEqual, bearer, CODE } from './todo.js';
 import { local } from './morning.js';
 import { grant, XP } from './hiscores.js';
 import { cleanEvent, putEvent } from './events.js';
@@ -104,11 +105,48 @@ export async function saveLift(env, body, now = Date.now()) {
   return { xp, feed };
 }
 
+/* The next gym day as of now. The phone's answer holds until that day has passed; after that
+ * (the phone not opened since) the next ticked weekday from today, or tomorrow on if today's
+ * workout is done. */
+export function planDay(s, now = Date.now()) {
+  const today = local(now).date;
+  if (s.nextDay && s.nextDay >= today) return s.nextDay;
+  if (!s.days.some(Boolean)) return null;
+  const doneToday = s.workouts.some((w) => local(w.start).date === today);
+  for (let i = doneToday ? 1 : 0; i < 8; i++) {
+    const d = addDays(today, i);
+    if (s.days[(new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7]) return d;
+  }
+  return null;
+}
+
+const addDays = (date, n) => { const d = new Date(date + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+/* Day (Odysseus) reads this to draw gym blocks: the planned day with its routine, and the
+ * workouts of the last 14 days. GET /api/hub/lift/day, Bearer HUB_SECRET_DAY. */
+export async function liftForDay(env, now = Date.now()) {
+  const st = await env.HUB_KV.get(STATE, 'json');
+  if (!st || !st.summary) return { plan: null, workouts: [] };
+  const s = st.summary;
+  const date = planDay(s, now);
+  return {
+    plan: s.next && date ? { name: s.next.name, date } : null,
+    workouts: s.workouts.filter((w) => w.end > now - 14 * DAY && w.end > w.start).map(({ id, name, start, end }) => ({ id, name, start: new Date(start).toISOString(), end: new Date(end).toISOString() })),
+    at: st.at,
+  };
+}
+
+export async function handleLiftDay(request, env, json, now = Date.now()) {
+  if (!env.HUB_SECRET_DAY || !safeEqual(bearer(request), env.HUB_SECRET_DAY)) return json({ error: 'unauthorized' }, request, 401);
+  if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
+  return json(await liftForDay(env, now), request);
+}
+
 /* Morning: what's next and when, today's weights, this week, and the last workout. */
 export async function liftForMorning(env, now = Date.now()) {
   const st = await env.HUB_KV.get(STATE, 'json');
   if (!st || !st.summary) return null;
-  const s = st.summary;
+  const s = { ...st.summary, nextDay: planDay(st.summary, now) };
   const today = local(now).date;
   const monday = mondayOf(today);
   const weekDone = new Set(s.workouts.filter((w) => local(w.start).date >= monday).map((w) => local(w.start).date)).size;

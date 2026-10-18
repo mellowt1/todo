@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { cleanSummary, strengthRows, feedLine, handleLift, liftForMorning } from '../src/lift.js';
+import { cleanSummary, strengthRows, feedLine, handleLift, handleLiftDay, liftForDay, liftForMorning, planDay } from '../src/lift.js';
 import { readBoard, logGym } from '../src/hiscores.js';
 
 const CODE = 'abcdefgh23456789';
@@ -104,6 +104,28 @@ test('Morning: next routine, today, the week and the last workout', async () => 
   assert.deepEqual(m.week, { done: 2, planned: 3 });
   assert.deepEqual(m.last, { name: 'Shoulders', date: '2026-10-17', minutes: 76, volume: 8200, prs: 1 });
   assert.equal(m.doneToday, null);
+});
+
+test('planned day: the phone holds until the day passes, then the next ticked weekday', () => {
+  const s = { nextDay: '2026-10-18', days: [true, false, true, false, false, false, true], workouts: [] };
+  assert.equal(planDay(s, SUN), '2026-10-18');
+  const tue = Date.parse('2026-10-20T08:00:00Z');
+  assert.equal(planDay(s, tue), '2026-10-21', 'Sunday passed without the phone: Wednesday');
+  const wedEve = Date.parse('2026-10-21T19:00:00Z');
+  assert.equal(planDay({ ...s, workouts: [w('w', 'Chest', wedEve - H)] }, wedEve), '2026-10-25', 'trained today: next Sunday');
+  assert.equal(planDay({ ...s, days: [false, false, false, false, false, false, false] }, tue), null);
+});
+
+test('Day reads the plan and two weeks of workouts with its own secret', async () => {
+  const e = { ...env(), HUB_SECRET_DAY: 'day-secret' };
+  await call(e, CODE, 'POST', { summary: summary([w('t', 'Shoulders', SUN - DAY, 76), w('o', 'Chest', SUN - 20 * DAY)]) });
+  const ask = (auth) => handleLiftDay(new Request('https://x/api/hub/lift/day', { headers: auth ? { Authorization: 'Bearer ' + auth } : {} }), e, json, SUN);
+  assert.equal((await ask('wrong')).status, 401);
+  assert.equal((await ask()).status, 401);
+  const got = await (await ask('day-secret')).json();
+  assert.deepEqual(got.plan, { name: 'Back', date: '2026-10-18' });
+  assert.deepEqual(got.workouts, [{ id: 't', name: 'Shoulders', start: new Date(SUN - DAY).toISOString(), end: new Date(SUN - DAY + 76 * 60e3).toISOString() }]);
+  assert.deepEqual(await liftForDay(env(), SUN), { plan: null, workouts: [] });
 });
 
 test('route: code, methods, backup', async () => {
