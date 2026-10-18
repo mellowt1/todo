@@ -10,6 +10,8 @@
  *   POST /api/german/outcome  Authorization: Bearer <GERMAN_PUSH_TOKEN>
  *                             <- { id, status, minutes?, outcomeAt, fixes? }
  *                             -> { ok: true }
+ *   POST /api/german/ring     Authorization: Bearer <GERMAN_PUSH_TOKEN>
+ *                             <- { persona, url }  -> one ntfy push to NTFY_TOPIC: "Ingrid ruft an"
  *   GET  /api/german/busy     Authorization: Bearer <GERMAN_PUSH_TOKEN>
  *                             -> { away: [{ date, start }] }  evenings Day marks Paul out, 7 days
  *   GET  /api/german/calls    Authorization: Bearer <GERMAN_READ_TOKEN>
@@ -162,7 +164,27 @@ function denied(request, secret, json) {
   return null;
 }
 
-export async function handleGerman(request, env, rest, url, json, now = Date.now()) {
+const RING_URL = /^https:\/\/[a-z0-9-]{1,63}\.[a-z0-9-]{1,63}\.ts\.net\/\?ring=[a-z0-9-]{1,64}$/;
+
+/* Pure: { persona, url } -> { push } for ntfy, or { error }. */
+export function ringPush(b) {
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return { error: 'send an object' };
+  if (!PERSONAS.includes(b.persona)) return { error: 'persona must be Ingrid or Hartmut' };
+  if (typeof b.url !== 'string' || !RING_URL.test(b.url)) return { error: 'url must be the tutor on a ts.net name with ?ring=<id>' };
+  return { push: {
+    title: `${b.persona} ruft an`,
+    message: 'Hast du kurz Zeit? Tippen zum Annehmen.',
+    priority: 4,
+    tags: ['telephone_receiver'],
+    click: b.url,
+    actions: [
+      { action: 'view', label: 'Annehmen', url: b.url },
+      { action: 'view', label: 'Nur kurz (3 Min)', url: b.url + '&short=1' },
+    ],
+  } };
+}
+
+export async function handleGerman(request, env, rest, url, json, now = Date.now(), fetcher = fetch) {
   const route = rest.join('/');
   if (route === 'week' || route === 'outcome') {
     if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
@@ -186,6 +208,21 @@ export async function handleGerman(request, env, rest, url, json, now = Date.now
     calls[i] = { ...calls[i], ...o.outcome, updated: new Date(now).toISOString() };
     await writeCalls(env, calls, now);
     return json({ ok: true }, request);
+  }
+
+  /* She rings: one ntfy push to Paul's phone (NTFY_TOPIC). The link only opens inside his
+   * tailnet (tailscale serve on the PC), so it carries no code worth anything to a reader. */
+  if (route === 'ring') {
+    if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
+    const no = denied(request, env.GERMAN_PUSH_TOKEN, json);
+    if (no) return no;
+    const got = await readBody(request);
+    if (got.error) return json({ error: got.error }, request, got.status);
+    const m = ringPush(got.body);
+    if (m.error) return json({ error: m.error }, request, 400);
+    if (!env.NTFY_TOPIC) return json({ error: 'no topic' }, request, 503);
+    const r = await fetcher('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: env.NTFY_TOPIC, ...m.push }) });
+    return r.ok ? json({ ok: true }, request) : json({ error: 'ntfy ' + r.status }, request, 502);
   }
 
   /* The evenings Day marks Paul out (src/dinner.js), so the PC moves a call off them. No titles. */

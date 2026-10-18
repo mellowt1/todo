@@ -2,7 +2,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
-import { handleGerman, cleanWeek, cleanOutcome, germanView, GERMAN_KEY, MAX_CALLS } from '../src/german.js';
+import { handleGerman, cleanWeek, cleanOutcome, germanView, ringPush, GERMAN_KEY, MAX_CALLS } from '../src/german.js';
 import { handleMorning, zoned, addDays, local } from '../src/morning.js';
 import { memNamespace } from './mem.js';
 
@@ -272,4 +272,30 @@ test('germanView: streak counts back from the latest non-planned call', () => {
   assert.equal(germanView([c('a', '2026-10-01', 'planned')], NOW).streak, 0);
   assert.equal(germanView([c('a', '2026-10-01', 'answered'), c('b', '2026-10-02', 'answered'), c('p', '2026-10-09', 'planned')], NOW).streak, 2);
   assert.equal(germanView([c('a', '2026-10-01', 'answered'), c('b', '2026-10-02', 'missed')], NOW).streak, 0);
+});
+
+test('ring: one ntfy push with the tailnet link and a quick-call button; bad input and no token refused', async () => {
+  const sent = [];
+  const fake = async (u, init) => { sent.push({ u, body: JSON.parse(init.body) }); return new Response('{}'); };
+  const env = makeEnv({ NTFY_TOPIC: 'topic-for-tests' });
+  const url = 'https://pc.tail1234.ts.net/?ring=2026-w43-1';
+  const call = (body, token = PUSH) => {
+    const u = new URL(BASE + '/api/german/ring');
+    return handleGerman(new Request(u, { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: JSON.stringify(body) }), env, ['ring'], u, json, NOW, fake);
+  };
+  assert.equal((await call({ persona: 'Ingrid', url }, 'wrong')).status, 401);
+  assert.equal((await call({ persona: 'Otto', url })).status, 400);
+  assert.equal((await call({ persona: 'Ingrid', url: 'https://evil.example/?ring=1' })).status, 400);
+  assert.equal(sent.length, 0);
+  const r = await call({ persona: 'Hartmut', url });
+  assert.equal(r.status, 200);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].u, 'https://ntfy.sh/');
+  assert.equal(sent[0].body.topic, 'topic-for-tests');
+  assert.equal(sent[0].body.title, 'Hartmut ruft an');
+  assert.equal(sent[0].body.click, url);
+  assert.deepEqual(sent[0].body.actions.map((a) => a.url), [url, url + '&short=1']);
+  assert.equal((await handleGerman(new Request(BASE + '/api/german/ring', { method: 'POST', headers: { Authorization: 'Bearer ' + PUSH }, body: JSON.stringify({ persona: 'Ingrid', url }) }),
+    makeEnv(), ['ring'], new URL(BASE), json, NOW, fake)).status, 503);
+  assert.equal(ringPush({ persona: 'Ingrid', url: url + '&x=1' }).error.startsWith('url'), true);
 });
