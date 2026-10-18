@@ -10,6 +10,8 @@
  *   POST /api/german/outcome  Authorization: Bearer <GERMAN_PUSH_TOKEN>
  *                             <- { id, status, minutes?, outcomeAt, fixes? }
  *                             -> { ok: true }
+ *   GET  /api/german/busy     Authorization: Bearer <GERMAN_PUSH_TOKEN>
+ *                             -> { away: [{ date, start }] }  evenings Day marks Paul out, 7 days
  *   GET  /api/german/calls    Authorization: Bearer <GERMAN_READ_TOKEN>
  *                             ?from=YYYY-MM-DD (default 28 days ago)
  *                             -> { calls: [...], updated }
@@ -20,6 +22,7 @@
 
 import { safeEqual, bearer } from './todo.js';
 import { local, addDays, validDay } from './morning.js';
+import { dinnerBlock } from './dinner.js';
 
 export const GERMAN_KEY = 'german:calls';
 export const MAX_CALLS = 20;
@@ -183,6 +186,15 @@ export async function handleGerman(request, env, rest, url, json, now = Date.now
     calls[i] = { ...calls[i], ...o.outcome, updated: new Date(now).toISOString() };
     await writeCalls(env, calls, now);
     return json({ ok: true }, request);
+  }
+
+  /* The evenings Day marks Paul out (src/dinner.js), so the PC moves a call off them. No titles. */
+  if (route === 'busy') {
+    if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
+    const no = denied(request, env.GERMAN_PUSH_TOKEN, json);
+    if (no) return no;
+    const block = await dinnerBlock(env, now);
+    return json({ away: (block ? block.away : []).map((a) => ({ date: a.date, start: a.start || '' })) }, request);
   }
 
   if (route === 'calls') {

@@ -32,6 +32,7 @@
  * German tutor calls (src/german.js; the PC pushes, Odysseus reads):
  *   POST /api/german/week     Bearer <GERMAN_PUSH_TOKEN>  <- { calls: [...] }  -> { ok: true, count }
  *   POST /api/german/outcome  Bearer <GERMAN_PUSH_TOKEN>  <- { id, status, minutes?, outcomeAt, fixes? }
+ *   GET  /api/german/busy     Bearer <GERMAN_PUSH_TOKEN>  -> { away: [{ date, start }] }  (Day's out evenings)
  *   GET  /api/german/calls    Bearer <GERMAN_READ_TOKEN>  ?from=YYYY-MM-DD  -> { calls, updated }
  *
  * Intake (src/intake.js; the to-do's code): a PDF, a photo or pasted text goes to Claude, the

@@ -197,3 +197,18 @@ test("Morning's block carries the title; Kitchen's does not", async () => {
   await post(e, back(2));
   assert.equal(await dinnerBlock(e, NOW), null);
 });
+
+test('the German tutor reads the out evenings with its push token: dates and start times, no titles', async () => {
+  const PUSH = 'german-push-for-tests';
+  const e = env({ GERMAN_PUSH_TOKEN: PUSH });
+  const soon = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(new Date(Date.now() + 2 * 86400000));
+  await post(e, away(1, { id: 'dinner:0123456789abcdef:' + soon + ':1', payload: { date: soon, title: 'Dinner with Sam', start: '19:30' } }));
+  await drain(e);
+  const busy = (token) => worker.fetch(new Request('https://hub.example/api/german/busy', { headers: { Authorization: 'Bearer ' + token } }), e);
+  assert.equal((await busy('wrong')).status, 401);
+  const r = await busy(PUSH);
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.deepEqual(body, { away: [{ date: soon, start: '19:30' }] });
+  assert.ok(!JSON.stringify(body).includes('Sam'));
+});
