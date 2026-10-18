@@ -1055,6 +1055,12 @@ export async function statusBlock(env) {
  * Records live in HUB_KV as intake:r:<ms, 14 digits>:<id>, so the newest sort last. Null until
  * the first one, so the card stays hidden. Only summaries travel; never the file, never the quotes. */
 const INTAKE_PREFIX = 'intake:r:';
+async function openTodoIds(env) {
+  const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));
+  const d = await (await stub.fetch('https://list/read')).json();
+  if (!Array.isArray(d.items)) throw new Error('no items');
+  return new Set(d.items.filter((i) => !i.done).map((i) => i.id));
+}
 export async function intakeBlock(env, now) {
   const listed = await env.HUB_KV.list({ prefix: INTAKE_PREFIX, limit: 200 });
   const names = listed.keys.map((k) => k.name).sort().reverse();
@@ -1062,6 +1068,10 @@ export async function intakeBlock(env, now) {
   const weekAgo = now - 7 * DAY;
   const msOf = (k) => Number(k.slice(INTAKE_PREFIX.length, INTAKE_PREFIX.length + 14)) || 0;
   const recent = (await Promise.all(names.slice(0, 8).map((k) => env.HUB_KV.get(k, 'json')))).filter((r) => r && r.record && r.record.readable !== false);
+  // A letter needs Paul only while one of its tasks is still open in To-do (ticked or deleted = handled).
+  // Null when the list can't be read: then the flag alone decides, as before.
+  const open = await openTodoIds(env).catch(() => null);
+  const stillOpen = (r) => !open || !Array.isArray(r.tasks) || !r.tasks.length || r.tasks.some((t) => t && open.has(t.id));
   const items = recent.map((r) => ({
     id: String(r.id || ''),
     at: validIso(r.at) ? r.at : null,
@@ -1069,7 +1079,7 @@ export async function intakeBlock(env, now) {
     kind: typeof r.record.kind === 'string' ? r.record.kind.slice(0, 16) : 'other',
     summary: typeof r.record.summary === 'string' ? maskSecrets(clean(r.record.summary)).slice(0, 160) : '',
     tasks: Array.isArray(r.tasks) ? r.tasks.length : 0,
-    needs: r.record.needs_paul === true,
+    needs: r.record.needs_paul === true && stillOpen(r),
   }));
   const usage = await env.HUB_KV.get('intake:usage:' + new Date(now).toISOString().slice(0, 7), 'json');
   return {

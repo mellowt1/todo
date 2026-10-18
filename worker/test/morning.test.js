@@ -892,11 +892,17 @@ test('intake block: hidden until the first record, then the newest first with wh
   rec(now - 3600000, 'new2', { who: 'me', kind: 'bill', needs_paul: false, summary: 'Paid already.' });
   rec(now - 60000, 'bad1', { readable: false });                        // an unreadable photo is not shown
   env.HUB_KV.m.set('intake:usage:' + new Date(now).toISOString().slice(0, 7), JSON.stringify({ calls: 4, input: 100, output: 20, cacheRead: 0, cacheWrite: 0 }));
+  const setTask = (done) => worker.fetch(new Request(`${BASE}/api/todo/${CODE}/ops`, { method: 'POST', body: JSON.stringify({ ops: [
+    { op: 'upsert', item: { id: 'aaaaaaaa', text: 'Reply', section: 'soon', done, doneAt: done ? now : null, updatedAt: now + (done ? 1 : 0), pos: now } }] }) }), env);
+  await setTask(false);
 
   const b = (await morning()).intake;
   assert.equal(b.week, 3);
   assert.deepEqual(b.recent.map((x) => x.id), ['new2', 'new1', 'old1']);
   assert.deepEqual(b.needs.map((x) => x.id), ['new1']);
+  // Its task ticked off in To-do: it no longer needs Paul.
+  await setTask(true);
+  assert.deepEqual((await morning()).intake.needs, []);
   assert.equal(b.recent[0].tasks, 1);
   assert.equal(b.recent[0].quotes, undefined);
   assert.deepEqual(b.month, { calls: 4, input: 100, output: 20 });
