@@ -5,7 +5,8 @@
  *
  * The app adds the task as typed at once, then asks here. Claude fixes typos, makes it a short
  * task in the language Paul typed it in, and turns a day or date in it into the list's date
- * ending (" · YYYY-MM-DD", which the app shows as a small label). Names, numbers and a leading
+ * ending (" · YYYY-MM-DD", which the app shows as a small label), with " HH:MM" after it when
+ * the line names a clock time (2026-10-19: Day plans dated tasks, src/dayplan.js). Names, numbers and a leading
  * "Name:" or "Apply:" stay as they are. The app writes the tidy text and offers Undo; this route
  * writes nothing. KV: tidy:usage:YYYY-MM. */
 
@@ -21,12 +22,15 @@ import { noDashes } from './mask.js';
 import { keptFor, lessonsText } from './lessons.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const DUE_END = /\s*·\s*(\d{4}-\d{2}-\d{2})$/;
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+// The list's date ending, its time optional. src/dayplan.js and app/app.js (DUE) read the same.
+export const DUE_END = /\s*·\s*(\d{4}-\d{2}-\d{2})(?: ([01]\d|2[0-3]):([0-5]\d))?$/;
 const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const Tidy = z.object({
   name: z.string().max(300).describe('the task, clean, without any day or date in it'),
   due: z.string().nullable().describe('YYYY-MM-DD when the line names a day or date, else null'),
+  time: z.string().nullable().describe('HH:MM, 24-hour, when the line names a clock time, else null'),
 });
 
 /* Frozen per deploy. Today's date goes in the user message. */
@@ -36,11 +40,13 @@ export const SYSTEM = [
   'Write it as a plain task, usually starting with the verb ("Call the gemeente about the parking permit"). Keep his words where they are already clear; do not make it formal.',
   'Keep names, places, numbers, amounts and codes exactly as typed. Keep a leading "Name:" (a task done for someone) or "Apply:" as it is.',
   'If the line names a day or date (today, tomorrow, Friday, next week, 31 Oct, vrijdag, morgen, volgende week, el lunes), take it out of the name and give it as due, counted from today. A weekday means the next one after today; "next week" means next Monday. Otherwise due is null.',
+  'If the line names a clock time (14:00, 2pm, half 3, om drie uur, a las 5), take it out of the name too and give it as time, 24-hour HH:MM. A time with no day: due is today if the time is still to come, else tomorrow. Never guess a time from words such as morning or evening. Otherwise time is null.',
   'Never add anything he did not write. If the line is already clean, return it unchanged.',
   'Check every word for spelling, also short ones. Examples (today Saturday 2026-10-17):',
-  '"dad: fix his printr" -> name "Dad: fix his printer", due null',
-  '"remind me to buy cat food tmrw" -> name "Buy cat food", due "2026-10-18"',
-  '"bel de huisarts volgende week" -> name "Bel de huisarts", due "2026-10-19"',
+  '"dad: fix his printr" -> name "Dad: fix his printer", due null, time null',
+  '"remind me to buy cat food tmrw" -> name "Buy cat food", due "2026-10-18", time null',
+  '"bel de huisarts volgende week" -> name "Bel de huisarts", due "2026-10-19", time null',
+  '"dentist friday 2pm" -> name "Dentist", due "2026-10-23", time "14:00"',
 ].join('\n');
 
 export async function tidyLine(env, text, now) {
@@ -77,8 +83,9 @@ export function toText(out, typed, today) {
   name = name.charAt(0).toUpperCase() + name.slice(1);
   let due = out && typeof out.due === 'string' && DATE.test(out.due) && !Number.isNaN(Date.parse(out.due)) ? out.due : null;
   if (due && due < addDays(today, -1)) due = null;
-  if (!due && kept) due = kept[1];
-  const tail = due ? ' · ' + due : '';
+  let time = due && out && typeof out.time === 'string' && TIME.test(out.time) ? out.time : null;
+  if (!due && kept) { due = kept[1]; time = kept[2] ? kept[2] + ':' + kept[3] : null; }
+  const tail = due ? ' · ' + due + (time ? ' ' + time : '') : '';
   return (cleanText(name.slice(0, MAX_TEXT - tail.length) + tail) || typed);
 }
 

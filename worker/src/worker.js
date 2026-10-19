@@ -136,6 +136,7 @@ import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
 import { handleTidy } from './tidy.js';
+import { handleTodoDay } from './dayplan.js';
 import { handleTalk } from './talk.js';
 import { handleLessons, handleLesson, weekLessons } from './lessons.js';
 import { handleLift, handleLiftDay, liftForMorning } from './lift.js';
@@ -339,7 +340,12 @@ const MODULES = {
   health: (request, env, rest) => handleHealth(request, env, rest, json),
   intake: (request, env, rest, url) => handleIntake(request, env, rest, url, { json, list, code: CODE }),
   event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
-  hub: (request, env, rest, url) => (rest.join('/') === 'lift/day' ? handleLiftDay(request, env, json) : handleHub(request, env, rest, url, json)),
+  hub: (request, env, rest, url) => {
+    const path = rest.join('/');
+    if (path === 'lift/day') return handleLiftDay(request, env, json);
+    if (path === 'todo/day') return handleTodoDay(request, env, json);
+    return handleHub(request, env, rest, url, json);
+  },
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
   apply: (request, env, rest) => handleApply(request, env, rest, json),
   tidy: (request, env, rest) => handleTidy(request, env, rest, json),

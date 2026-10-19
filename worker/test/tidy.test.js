@@ -41,3 +41,10 @@ test('refused: unknown code, empty text, no key', async () => {
   assert.equal((await post(env(), `tidy/${CODE}`, { text: '  ' })).status, 400);
   assert.equal((await post(env({ ANTHROPIC_API_KEY: undefined }), `tidy/${CODE}`, { text: 'x' })).status, 503);
 });
+
+test('toText: a clock time rides after the date, never alone, and a kept time stays when none found', () => {
+  assert.equal(toText({ name: 'Dentist', due: '2026-10-23', time: '14:00' }, 'dentist friday 2pm', '2026-10-17'), 'Dentist · 2026-10-23 14:00');
+  assert.equal(toText({ name: 'Dentist', due: null, time: '14:00' }, 'dentist 2pm', '2026-10-17'), 'Dentist', 'a time without a date is dropped');
+  assert.equal(toText({ name: 'Dentist', due: '2026-10-23', time: '25:00' }, 'dentist', '2026-10-17'), 'Dentist · 2026-10-23');
+  assert.equal(toText({ name: 'Call Bas', due: null, time: null }, 'call bas · 2026-10-20 09:30', '2026-10-17'), 'Call Bas · 2026-10-20 09:30');
+});

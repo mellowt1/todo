@@ -455,12 +455,13 @@
   // label at the right, amber from two days before and red only once it has passed (the letter
   // card's colours, so one date reads the same in both). "Apply:" stays in the name: the Slayer
   // icon says the rest (2026-10-19). The text itself is unchanged, so the edit sheet shows both.
-  const DUE = /\s*·\s*(\d{4}-\d{2}-\d{2})$/;
+  // A time may follow the date (" · 2026-11-01 14:00", 2026-10-19): Day plans the task at that hour.
+  const DUE = /\s*·\s*(\d{4}-\d{2}-\d{2})(?: ([01]\d|2[0-3]):([0-5]\d))?$/;
   function nameParts(it) {
     let name = it.text.replace(INTAKE_MARK, '');
     const m = name.match(DUE);
     if (m) name = name.slice(0, m.index);
-    return { name: name || it.text, due: m ? m[1] : null };
+    return { name: name || it.text, due: m ? m[1] : null, time: m && m[2] ? m[2] + ':' + m[3] : null };
   }
 
   /* ---------- Hiscores ----------
@@ -532,7 +533,7 @@
   function textHtml(it, withSkill = true) {
     const p = nameParts(it);
     let meta = '';
-    if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + '">' + d.words + '</span>'; }
+    if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + (p.time ? ' ' + p.time : '') + '">' + d.words + (p.time ? ' ' + p.time : '') + '</span>'; }
     // One slot at the right: the skill the task pays most into (a letter's Defence, an Apply's Slayer).
     if (withSkill) meta += skillSlot(it);
     return '<span class="tname">' + esc(p.name) + '</span>' + (meta ? '<span class="tmeta">' + meta + '</span>' : '');
@@ -1755,7 +1756,7 @@
     capUndo = { id, undo };
     const li = $('capAdded').querySelector('li[data-id="' + id + '"]:not(.leaving)');
     const p = nameParts({ text: clean });
-    const shown = p.name + (p.due ? ' · ' + dueLabel(p.due).words : ''); // as the list row reads it
+    const shown = p.name + (p.due ? ' · ' + dueLabel(p.due).words + (p.time ? ' ' + p.time : '') : ''); // as the list row reads it
     if (!li) return say('Tidied: ' + shown + '.');
     swapCapText(li.querySelector('.t'), shown);
     const b = document.createElement('button');
