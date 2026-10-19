@@ -12,6 +12,10 @@ const FILES = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-512-maskable.png',
+  './icons/skills/woodcutting.png',
+  './icons/skills/slayer.png',
+  './icons/skills/defence.png',
+  './icons/skills/attack.png',
 ];
 
 self.addEventListener('install', (e) => {

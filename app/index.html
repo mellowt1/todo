@@ -57,6 +57,10 @@
         <button id="closeDone" class="text-btn phone-only done-only">Close</button>
         <button id="addDesk" class="add-desk desk-only list-only" aria-label="Add task"><svg class="ic ic-2" width="20" height="20"><use href="#i-plus"/></svg></button>
       </div>
+      <div id="progress" class="progress list-only" hidden>
+        <span id="progressText" class="meta"></span>
+        <span class="pbar" aria-hidden="true"><span id="progressFill"></span></span>
+      </div>
       <div id="pillSlot" class="slot"><div class="slot-clip">
         <div id="pill" class="pill" hidden><svg class="ic" width="16" height="16"><use href="#i-offline"/></svg><span></span></div>
       </div></div>
@@ -81,11 +85,14 @@
       </div>
     </div></div>
 
+    <section id="week" class="week done-only" hidden></section>
+
     <ul id="list" class="list" aria-labelledby="title"></ul>
 
     <div id="empty" class="empty" hidden>
       <svg class="ic ic-glyph" width="40" height="40"><use href="#i-glyph"/></svg>
       <p></p>
+      <div id="rewards" class="rewards" hidden></div>
     </div>
 
     <div id="install" class="install" hidden>
@@ -104,8 +111,8 @@
 
 <nav id="switcher" class="seg switcher phone-only list-only" aria-label="Sections">
   <button data-section="today">Today</button>
-  <button data-section="soon">Soon</button>
-  <button data-section="someday">Someday</button>
+  <button data-section="soon">Soon<span class="scount" aria-hidden="true"></span></button>
+  <button data-section="someday">Someday<span class="scount" aria-hidden="true"></span></button>
 </nav>
 
 <div id="toast" class="toast" hidden>

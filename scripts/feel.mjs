@@ -1631,7 +1631,7 @@ for (const motion of ['no-preference', 'reduce']) {
         return {
           h: d.getBoundingClientRect().height, hh: head.isConnected ? head.getBoundingClientRect().height : 0, op: +getComputedStyle(d).opacity,
           drained: /rgba\(.*, 0\)|transparent/.test(ch.backgroundColor) && +getComputedStyle(d.querySelector('.dcheck .ic')).opacity < 0.05,
-          back: tx.color === text && /rgba\(.*, 0\)|transparent/.test(tx.textDecorationColor),
+          back: tx.color === text && tx.textDecorationLine === 'none', // Done text is plain since 2026-10-19
         };
       });
       const b = d.getBoundingClientRect();
@@ -2559,9 +2559,9 @@ for (const motion of ['no-preference', 'reduce']) {
     await seed([['Contrast row'], ['Second']]);
     const page = await open();
     const vals = () => page.evaluate(() => { const cs = getComputedStyle(document.documentElement); return ['--ring', '--secondary', '--sep'].map((k) => cs.getPropertyValue(k).trim().toUpperCase()); });
-    assert.deepEqual(await vals(), ['#A1A1A6', '#6E6E73', '#E5E5EA'], 'the default light look changed');
+    assert.deepEqual(await vals(), ['#88888D', '#6E6E73', '#E5E5EA'], 'the default light look changed'); // ring 3.5:1 since 2026-10-19
     await page.emulateMedia({ colorScheme: 'dark' });
-    assert.deepEqual(await vals(), ['#48484A', '#8E8E93', '#2C2C2E'], 'the default dark look changed');
+    assert.deepEqual(await vals(), ['#636366', '#8E8E93', '#2C2C2E'], 'the default dark look changed'); // ring 3.5:1 on black since 2026-10-19
     await page.emulateMedia({ colorScheme: 'light', contrast: 'more' });
     if (!(await page.evaluate(() => matchMedia('(prefers-contrast: more)').matches))) part(ENGINE + ' can not emulate prefers-contrast');
     else {

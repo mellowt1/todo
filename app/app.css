@@ -7,7 +7,7 @@
   --text: #1C1C1E;
   --secondary: #6E6E73;
   --sep: #E5E5EA;
-  --ring: #A1A1A6;          /* darker than the canvas #C7C7CC so the circle shows in sunlight (C10b) */
+  --ring: #88888D;          /* the circle is the main control: 3.5:1 on white, 3.2:1 on the surface (WCAG 1.4.11) */
   --accent: #3F7D5C;        /* fills: add button, active segment, swipe, done check */
   --accent-text: #3F7D5C;   /* text, focus rings, caret */
   --accent-soft: rgba(63, 125, 92, 0.14);
@@ -49,7 +49,7 @@
     --text: #F2F2F7;
     --secondary: #8E8E93;
     --sep: #2C2C2E;
-    --ring: #48484A;
+    --ring: #636366;          /* 3.5:1 on black */
     --accent: #7DBF98;        /* one green in dark: fills match the text (C10a) */
     --accent-text: #7DBF98;
     --on-accent: #000000;     /* white on #7DBF98 is about 2:1 */
@@ -139,9 +139,16 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 /* A date and the Apply tag sit at the right of the name, small (app.js textHtml). */
 .tmeta { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 6px; }
 .dtext .tmeta { margin-left: 8px; }
-.ttag { padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-text); font-size: 12px; font-weight: 600; letter-spacing: .01em; }
+/* Hiscores skill icons (OSRS pixel art): kept crisp, sized by their box. */
+.skill { display: block; width: 18px; height: 18px; object-fit: contain; image-rendering: pixelated; flex-shrink: 0; }
+.tskill { align-self: center; opacity: 0.9; }
+.dbtn .tskill { align-self: flex-start; padding-top: 3px; }
+/* Today cleared with its rewards: the block starts higher so the list of skills fits above the switcher. */
+.empty.all-done:has(.rewards:not([hidden])) { margin-top: max(24px, calc(140px - var(--top))); }
 .tdue { color: var(--secondary); font-size: var(--fs-meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tdue.near { color: var(--danger); font-weight: 600; }
+/* Soon is amber, passed is red: the same two colours as a letter card's days left. */
+.tdue.near { color: var(--amber-ink); font-weight: 600; }
+.tdue.late { color: var(--danger); font-weight: 600; }
 /* A link the hub set (a vacancy's page): a quiet icon with a 44px target that keeps the row's height. */
 .row .link {
   flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;
@@ -204,8 +211,10 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 .skeleton:nth-child(3) .bar { width: 62%; }
 
 /* ---------- Done history ---------- */
-.dhead { padding: 18px var(--gut-r) 6px var(--gut-l); font-size: var(--fs-meta); font-weight: 600; color: var(--secondary); }
-.drow { position: relative; margin: 0 var(--gut-r) 0 var(--gut-l); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 68px; }
+.dhead { display: flex; justify-content: space-between; padding: 18px var(--gut-r) 6px var(--gut-l); font-size: var(--fs-meta); font-weight: 600; color: var(--secondary); }
+/* The day's XP (app.js doneRows), outside the text so the header still reads as its label. */
+.dhead[data-xp]::after { content: attr(data-xp); font-weight: 400; font-variant-numeric: tabular-nums; }
+.drow { position: relative; margin: 0 var(--gut-r) 0 var(--gut-l); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 48px; }
 .dbtn { display: flex; align-items: flex-start; gap: 14px; width: 100%; padding: 12px 0; text-align: left; }
 /* No line under a day header; the line starts at the text. */
 .drow + .drow::before { content: ""; position: absolute; left: 38px; right: 0; top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
@@ -216,16 +225,17 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 }
 .dcheck .ic { transition: opacity var(--dur-press) ease; }
 .dbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.dbody > .meta, .dtime { display: block; }
+.dtime { display: block; }
+/* The section a done task came from stays for screen readers (aria-describedby) only. */
+.dbody > .meta { display: none; }
 .dtext {
-  font-size: var(--fs-body); line-height: 1.35; color: var(--secondary); text-decoration: line-through; overflow-wrap: anywhere;
+  /* Done is a record, not a bin: plain text, the green check already says done. */
+  font-size: var(--fs-body); line-height: 1.35; color: var(--text); overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  transition: color var(--dur-press) ease, text-decoration-color var(--dur-press) ease;
 }
 /* Reopen: the tick drains to an empty ring and the text comes back, then the row closes. */
 .drow.reopening .dcheck { background: transparent; border-color: var(--ring); }
 .drow.reopening .dcheck .ic { opacity: 0; }
-.drow.reopening .dtext { color: var(--text); text-decoration-color: transparent; }
 .drow.collapsing, .dhead.collapsing { overflow: hidden; }
 .dtime { padding-top: 3px; }
 body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
@@ -314,6 +324,13 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 .cap-added li { display: flex; align-items: center; gap: 14px; min-height: 30px; color: var(--secondary); overflow: hidden; } /* app.js grows each new line */
 .cap-added .ok { width: 24px; display: flex; justify-content: center; color: var(--accent-text); }
 .cap-added .t { flex: 1; min-width: 0; font-size: var(--fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A tidied line's own Undo (app.js capTidied): quiet text, the whole line's height to tap. */
+.cap-undo {
+  flex-shrink: 0; align-self: stretch; min-width: 56px; margin-right: -8px; padding: 0 8px; border: 0; border-radius: 8px;
+  background: none; color: var(--accent-text); font: inherit; font-size: var(--fs-meta); font-weight: 600; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.cap-undo:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
 .edit-sheet { gap: 16px; min-height: min(460px, 70vh); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 /* Keyboard up: the sheet fits in what is left of the screen, so Close stays on it. */
 .edit-sheet.kb { min-height: 0; max-height: calc(var(--vvh) - env(safe-area-inset-top) - 12px); padding-bottom: 16px; }
@@ -541,7 +558,45 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .pill.reading .spin { animation: none; } }
 /* A task that came from a letter carries a small clip after its text, instead of the raw [intake] mark. */
-.clipmark { display: inline-block; vertical-align: -2px; margin-left: 5px; color: var(--secondary); }
+/* ---------- Hiscores layer (app.js, Hiscores) ---------- */
+/* Today's progress under the title: a line of text and a thin bar that fills by transform. */
+.progress { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 6px; }
+.pbar { display: block; height: 4px; border-radius: 2px; background: var(--sep); overflow: hidden; }
+#progressFill { display: block; height: 100%; border-radius: 2px; background: var(--accent); transform-origin: left center; transform: scaleX(0); }
+body.ready #progressFill { transition: transform var(--dur-move) var(--ease); }
+#progressText { font-variant-numeric: tabular-nums; }
+/* The XP drop: rises from the row's right edge and fades (app.js xpDrop). */
+.xpdrop {
+  position: fixed; z-index: 13; display: flex; align-items: center; gap: 5px; pointer-events: none;
+  font-size: 15px; font-weight: 700; color: var(--accent-text); font-variant-numeric: tabular-nums;
+}
+.xpdrop .skill { width: 16px; height: 16px; }
+/* Today cleared: the day's XP by skill. */
+.rewards { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 2px; }
+.empty .rewards .rsum { font-size: 15px; }
+.rlist { list-style: none; margin: 0; padding: 4px 0; width: 100%; border-radius: 14px; background: var(--surface); color: var(--text); }
+.rlist li { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 16px; font-size: 15px; }
+.rlist .rname { flex: 1; }
+.rlist b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.rlist .rlevel { min-width: 60px; text-align: right; font-size: var(--fs-meta); color: var(--secondary); }
+/* Done opens on the week (app.js renderWeek). */
+.week { margin: 6px var(--gut-r) 4px var(--gut-l); padding: 14px 16px; border-radius: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 12px; }
+.wk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 15px; font-weight: 600; }
+.wk-head .meta { font-weight: 400; font-variant-numeric: tabular-nums; }
+.wk-bars { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: end; height: 76px; }
+.wk-day { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5px; height: 100%; }
+.wk-n { font-size: 11px; color: var(--secondary); font-variant-numeric: tabular-nums; min-height: 13px; }
+.wk-bar { display: block; width: 100%; max-width: 26px; border-radius: 4px; background: var(--accent); opacity: 0.35; }
+.wk-day.now .wk-bar { opacity: 1; }
+.wk-l { font-size: 11px; color: var(--secondary); }
+.wk-day.now .wk-l { color: var(--text); font-weight: 600; }
+.wk-skills { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.wk-skills span { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-meta); color: var(--secondary); font-variant-numeric: tabular-nums; }
+.wk-skills .skill { width: 14px; height: 14px; }
+/* The phone switcher's counts for Soon and Someday. */
+.scount { margin-left: 5px; color: var(--secondary); font-weight: 400; }
+.scount:empty { display: none; }
+.seg button[aria-current="page"] .scount { color: inherit; opacity: 0.75; }
 /* The edit sheet shows what the letter said, under the section picker. */
 .edit-from { background: var(--field); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 .edit-from p { margin: 0; font-size: var(--fs-body); line-height: 1.35; }

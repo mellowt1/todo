@@ -61,9 +61,11 @@ for (const [name, viewport, scheme] of [['apply-phone', { width: 390, height: 84
   await page.waitForSelector('.row[data-id="applyplan001"]');
   await page.waitForTimeout(600);
 
-  // Clean names: the date and "Apply:" leave the name and sit small at the right.
-  check((await page.textContent('.row[data-id="applyplan001"] .tname')) === 'Planner militaire opleidingen (Defensie)', name + ': clean name');
-  check((await page.textContent('.row[data-id="applyplan001"] .ttag')) === 'Apply', name + ': Apply tag');
+  // Clean names: the date leaves the name and sits small at the right; "Apply:" stays in the name
+  // and the row's skill is Slayer, the Hiscores skill an application pays into (2026-10-19).
+  check((await page.textContent('.row[data-id="applyplan001"] .tname')) === 'Apply: Planner militaire opleidingen (Defensie)', name + ': name keeps Apply:');
+  check((await page.getAttribute('.row[data-id="applyplan001"] .tskill img', 'src')) === 'icons/skills/slayer.png', name + ': Slayer skill');
+  check((await page.getAttribute('.row[data-id="mine0000001"] .tskill img', 'src')) === 'icons/skills/woodcutting.png', name + ': an ordinary task pays Woodcutting');
   check((await page.textContent('.row[data-id="applyplan001"] .tdue')) === '1 Nov', name + ': date label 1 Nov');
   check(await page.evaluate(() => { const r = document.querySelector('.row[data-id="applyplan001"]'); return r.querySelector('.tmeta').getBoundingClientRect().right > r.querySelector('.tname').getBoundingClientRect().right; }), name + ': label to the right of the name');
   await page.locator('#list').screenshot({ path: file(name + '-list') });

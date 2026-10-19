@@ -196,12 +196,14 @@
     justAdded.add(id);
     upsert({ id, text, section: ui.section, done: false, doneAt: null, pos: now() });
     tidyLater(id, text);
+    return id;
   }
 
   /* Tidy (Paul, 2026-10-17): the task goes in as typed, then Claude cleans it up a second later
    * (typos, a short task, its day or date as the date label; POST /api/tidy/:code). The tidy
    * text replaces it only when nobody has touched the task since, with Undo in the toast.
-   * Offline, it stays as typed. */
+   * The toast sits under the capture sheet, so while the sheet is open the Undo goes on the
+   * sheet's own line instead (capTidied). Offline, it stays as typed. */
   async function tidyLater(id, typed) {
     if (!navigator.onLine) return;
     try {
@@ -211,7 +213,9 @@
       if (!d || !d.changed || !d.text || !it || it.done || it.text !== typed) return;
       upsert(Object.assign({}, it, { text: d.text }));
       tidied[id] = d.text;
-      toast('Tidied.', () => { const cur = items[id]; if (cur) { upsert(Object.assign({}, cur, { text: typed })); teach('undone', d.text, typed); } delete tidied[id]; }, id);
+      const undo = () => { const cur = items[id]; if (cur) { upsert(Object.assign({}, cur, { text: typed })); teach('undone', d.text, typed); } delete tidied[id]; };
+      if (!$('capture').hidden && !capClosing) return capTidied(id, typed, d.text, undo);
+      toast('Tidied.', undo, id);
     } catch (e) { /* stays as typed */ }
   }
 
@@ -227,7 +231,10 @@
     const it = items[id];
     if (!it || it.done) return;
     const prev = Object.assign({}, it);
-    upsert(Object.assign({}, it, { done: true, doneAt: now() }));
+    const at = now();
+    const row = byId(id);
+    if (row && view === 'list') xpDrop(row, pays(it, at));
+    upsert(Object.assign({}, it, { done: true, doneAt: at }));
     toast('Done.', () => upsert(prev), id);
   }
 
@@ -445,32 +452,90 @@
   const INTAKE_MARK = /\s*\[intake\]$/;
   const isIntake = (it) => INTAKE_MARK.test(it.text);
   // The name stays clean (Paul, 2026-10-17): a date at the end (" · 2026-11-01") shows as a small
-  // label at the right, red from two days before; "Apply:" in front shows as a tag. The text
-  // itself is unchanged, so the edit sheet still shows and changes both.
+  // label at the right, amber from two days before and red only once it has passed (the letter
+  // card's colours, so one date reads the same in both). "Apply:" stays in the name: the Slayer
+  // icon says the rest (2026-10-19). The text itself is unchanged, so the edit sheet shows both.
   const DUE = /\s*·\s*(\d{4}-\d{2}-\d{2})$/;
-  const APPLY_TAG = /^Apply:\s*/i;
   function nameParts(it) {
     let name = it.text.replace(INTAKE_MARK, '');
     const m = name.match(DUE);
     if (m) name = name.slice(0, m.index);
-    const apply = APPLY_TAG.test(name);
-    if (apply) name = name.replace(APPLY_TAG, '');
-    return { name: name || it.text, due: m ? m[1] : null, apply };
+    return { name: name || it.text, due: m ? m[1] : null };
+  }
+
+  /* ---------- Hiscores ----------
+   * The hub pays XP into Paul's real-life Hiscores for every task ticked off; the list shows what
+   * a task pays and what the day earned. These rules are worker/src/hiscores.js taskRows(),
+   * copied: change both together. The list never writes XP, the hub's scan does. */
+  const XP_RULES = { task: 100, apply: 4000, oldTask: 1500, letterTask: 1200 };
+  const OLD_MS = 14 * 86400000;
+  const SKILL = { woodcutting: 'Woodcutting', slayer: 'Slayer', attack: 'Attack', defence: 'Defence' };
+  // What a task pays when ticked at `at` (an open task: now), biggest first.
+  function pays(it, at) {
+    const out = [/^apply:/i.test(it.text) ? { skill: 'slayer', xp: XP_RULES.apply } : { skill: 'woodcutting', xp: XP_RULES.task }];
+    if (Number.isFinite(it.pos) && at - it.pos >= OLD_MS) out.push({ skill: 'attack', xp: XP_RULES.oldTask });
+    if (INTAKE_MARK.test(it.text)) out.push({ skill: 'defence', xp: XP_RULES.letterTask });
+    return out.sort((a, b) => b.xp - a.xp);
+  }
+  const paysAt = (it) => pays(it, it.done ? it.doneAt : now());
+  const xpSum = (ps) => ps.reduce((n, p) => n + p.xp, 0);
+  const fmt = (n) => n.toLocaleString('en-GB');
+  const skillImg = (s) => '<img class="skill" src="icons/skills/' + s + '.png" alt="" width="18" height="18">';
+  const paysTitle = (ps) => ps.map((p) => SKILL[p.skill] + ' ' + fmt(p.xp) + ' XP').join(', ');
+  const midnight = (d = new Date()) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  // XP by skill over a set of done tasks, biggest first.
+  function bySkill(done) {
+    const m = {};
+    for (const it of done) for (const p of paysAt(it)) m[p.skill] = (m[p.skill] || 0) + p.xp;
+    return Object.keys(m).map((skill) => ({ skill, xp: m[skill] })).sort((a, b) => b.xp - a.xp);
+  }
+  // Levels come from the hub's board (GET /api/hiscores/:code), read once a session when a
+  // screen shows them. Without it the screens show XP only.
+  let levels = null;
+  let levelsAsked = false;
+  function loadLevels() {
+    if (levelsAsked || !navigator.onLine) return;
+    levelsAsked = true;
+    fetch(API + '/api/hiscores/' + code).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d || !Array.isArray(d.skills)) return;
+      levels = {};
+      for (const s of d.skills) if (s && s.id) levels[s.id] = s.level;
+      render();
+    }).catch(() => {});
+  }
+  // The XP drop (OSRS): what a tick paid rises from the right of the row and fades. Decoration
+  // only; the toast already says "Done.". Reduced motion: it fades in place.
+  function xpDrop(row, ps) {
+    const r = row.getBoundingClientRect();
+    ps.forEach((p, i) => {
+      const d = document.createElement('div');
+      d.className = 'xpdrop';
+      d.setAttribute('aria-hidden', 'true');
+      d.innerHTML = skillImg(p.skill) + '<span>+' + fmt(p.xp) + '</span>';
+      d.style.top = Math.round(r.top + r.height / 2 - 11) + 'px';
+      d.style.right = Math.round(innerWidth - r.right + 16) + 'px';
+      document.body.append(d);
+      const up = 'translateY(' + -32 * M.dist + 'px)';
+      play(d, [{ opacity: 0, transform: 'none' }, { opacity: 1, offset: 0.12 }, { opacity: 1, offset: 0.7 }, { opacity: 0, transform: up }],
+        { duration: 1300, delay: i * 200, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }).then(() => d.remove());
+    });
   }
   function dueLabel(d) {
     const t = new Date(d + 'T12:00:00');
     const today = new Date();
     const diff = Math.round((new Date(t.getFullYear(), t.getMonth(), t.getDate()) - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
     const words = diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : diff === -1 ? 'Yesterday' : t.getDate() + ' ' + MONTHS[t.getMonth()];
-    return { words, near: diff <= 2 };
+    return { words, state: diff < 0 ? ' late' : diff <= 2 ? ' near' : '' };
   }
-  function textHtml(it) {
+  const skillSlot = (it) => { const ps = paysAt(it); return '<span class="tskill" title="' + paysTitle(ps) + '">' + skillImg(ps[0].skill) + '</span>'; };
+  // withSkill false: the caller puts the skill in a column of its own (Done rows).
+  function textHtml(it, withSkill = true) {
     const p = nameParts(it);
-    const clip = isIntake(it) ? '<svg class="ic clipmark" width="14" height="14" role="img" aria-label="from a letter"><use href="#i-clip"/></svg>' : '';
     let meta = '';
-    if (p.apply) meta += '<span class="ttag">Apply</span>';
-    if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (d.near && !it.done ? ' near' : '') + '" title="' + p.due + '">' + d.words + '</span>'; }
-    return '<span class="tname">' + esc(p.name) + clip + '</span>' + (meta ? '<span class="tmeta">' + meta + '</span>' : '');
+    if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + '">' + d.words + '</span>'; }
+    // One slot at the right: the skill the task pays most into (a letter's Defence, an Apply's Slayer).
+    if (withSkill) meta += skillSlot(it);
+    return '<span class="tname">' + esc(p.name) + '</span>' + (meta ? '<span class="tmeta">' + meta + '</span>' : '');
   }
 
   function dayLabel(t) {
@@ -515,16 +580,23 @@
   const doneList = () => Object.values(items).filter((i) => i.done).sort((a, b) => b.doneAt - a.doneAt);
   // Done rows from..to, with a day header wherever the day changes from last. Each row is a
   // real button, described by its section and time as they show.
+  // A day header carries that day's XP in data-xp (drawn by app.css), so its text stays the label.
+  let dayXp = new Map();
   function doneRows(done, from, to, last) {
     let html = '';
     for (const it of done.slice(from, to)) {
       const label = dayLabel(it.doneAt);
-      if (label !== last) { html += '<li class="dhead">' + label + '</li>'; last = label; }
+      if (label !== last) {
+        const xp = dayXp.get(midnight(new Date(it.doneAt)));
+        html += '<li class="dhead"' + (xp ? ' data-xp="' + fmt(xp) + ' XP"' : '') + '>' + label + '</li>';
+        last = label;
+      }
       const t = new Date(it.doneAt);
       html += '<li class="drow" data-id="' + it.id + '">' +
         '<button class="dbtn" aria-label="Reopen ' + esc(it.text) + '" aria-describedby="ds-' + it.id + ' dt-' + it.id + '">' +
         '<span class="dcheck" aria-hidden="true"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span>' +
-        '<span class="dbody"><span class="dtext">' + textHtml(it) + '</span><span class="meta" id="ds-' + it.id + '">' + LABEL[it.section] + '</span></span>' +
+        '<span class="dbody"><span class="dtext">' + textHtml(it, false) + '</span><span class="meta" id="ds-' + it.id + '">' + LABEL[it.section] + '</span></span>' +
+        skillSlot(it) +
         '<span class="meta dtime" id="dt-' + it.id + '">' + pad(t.getHours()) + ':' + pad(t.getMinutes()) + '</span></button></li>';
     }
     return html;
@@ -532,9 +604,59 @@
   // I7: a task from Today finished since local midnight.
   const ALL_DONE = 'All done for today.';
   function doneToday(all) {
-    const d = new Date();
-    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    return all.some((i) => i.done && i.section === 'today' && i.doneAt >= midnight);
+    const m = midnight();
+    return all.some((i) => i.done && i.section === 'today' && i.doneAt >= m);
+  }
+  const doneSince = (t) => Object.values(items).filter((i) => i.done && i.doneAt >= t);
+
+  // Today's progress under the title: done of Today's tasks, and the XP the whole day earned.
+  function renderProgress() {
+    const el = $('progress');
+    const on = view === 'list' && ui.section === 'today' && loaded;
+    const m = midnight();
+    const ticked = on ? doneSince(m).filter((i) => i.section === 'today').length : 0;
+    const total = on ? ticked + openIn('today').length : 0;
+    el.hidden = !total;
+    if (!total) return;
+    const xp = xpSum(doneSince(m).flatMap(paysAt));
+    $('progressText').textContent = ticked + ' of ' + total + ' done' + (xp ? ' · ' + fmt(xp) + ' XP today' : '');
+    $('progressFill').style.transform = 'scaleX(' + (ticked / total).toFixed(3) + ')';
+  }
+
+  // Today cleared: what the day paid, skill by skill, with the level when the board has it.
+  function rewardsHtml() {
+    const done = doneSince(midnight());
+    const rows = bySkill(done);
+    if (!rows.length) return '';
+    loadLevels();
+    return '<p class="rsum">' + done.length + (done.length === 1 ? ' task, ' : ' tasks, ') + fmt(xpSum(rows)) + ' XP earned</p>' +
+      '<ul class="rlist">' + rows.map((r) => '<li>' + skillImg(r.skill) + '<span class="rname">' + SKILL[r.skill] + '</span><b>+' + fmt(r.xp) + '</b>' +
+        '<span class="rlevel">' + (levels && levels[r.skill] ? 'Level ' + levels[r.skill] : '') + '</span></li>').join('') + '</ul>';
+  }
+
+  // Done opens on the week: tasks per day for the last seven days, the week's XP and its skills.
+  const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  function renderWeek(done) {
+    const el = $('week');
+    const today = midnight();
+    const start = midnight(new Date(today - 6 * 86400000 + 43200000)); // six days back, safe across a clock change
+    const week = done.filter((i) => i.doneAt >= start);
+    el.hidden = view !== 'done' || !done.length;
+    if (el.hidden) return;
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const t = midnight(new Date(today - i * 86400000 + 43200000));
+      days.push({ t, n: week.filter((x) => midnight(new Date(x.doneAt)) === t).length, label: WEEKDAYS[new Date(t).getDay()] });
+    }
+    const max = Math.max(1, ...days.map((d) => d.n));
+    const skills = bySkill(week);
+    el.innerHTML = '<div class="wk-head"><span>This week</span><span class="meta">' + week.length + (week.length === 1 ? ' task' : ' tasks') + ' · ' + fmt(xpSum(skills)) + ' XP</span></div>' +
+      '<div class="wk-bars" aria-hidden="true">' + days.map((d, i) => '<div class="wk-day' + (i === 6 ? ' now' : '') + '"><span class="wk-n">' + (d.n || '') + '</span><span class="wk-bar" data-h="' + (d.n / max).toFixed(3) + '"></span><span class="wk-l">' + d.label + '</span></div>').join('') + '</div>' +
+      (skills.length ? '<div class="wk-skills">' + skills.map((s) => '<span>' + skillImg(s.skill) + SKILL[s.skill] + ' ' + fmt(s.xp) + '</span>').join('') + '</div>' : '');
+    el.setAttribute('aria-label', 'This week: ' + week.length + ' tasks done, ' + fmt(xpSum(skills)) + ' XP');
+    // Heights through the CSSOM: a bar never shorter than a sliver, so an empty day still reads as a day.
+    for (const b of el.querySelectorAll('.wk-bar')) b.style.height = Math.max(3, Math.round(Number(b.dataset.h) * 44)) + 'px';
+    loadLevels();
   }
 
   // The chrome (title, counts, controls) always updates at once. The list waits while a
@@ -568,6 +690,12 @@
       const c = b.querySelector('.count');
       if (c) { const n = openIn(b.dataset.section).length; c.textContent = n ? String(n) : ''; }
     }
+    // The phone switcher shows how much waits in Soon and Someday, as the sidebar does.
+    for (const c of document.querySelectorAll('#switcher .scount')) {
+      const n = openIn(c.parentElement.dataset.section).length;
+      c.textContent = n ? String(n) : '';
+    }
+    renderProgress();
     if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
     $('install').hidden = !(view === 'list' && showInstall());
   }
@@ -611,6 +739,8 @@
       }
     } else {
       const done = doneList();
+      dayXp = new Map();
+      for (const it of done) { const d = midnight(new Date(it.doneAt)); dayXp.set(d, (dayXp.get(d) || 0) + xpSum(paysAt(it))); }
       html = doneRows(done, 0, doneShown, '');
       if (done.length > doneShown) html += MORE;
       if (!done.length) emptyText = 'Done tasks will show up here.';
@@ -635,6 +765,11 @@
     empty.hidden = !emptyText;
     empty.querySelector('p').textContent = emptyText;
     empty.classList.toggle('all-done', emptyText === ALL_DONE);
+    const rewards = emptyText === ALL_DONE ? rewardsHtml() : '';
+    const rw = $('rewards');
+    if (rw.innerHTML !== rewards) rw.innerHTML = rewards;
+    rw.hidden = !rewards;
+    renderWeek(view === 'done' && loaded ? doneList() : []);
     // The empty state arrives a moment after the last row has gone, rising 4px.
     if (same && emptyText && !emptyWas) {
       play(empty, [{ opacity: 0, transform: 'translateY(' + 4 * M.dist + 'px)' }, { opacity: 1, transform: 'none' }], { delay: 60, fill: 'backwards' });
@@ -1559,6 +1694,7 @@
     if (desk.matches) return showInline();
     capInput.value = '';
     capAdded = [];
+    capUndo = null;
     $('capAdded').textContent = '';
     capLabel();
     // Start where the keyboard will be, so the sheet does not land and then jump.
@@ -1573,10 +1709,11 @@
   let capAdded = [];
   // Only the new line is added, growing from nothing. Past three lines the first closes at the
   // same pace, so the sheet keeps its height. Reduced motion: the line fades in, the first goes at once.
-  function addCapLine(t) {
+  function addCapLine(t, id) {
     const ul = $('capAdded');
     const first = !ul.firstElementChild;
     const li = document.createElement('li');
+    li.dataset.id = id;
     li.innerHTML = '<span class="ok"><svg class="ic ic-2" width="16" height="16"><use href="#i-check"/></svg></span><span class="t"></span>';
     li.querySelector('.t').textContent = t;
     ul.append(li);
@@ -1606,6 +1743,38 @@
     l.textContent = t;
     if (!$('capture').hidden) play(l, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
   }
+  // A tidy that lands while the sheet is open: the ticked line crossfades to the tidied words and
+  // carries its own Undo, so what the sheet shows matches the list. A line already gone (past three)
+  // keeps its Undo for the toast when the sheet closes; so does the newest line still showing one.
+  let capUndo = null;
+  function swapCapText(el, text) {
+    el.textContent = text;
+    play(el, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
+  }
+  function capTidied(id, typed, clean, undo) {
+    capUndo = { id, undo };
+    const li = $('capAdded').querySelector('li[data-id="' + id + '"]:not(.leaving)');
+    const p = nameParts({ text: clean });
+    const shown = p.name + (p.due ? ' · ' + dueLabel(p.due).words : ''); // as the list row reads it
+    if (!li) return say('Tidied: ' + shown + '.');
+    swapCapText(li.querySelector('.t'), shown);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cap-undo';
+    b.textContent = 'Undo';
+    b.setAttribute('aria-label', 'Undo tidy, back to ' + typed);
+    b.addEventListener('click', () => {
+      undo();
+      if (capUndo && capUndo.id === id) capUndo = null;
+      swapCapText(li.querySelector('.t'), typed);
+      b.remove();
+      say('Undone.');
+      capInput.focus();
+    });
+    li.append(b);
+    play(b, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
+    say('Tidied: ' + shown + '.');
+  }
   let capClosing = false;
   function closeCapture() {
     if (capClosing || $('capture').hidden) return; // Escape, a tap outside and a swipe can all arrive
@@ -1614,16 +1783,21 @@
     capInput.value = '';
     capInput.blur();
     if (v) addTask(v); // written at the tap: the page can hide before the sheet has left
-    closeSheet($('capture'), () => { capClosing = false; });
+    const held = capUndo;
+    capUndo = null;
+    closeSheet($('capture'), () => {
+      capClosing = false;
+      if (held && tidied[held.id]) toast('Tidied.', held.undo, held.id);
+    });
   }
   capInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
       const v = cleanText(capInput.value);
       if (!v) return closeCapture(); // Return on an empty field means finished
-      addTask(v);
+      const id = addTask(v);
       capAdded.push(v);
-      addCapLine(v);
+      addCapLine(v, id);
       capInput.value = '';
       say('Added to ' + LABEL[ui.section] + '.');
     } else if (e.key === 'Escape') {
