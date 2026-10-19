@@ -518,6 +518,19 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 .ap-more[open] > .hb-draft { margin-bottom: 10px; }
 #apBody button:focus-visible, #apBody a:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 
+/* Ask: Claude's answer to a question or a message typed in the add box (app.js, Ask). Reuses the letter card's parts. */
+.ask-line { margin: 4px 0 0; font-size: var(--fs-meta); color: var(--secondary); overflow-wrap: anywhere; }
+.ask-answer { margin: 0; font-size: 19px; line-height: 1.4; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+.ask-draft { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--field); }
+.ask-draft p { margin: 0; font-size: 16px; line-height: 1.45; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+.ask-btns { display: flex; gap: 8px; }
+.ask-share { min-height: 40px; padding: 0 12px; border: 1px solid var(--sep); border-radius: 99px; color: var(--text); font-size: 14px; font-weight: 600; }
+.ask-task { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 8px 6px 14px; border-radius: 12px; background: var(--field); }
+.ask-t { flex: 1; min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
+.ask-t small { display: block; font-size: var(--fs-meta); color: var(--secondary); }
+.ask-keep { align-self: center; min-height: 44px; padding: 0 12px; color: var(--secondary); font-size: 15px; }
+#askBody button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
 /* Increase Contrast (iOS and macOS): darker rings, secondary text and lines. The default look is unchanged. */
 @media (prefers-contrast: more) {
   :root { --ring: #6E6E73; --secondary: #545458; --sep: #C6C6C8; }

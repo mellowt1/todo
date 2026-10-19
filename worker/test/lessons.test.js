@@ -7,7 +7,9 @@ import { DatabaseSync } from 'node:sqlite';
 import worker from '../src/worker.js';
 import { _setDesker, prepare } from '../src/desk.js';
 import { tidyLine } from '../src/tidy.js';
-import { deskSignal, cleanProposals, lessonsText, weekLessons, keptFor, _setLessonAsker, KEPT_KEY, WEEK_PREFIX } from '../src/lessons.js';
+import { deskSignal, cleanProposals, cleanReport, lessonsText, weekLessons, keptFor, _setLessonAsker, KEPT_KEY, WEEK_PREFIX } from '../src/lessons.js';
+import { readItem } from '../src/intake.js';
+import { askLift } from '../src/lift-ask.js';
 import { weekBlock } from '../src/week.js';
 import { memNamespace } from './mem.js';
 
@@ -135,7 +137,7 @@ test('Keep puts a rule into the prompts, Drop takes it out, Undo puts it back to
 
   r = await post(e, `morning/${CODE}/lesson`, { id: 'lesson00001', action: 'drop' });
   assert.deepEqual((await r.json()).lessons, { proposed: [], kept: [] });
-  assert.deepEqual(JSON.parse(e.HUB_KV.m.get(KEPT_KEY)), { desk: [], tidy: [] });
+  assert.deepEqual(JSON.parse(e.HUB_KV.m.get(KEPT_KEY)), { desk: [], tidy: [], intake: [], lift: [] });
   r = await post(e, `morning/${CODE}/lesson`, { id: 'lesson00001', action: 'undo' });
   assert.equal((await r.json()).lessons.proposed.length, 1);
 
@@ -162,4 +164,37 @@ test('lessonsText and the real calls: kept rules reach the system prompt of Desk
   assert.equal(bodies[0].system.length, 2);
   assert.match(bodies[0].system[1].text, /- Write tasks for Dad in Spanish\./);
   assert.match(bodies[1].system, /- Leave "tmrw" as typed\.$/);
+});
+
+test('feedback from more apps: intake edits and deletes, lift picks; each app only its own kinds', async () => {
+  const e = env();
+  const ok = async (body) => assert.deepEqual(await (await post(e, `lessons/${CODE}/feedback`, body)).json(), { ok: true });
+  await ok({ app: 'intake', kind: 'edited', before: 'Pay the CJIB fine · 2026-10-21 [intake]', after: 'Pay CJIB fine via iDEAL · 2026-10-21 [intake]' });
+  await ok({ app: 'intake', kind: 'skipped', before: 'Read the UWV letter [intake]' });
+  await ok({ app: 'lift', kind: 'approved', before: 'Face Pull', note: 'what for my rear delts' });
+  await ok({ app: 'lift', kind: 'skipped', before: 'Upright Row, Shrug', note: 'what for my rear delts' });
+  await ok({ app: 'tidy', kind: 'undone', before: 'ask: What do I have on Thursday', after: 'task' });
+  assert.deepEqual(rows(e).map((r) => r.app + ' ' + r.kind), ['intake edited', 'intake skipped', 'lift approved', 'lift skipped', 'tidy undone']);
+  assert.equal(rows(e)[2].note, 'what for my rear delts');
+  assert.equal((await post(e, `lessons/${CODE}/feedback`, { app: 'intake', kind: 'approved', before: 'a' })).status, 400);
+  assert.equal((await post(e, `lessons/${CODE}/feedback`, { app: 'intake', kind: 'edited', before: 'a' })).status, 400, 'an edit says what Paul wanted');
+  assert.equal((await post(e, `lessons/${CODE}/feedback`, { app: 'lift', kind: 'skipped' })).status, 400);
+  assert.equal(cleanReport({ app: 'talk', kind: 'skipped', before: 'x' }).error.startsWith('app and kind'), true);
+});
+
+test('kept rules reach Intake and Lift Ask too, in a second system block', async () => {
+  const e = env({ ANTHROPIC_API_KEY: 'k-lessons-more' });
+  e.HUB_KV.m.set(KEPT_KEY, JSON.stringify({ intake: ['Never make a task for a newsletter.'], lift: ['Prefer cable exercises.'] }));
+  const bodies = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { bodies.push(JSON.parse(init.body)); return new Response('{"type":"error","error":{"type":"invalid_request_error","message":"stop"}}', { status: 400, headers: { 'content-type': 'application/json' } }); };
+  try {
+    await assert.rejects(readItem(e, { files: [], text: 'a letter', today: '2026-10-19' }));
+    await assert.rejects(askLift(e, { question: 'rear delts?', library: ['Face Pull'], recent: [], routines: [] }));
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.equal(bodies.length, 2);
+  assert.match(bodies[0].system[1].text, /- Never make a task for a newsletter\./);
+  assert.match(bodies[1].system[1].text, /- Prefer cable exercises\./);
 });

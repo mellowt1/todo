@@ -3,15 +3,18 @@
  *
  *   1. Feedback. Every time Paul takes, changes or throws away what Claude gave him, one row goes
  *      into D1 feedback. Desk writes it itself (src/desk.js, on each approve, copy, skip, undo);
- *      the To-do app reports Tidy's Undo and an edit of a tidied task:
- *        POST /api/lessons/:code/feedback  <- { app: "tidy", kind: "undone" | "edited", before, after }
+ *      the apps report the rest (Paul, 2026-10-19: "the lesson loop should be more than just desk"):
+ *        POST /api/lessons/:code/feedback  <- { app, kind, before, after?, note? }   (REPORTS below)
+ *      To-do: Tidy's Undo, an edit of a tidied task, and "Keep as a task" when Tidy sent a line to
+ *      Desk (app tidy); an edit or a delete of a task Intake read from a letter (app intake).
+ *      Lift: a pick from Ask Claude added to a routine, or left (app lift).
  *   2. Sundays from 06:00, once (KV lessons:week:<monday>, reserved before the call): when the
  *      week holds at least MIN_CORRECTIONS corrections, Claude reads them with the rules already
  *      kept or dropped and proposes at most MAX_NEW short rules, each with one line on why.
  *   3. Morning's Week view shows them with Keep and Drop:
  *        POST /api/morning/:code/lesson    <- { id, action: "keep" | "drop" | "undo" }  -> { lessons }
- *      Kept rules (KV lessons:kept, rebuilt on every decision) go into the system prompts of Desk
- *      and Tidy from their next call on. Dropping a kept rule takes it out again.
+ *      Kept rules (KV lessons:kept, rebuilt on every decision) go into the system prompts of Desk,
+ *      Tidy, Intake and Lift's Ask from their next call on. Dropping a kept rule takes it out again.
  *
  * Writes only feedback, lessons and lessons:* keys. Never another app's data. */
 
@@ -22,7 +25,10 @@ import { anthropic, MODEL, randomId } from './intake.js';
 import { local, addDays, zoned } from './morning.js';
 import { maskSecrets, noDashes } from './mask.js';
 
-export const APPS = ['desk', 'tidy'];
+export const APPS = ['desk', 'tidy', 'intake', 'lift'];
+// What each app may report itself (Desk logs its own). after is required where it says what Paul wanted.
+export const REPORTS = { tidy: ['undone', 'edited'], intake: ['edited', 'skipped'], lift: ['approved', 'skipped'] };
+const NEEDS_AFTER = ['undone', 'edited'];
 export const KINDS = ['approved', 'copied', 'edited', 'skipped', 'undone'];
 export const CORRECTIONS = ['edited', 'skipped', 'undone'];
 export const MIN_CORRECTIONS = 2;
@@ -95,7 +101,11 @@ export function lessonsText(rules) {
 /* ---------- 2. Sunday: Claude proposes ---------- */
 
 const SYSTEM = [
-  'You help two small Claude features in Paul\'s own apps get better at what he wants. Desk: Paul types one line on his PC and Claude prepares to-do tasks and message drafts; he approves, edits, copies or skips each. Tidy: each to-do Paul types comes back cleaned up (typos, short, a date ending " · YYYY-MM-DD"); he can undo it or edit it after.',
+  'You help small Claude features in Paul\'s own apps get better at what he wants.',
+  'tidy: each to-do Paul types comes back cleaned up (typos, short, a date ending " · YYYY-MM-DD"), and Tidy also decides whether the line is a task, a question for Claude or a message to write. He can undo it, edit it after, or press Keep as a task when it sent a line to Desk by mistake (before "ask: ..." or "write: ...", after "task").',
+  'desk: a question or a message request typed in that same box. Claude answers, drafts messages and may suggest tasks; he adds, edits, copies or skips each.',
+  'intake: Claude reads letters, bills and PDFs and writes dated tasks. He may edit such a task (before is Claude\'s, after his) or delete it unused (skipped).',
+  'lift: in his gym app he asks Claude which exercises to add. Each pick is added to a routine (approved) or left (skipped); note is his question.',
   'You get this week\'s feedback rows: app, kind (edited = Paul changed Claude\'s version before keeping it, skipped = he threw it away, undone = he took it back, approved/copied = kept as given), before (Claude\'s version), after (Paul\'s), note (the line he typed). You also get the rules he already keeps and the ones he dropped.',
   `Propose at most ${MAX_NEW} new rules, only where the rows show a pattern or one very clear preference. Fewer is better; none is fine. Each rule: app, text (one instruction to Claude, under 140 characters, concrete, e.g. "Keep Dutch tasks in Dutch; never translate them."), why (under 120 characters, to Paul as "you", naming the corrections, e.g. "You undid 3 tidies that turned \\"tmrw\\" into a date.").`,
   'Never repeat or reword a kept rule or a dropped one. Never propose a rule that a single approved row contradicts. Use only what is in the rows; never invent tasks, names or numbers. Never use dashes as punctuation; use commas or full stops.',
@@ -207,7 +217,19 @@ export async function handleLesson(request, env, json, now = Date.now()) {
   return json({ ok: true, ...out }, request);
 }
 
-/* POST /api/lessons/:code/feedback, from the To-do app (Tidy only; Desk logs its own). */
+/* Pure: a report from an app, checked against REPORTS. Returns the row or { error }. */
+export function cleanReport(body) {
+  if (!body || !REPORTS[body.app] || !REPORTS[body.app].includes(body.kind)) {
+    return { error: 'app and kind: ' + Object.entries(REPORTS).map(([a, k]) => a + ' ' + k.join('|')).join(', ') };
+  }
+  const before = clip(body.before);
+  const after = clip(body.after);
+  if (!before) return { error: 'before required' };
+  if (NEEDS_AFTER.includes(body.kind) && (!after || after === before)) return { error: 'after required, and different' };
+  return { row: { app: body.app, kind: body.kind, before, after, note: clip(body.note, 300) } };
+}
+
+/* POST /api/lessons/:code/feedback, from the To-do app and Lift (Desk logs its own). */
 export async function handleLessons(request, env, rest, json, now = Date.now()) {
   if (rest.length !== 2 || rest[1] !== 'feedback' || !CODE.test(rest[0])) return json({ error: 'not found' }, request, 404);
   if (!env.TODO_CODE || !safeEqual(rest[0], env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
@@ -216,8 +238,8 @@ export async function handleLessons(request, env, rest, json, now = Date.now()) 
   if (raw.length > 2000) return json({ error: 'too large' }, request, 413);
   let body;
   try { body = JSON.parse(raw); } catch (e) { return json({ error: 'bad json' }, request, 400); }
-  if (!body || body.app !== 'tidy' || !['undone', 'edited'].includes(body.kind)) return json({ error: 'app tidy, kind undone or edited' }, request, 400);
-  if (!clip(body.before) || !clip(body.after) || clip(body.before) === clip(body.after)) return json({ error: 'before and after required' }, request, 400);
-  const ok = await logFeedback(env, { app: 'tidy', kind: body.kind, before: body.before, after: body.after }, now);
+  const got = cleanReport(body);
+  if (got.error) return json({ error: got.error }, request, 400);
+  const ok = await logFeedback(env, got.row, now);
   return json({ ok }, request);
 }

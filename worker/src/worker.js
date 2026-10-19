@@ -64,7 +64,7 @@
  * Backups: once a day the cron also copies the to-do list and the kitchen into KV
  * (backup:todo, backup:kitchen, backup:at) for the PC's weekly backup.
  *
- * Desk (src/desk.js; the to-do's code): Paul types one line on Morning, Claude prepares up to three
+ * Desk (src/desk.js; the to-do's code): a question or message typed in To-do's add box (Tidy says which), Claude prepares up to three
  * tasks or drafts and a short answer; nothing reaches the list until he approves, drafts are never sent.
  *   GET  /api/desk/:code        -> { items }  the last 10 lines
  *   POST /api/desk/:code        <- { text }   -> { item }
@@ -88,10 +88,19 @@
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
- * Lessons (src/lessons.js): Paul's corrections of Desk and Tidy go into D1 feedback; on Sundays
- * Claude proposes short rules from them, Paul keeps or drops each on Morning's Week view, and the
- * kept ones go into Desk's and Tidy's prompts.
- *   POST /api/lessons/:code/feedback   <- { app: "tidy", kind: "undone" | "edited", before, after }
+ * Door (src/door.js; the to-do's code): "Did I Lock It?" logs each lock here (never the photo), and
+ * on every cron run a timed Day event coming up within 45 minutes sends one ntfy push "Lock the
+ * door" that opens Door, unless a lock was logged in the last hour.
+ *   POST /api/door/:code/lock    <- { id, at, word?, photo? }     POST /api/door/:code/remove <- { id }
+ *   GET  /api/door/:code         -> { locks, next: { title, start, remindAt } | null }
+ *
+ * Digest (src/digest.js; Bearer <BEAT_TOKEN>): GET /api/hub/digest, the last week in the hub, masked.
+ * The PC writes it into Claude Code's memory every morning and feeds it to the Sunday weekly fix.
+ *
+ * Lessons (src/lessons.js): Paul's corrections of Desk, Tidy, Intake and Lift's Ask go into D1
+ * feedback; on Sundays Claude proposes short rules from them, Paul keeps or drops each on Morning's
+ * Week view, and the kept ones go into those four prompts.
+ *   POST /api/lessons/:code/feedback   <- { app, kind, before, after?, note? }  (REPORTS in lessons.js)
  *   POST /api/morning/:code/lesson     <- { id, action: "keep" | "drop" | "undo" }  -> { lessons }
  *
  * Status (src/status.js): every hour the cron reads what the hub holds and writes one line
@@ -140,6 +149,8 @@ import { handleTodoDay } from './dayplan.js';
 import { handleTalk } from './talk.js';
 import { handleLessons, handleLesson, weekLessons } from './lessons.js';
 import { handleLift, handleLiftDay, liftForMorning } from './lift.js';
+import { handleDoor, doorCron } from './door.js';
+import { handleDigest } from './digest.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -335,6 +346,7 @@ const MODULES = {
   morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
   hiscores: (request, env, rest) => handleHiscores(request, env, rest, json),
   lift: (request, env, rest) => handleLift(request, env, rest, json),
+  door: (request, env, rest) => handleDoor(request, env, rest, json),
   kitchen: handleKitchen,
   german: (request, env, rest, url) => handleGerman(request, env, rest, url, json),
   health: (request, env, rest) => handleHealth(request, env, rest, json),
@@ -343,6 +355,7 @@ const MODULES = {
   hub: (request, env, rest, url) => {
     const path = rest.join('/');
     if (path === 'lift/day') return handleLiftDay(request, env, json);
+    if (path === 'digest') return handleDigest(request, env, json);
     if (path === 'todo/day') return handleTodoDay(request, env, json);
     return handleHub(request, env, rest, url, json);
   },
@@ -373,7 +386,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

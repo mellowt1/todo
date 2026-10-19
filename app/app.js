@@ -204,12 +204,16 @@
    * text replaces it only when nobody has touched the task since, with Undo in the toast.
    * The toast sits under the capture sheet, so while the sheet is open the Undo goes on the
    * sheet's own line instead (capTidied). Offline, it stays as typed. */
-  async function tidyLater(id, typed) {
+  /* A question for Claude or a message to write (Tidy's kind "ask" or "write", 2026-10-19) leaves
+   * the list again and goes to Desk; its answer opens in the Claude sheet (Ask, below). An edited
+   * task (edit true) is only tidied, never sent. */
+  async function tidyLater(id, typed, edit) {
     if (!navigator.onLine) return;
     try {
       const r = await fetch(API + '/api/tidy/' + code, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: typed }) });
       const d = r.ok ? await r.json() : null;
       const it = items[id];
+      if (!edit && d && (d.kind === 'ask' || d.kind === 'write') && it && !it.done && it.text === typed) return toDesk(id, typed, d.kind);
       if (!d || !d.changed || !d.text || !it || it.done || it.text !== typed) return;
       upsert(Object.assign({}, it, { text: d.text }));
       tidied[id] = d.text;
@@ -223,8 +227,13 @@
    * what Paul wanted instead. On Sundays Claude turns those into rules he keeps or drops on Morning. */
   const tidied = {};
   function teach(kind, before, after) {
-    if (!navigator.onLine || !before || !after || before === after) return;
-    fetch(API + '/api/lessons/' + code + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app: 'tidy', kind, before, after }) }).catch(() => {});
+    if (!before || !after || before === after) return;
+    report('tidy', kind, before, after);
+  }
+  // Also Intake (an edit or a delete of a task read from a letter) and "Keep as a task" (2026-10-19).
+  function report(app, kind, before, after) {
+    if (!navigator.onLine || !before) return;
+    fetch(API + '/api/lessons/' + code + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app, kind, before, after }) }).catch(() => {});
   }
 
   function markDone(id) {
@@ -1909,8 +1918,9 @@
     const edited = from && items[from.id];
     if (edited && !edited.done && edited.text !== from.text) {
       if (tidied[edited.id] === from.text) teach('edited', from.text, edited.text);
+      if (INTAKE_MARK.test(from.text)) report('intake', 'edited', from.text, edited.text);
       delete tidied[edited.id];
-      tidyLater(edited.id, edited.text);
+      tidyLater(edited.id, edited.text, true);
     }
     // Focus goes back to the row it opened from. A task that ended up in another section says
     // where it went, once, however many times the section was changed.
@@ -1983,6 +1993,8 @@
     clearTimeout(editTimer);
     editId = null;
     editFrom = null;
+    const gone = items[id];
+    if (gone && !gone.done && isIntake(gone)) report('intake', 'skipped', gone.text); // Claude made a task he didn't want
     remove(id); // written at the tap; the row collapses behind the leaving sheet
     closeSheet($('edit'));
   });
@@ -2263,6 +2275,135 @@
   $('apply').querySelector('.scrim').addEventListener('click', closeApply);
   $('editApply').addEventListener('click', () => { const id = editId; closeEdit(() => openApply(id)); });
 
+  /* ---------- Ask: Claude answers in a sheet (Desk folded into To-do, 2026-10-19) ----------
+   * Paul types everything into the same box ("I don't really know when to use Desk"). When Tidy
+   * says a line is a question ("ask") or a message for Claude to write ("write"), it leaves the
+   * list and goes to Desk (worker/src/desk.js, POST /api/desk/:code). The sheet shows the answer,
+   * each draft with Copy and Share, and any task Claude suggests with Add. "Keep it as a task"
+   * puts the line back as typed and tells the lessons loop Tidy got it wrong. Nothing is sent
+   * from here; a draft only leaves through Paul's own Share or paste. */
+  let askItem = null;
+  let askWait = null; // an answer that came while another sheet was open
+  let askTimer = 0;
+  const LANG = { nl: 'Dutch', en: 'English', es: 'Spanish' };
+  async function toDesk(id, typed, kind) {
+    const section = items[id] ? items[id].section : ui.section;
+    remove(id);
+    delete tidied[id];
+    const li = $('capAdded').querySelector('li[data-id="' + id + '"]:not(.leaving)');
+    if (li) swapCapText(li.querySelector('.t'), 'For Claude: ' + typed);
+    readingN++;
+    readPill.querySelector('span').textContent = kind === 'write' ? 'Claude is writing' : 'Asking Claude';
+    slotIn(readPill);
+    say(kind === 'write' ? 'Claude is writing it.' : 'Asking Claude.');
+    let why = 'Claude could not answer. Kept it as a task.';
+    try {
+      const r = await fetch(API + '/api/desk/' + code, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: typed }) });
+      const d = await r.json().catch(() => null);
+      if (refused(r.status, d)) return showNoCode();
+      if (r.status === 429) why = 'Claude is busy. Kept it as a task.';
+      if (!r.ok || !d || !d.item) throw new Error((d && d.error) || 'status ' + r.status);
+      showAsk(Object.assign({}, d.item, { typed, kind, section }));
+    } catch (e) {
+      keepAsTask(typed, section);
+      toast(why);
+    } finally {
+      if (--readingN === 0) slotOut(readPill);
+    }
+  }
+  function keepAsTask(typed, section) {
+    const id = newId();
+    justAdded.add(id);
+    upsert({ id, text: typed, section: SECTIONS.includes(section) ? section : ui.section, done: false, doneAt: null, pos: now() });
+    tidyLater(id, typed, true); // tidied like any task, never sent to Claude again
+  }
+  // The answer waits for the capture sheet (or any other) to close, then opens.
+  function showAsk(item) {
+    if (!modals.size) return openAsk(item);
+    askWait = item;
+    say('Claude answered. It opens when you close this.');
+    clearInterval(askTimer);
+    askTimer = setInterval(() => {
+      if (modals.size || !askWait) return;
+      clearInterval(askTimer);
+      const x = askWait;
+      askWait = null;
+      openAsk(x);
+    }, 300);
+  }
+  function openAsk(item) {
+    askItem = item;
+    renderAsk();
+    openSheet($('ask'), 0, null);
+    $('askClose').focus({ preventScroll: true });
+  }
+  function renderAsk() {
+    const it = askItem;
+    if (!it) return;
+    let html = '<p class="ask-line">' + esc(it.typed || it.text) + '</p>';
+    if (it.answer) html += '<p class="ask-answer">' + esc(it.answer) + '</p>';
+    it.actions.forEach((a, i) => {
+      if (a.kind === 'draft') {
+        const head = [a.to ? 'To ' + a.to : 'Message', LANG[a.lang] || ''].filter(Boolean).join(' · ');
+        const copied = a.state === 'copied';
+        html += '<div class="ask-draft"><div class="meta">' + esc(head) + '</div><p>' + esc(a.text) + '</p><div class="ask-btns">' +
+          '<button class="card-copy' + (copied ? ' ok' : '') + '" data-act="copy" data-i="' + i + '">' + (copied ? 'Copied' : 'Copy') + '</button>' +
+          (navigator.share ? '<button class="ask-share" data-act="share" data-i="' + i + '">Share</button>' : '') + '</div></div>';
+      } else if (a.kind === 'todo') {
+        const on = a.state === 'approved';
+        const p = nameParts({ text: a.text });
+        const shown = p.name + (p.due ? ' · ' + dueLabel(p.due).words + (p.time ? ' ' + p.time : '') : '');
+        html += '<div class="ask-task"><span class="ask-t">' + esc(shown) + '<small>' + (on ? 'In ' : 'For ') + LABEL[a.section] + '</small></span>' +
+          '<button class="card-copy' + (on ? ' ok' : '') + '" data-act="' + (on ? 'undo' : 'add') + '" data-i="' + i + '" aria-label="' + (on ? 'Added. Tap to take it out again' : 'Add to ' + LABEL[a.section]) + '">' + (on ? 'Added' : 'Add') + '</button></div>';
+      }
+    });
+    if (!it.answer && !it.actions.length) html += '<p class="ap-say">Claude had nothing to add.</p>';
+    html += '<button class="ask-keep" data-act="keep">Keep it as a task instead</button>';
+    $('askBody').innerHTML = html;
+  }
+  async function askAct(i, action) {
+    const it = askItem;
+    try {
+      const r = await fetch(API + '/api/desk/' + code + '/act', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: it.id, idx: i, action }) });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d || !d.item) throw new Error((d && d.error) || 'status ' + r.status);
+      if (askItem && askItem.id === it.id) { askItem = Object.assign({}, d.item, { typed: it.typed, kind: it.kind, section: it.section }); renderAsk(); }
+      if (action === 'approve' || action === 'undo') poll(); // Desk wrote the task; draw it now
+      return true;
+    } catch (e) {
+      toast(navigator.onLine ? 'Could not do that. Try again.' : 'Needs a connection.');
+      return false;
+    }
+  }
+  function closeAsk() {
+    if (!askItem) return;
+    askItem = null;
+    closeSheet($('ask'));
+  }
+  $('askBody').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    const it = askItem;
+    if (!b || !it) return;
+    const i = Number(b.dataset.i);
+    const a = it.actions[i];
+    const act = b.dataset.act;
+    if (act === 'keep') {
+      keepAsTask(it.typed, it.section);
+      report('tidy', 'undone', it.kind + ': ' + it.typed, 'task'); // Tidy sent a task to Claude
+      closeAsk();
+      toast('Kept as a task.');
+    } else if (act === 'add') askAct(i, 'approve').then((ok) => ok && say('Added to ' + LABEL[a.section]));
+    else if (act === 'undo') askAct(i, 'undo').then((ok) => ok && say('Taken out again'));
+    else if (act === 'copy' && a) {
+      const done = (ok) => { if (ok) { askAct(i, 'copied'); say('Copied'); } else { b.textContent = 'Select it and copy'; say('Could not copy'); } };
+      (navigator.clipboard ? navigator.clipboard.writeText(a.text) : Promise.reject()).then(() => done(true), () => done(false));
+    } else if (act === 'share' && a) {
+      navigator.share({ text: a.text }).then(() => askAct(i, 'copied'), () => {});
+    }
+  });
+  $('askClose').addEventListener('click', closeAsk);
+  $('ask').querySelector('.scrim').addEventListener('click', closeAsk);
+
   /* ---------- Keyboard (desktop) ---------- */
   function rows() { return Array.from(list.querySelectorAll(view === 'done' ? '.drow' : '.row:not(.skeleton)')); }
   const isField = (el) => !!el && (/^(input|textarea|select)$/i.test(el.tagName || '') || el.isContentEditable);
@@ -2281,12 +2422,13 @@
       if (!$('edit').hidden) { closeEdit(); return; }
       if (!$('card').hidden) { closeCard(); return; }
       if (!$('apply').hidden) { closeApply(); return; }
+      if (!$('ask').hidden) { closeAsk(); return; }
       if (!$('capture').hidden) { closeCapture(); return; }
       closeReveal();
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('ask')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
       const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

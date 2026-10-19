@@ -25,7 +25,7 @@ test('the route: tidies, says whether it changed, counts usage; intake tasks pas
   let seen;
   _setTidier(async (_e, text) => { seen = text; return { out: { name: 'Book the bike service', due: '2026-10-20' }, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }; });
   let r = await post(e, `tidy/${CODE}`, { text: '  book bike servise monday ' });
-  assert.deepEqual(await r.json(), { text: 'Book the bike service · 2026-10-20', changed: true });
+  assert.deepEqual(await r.json(), { text: 'Book the bike service · 2026-10-20', changed: true, kind: 'task' });
   assert.equal(seen, 'book bike servise monday');
   assert.ok([...e.HUB_KV.m.keys()].some((k) => k.startsWith('tidy:usage:')));
   r = await post(e, `tidy/${CODE}`, { text: 'Pay the CJIB fine · 2026-10-21 [intake]' });
@@ -47,4 +47,14 @@ test('toText: a clock time rides after the date, never alone, and a kept time st
   assert.equal(toText({ name: 'Dentist', due: null, time: '14:00' }, 'dentist 2pm', '2026-10-17'), 'Dentist', 'a time without a date is dropped');
   assert.equal(toText({ name: 'Dentist', due: '2026-10-23', time: '25:00' }, 'dentist', '2026-10-17'), 'Dentist · 2026-10-23');
   assert.equal(toText({ name: 'Call Bas', due: null, time: null }, 'call bas · 2026-10-20 09:30', '2026-10-17'), 'Call Bas · 2026-10-20 09:30');
+});
+
+test('a question or a message comes back as typed with its kind, for the app to hand to Desk', async () => {
+  const e = env();
+  _setTidier(async () => ({ out: { name: 'What do I have on Thursday', due: null, time: null, kind: 'ask' }, usage: null }));
+  assert.deepEqual(await (await post(e, `tidy/${CODE}`, { text: 'what do i have on thursday' })).json(), { text: 'what do i have on thursday', changed: false, kind: 'ask' });
+  _setTidier(async () => ({ out: { name: 'Write to the landlord', due: null, time: null, kind: 'write' }, usage: null }));
+  assert.equal((await (await post(e, `tidy/${CODE}`, { text: 'write to the landlord' })).json()).kind, 'write');
+  _setTidier(async () => ({ out: { name: 'Odd', due: null, time: null, kind: 'poem' }, usage: null }));
+  assert.equal((await (await post(e, `tidy/${CODE}`, { text: 'odd' })).json()).kind, 'task', 'anything unknown is a task');
 });

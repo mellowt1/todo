@@ -189,6 +189,19 @@
   </div>
 </div>
 
+<!-- Ask: a question or a message typed in the add box goes to Claude (Desk); the answer opens here (app.js, Ask). Nothing is sent. -->
+<div id="ask" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet" role="dialog" aria-labelledby="askHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="askHead" class="meta">Claude</span>
+      <button id="askClose" class="text-btn">Close</button>
+    </div>
+    <div id="askBody" class="card-body" aria-live="polite"></div>
+  </div>
+</div>
+
 <div id="confirm" class="dialog-wrap" hidden>
   <div class="scrim"></div>
   <div class="dialog" role="alertdialog" aria-labelledby="confirmText">

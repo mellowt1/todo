@@ -26,6 +26,7 @@ import { z } from 'zod';
 import { cleanBatch, cleanOp, MAX_TEXT } from './todo.js';
 import { maskSecrets } from './mask.js';
 import { cardFromRecord, saveLetter, handleLetters } from './letters.js';
+import { keptFor, lessonsText } from './lessons.js';
 
 export const MODEL = 'claude-opus-5-5';
 export const MAX_FILES = 10;
@@ -118,10 +119,14 @@ export async function readItem(env, { files, text, today }) {
   content.push({ type: 'text', text: `Today is ${today}. Read the input above and fill the record.` });
 
   const people = typeof env.INTAKE_PEOPLE === 'string' && env.INTAKE_PEOPLE.trim() ? '\nWho is who:\n' + env.INTAKE_PEOPLE.trim() : '';
+  // Paul's kept rules (src/lessons.js) in a second block, so the first stays cached.
+  const rules = lessonsText(await keptFor(env, 'intake'));
+  const system = [{ type: 'text', text: SYSTEM + people, cache_control: { type: 'ephemeral' } }];
+  if (rules) system.push({ type: 'text', text: rules });
   const res = await anthropic(env).beta.messages.parse({
     model: MODEL,
     max_tokens: 8000,
-    system: [{ type: 'text', text: SYSTEM + people, cache_control: { type: 'ephemeral' } }],
+    system,
     messages: [{ role: 'user', content }],
     output_config: { effort: 'high', format: zodOutputFormat(Record) },
     fallbacks: 'default',

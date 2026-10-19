@@ -14,7 +14,8 @@
     "feel:webkit": "node scripts/feel.mjs --webkit",
     "lookset": "node scripts/lookset.mjs",
     "apply-check": "node scripts/apply-check.mjs",
-    "tidy-check": "node scripts/tidy-check.mjs"
+    "tidy-check": "node scripts/tidy-check.mjs",
+    "ask-check": "node scripts/ask-check.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

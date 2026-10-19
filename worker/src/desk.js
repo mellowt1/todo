@@ -1,4 +1,9 @@
-/* Desk: Paul types one line on Morning, Claude prepares, Paul approves.
+/* Desk: Paul types one line, Claude prepares, Paul approves.
+ *
+ * Since 2026-10-19 the line comes from the To-do app's add box (Paul: "if I want to write something
+ * in Day, I just pop open To Do and type it in"). Tidy (src/tidy.js) decides a line is a question
+ * ("ask") or a message to write ("write"); the app then sends it here and shows the answer and the
+ * drafts in a sheet. Morning's own Desk card is gone.
  *
  *   GET  /api/desk/:code           -> { items }   the last 10 lines, newest first
  *   POST /api/desk/:code           <- { text }    -> { item }
@@ -56,7 +61,7 @@ export const Plan = z.object({
 
 /* Frozen per deploy, so it caches. The day's context goes in the user message. */
 export const SYSTEM = [
-  'You are Desk, a helper inside Paul\'s own apps. Paul types one line on his PC. You prepare things for him to approve; you never act yourself.',
+  'You are Desk, a helper inside Paul\'s own apps. Paul typed one line into his to-do app, on his phone or PC, and it was a question for you or a message he wants written. You prepare things for him to approve; you never act yourself.',
   'You can prepare two kinds of action, three at most, and give one short answer:',
   '1. todo: a task for his to-do list. Sections: today (must happen today or tomorrow), soon (this week or two, or has a date), someday (no pressure). A task Paul does for someone else starts with their name, e.g. "Dad: set up the printer".',
   '   Write the task short and imperative, the way Paul would write it himself, in the language he typed. When he gives a date, end the text with " · YYYY-MM-DD".',

@@ -14,6 +14,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { anthropic, bumpUsage, dayOf } from './intake.js';
+import { keptFor, lessonsText } from './lessons.js';
 
 export const ASK_MODEL = 'claude-opus-5-5';
 const MAX_BODY = 60000;
@@ -69,10 +70,13 @@ export function cleanAnswer(out) {
 
 export async function askLift(env, input) {
   const { question, library, recent, routines } = input;
+  const rules = lessonsText(await keptFor(env, 'lift')); // Paul's kept rules, src/lessons.js
+  const system = [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }];
+  if (rules) system.push({ type: 'text', text: rules });
   const res = await anthropic(env).messages.parse({
     model: ASK_MODEL,
     max_tokens: 8000,
-    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    system,
     messages: [{
       role: 'user',
       content: `His library: ${library.join('; ')}\n`
