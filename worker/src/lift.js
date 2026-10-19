@@ -7,6 +7,7 @@
  *   POST /api/lift/:code         <- { summary, backup? }  -> { ok, xp, feed }
  *   GET  /api/lift/:code         -> { summary, at, backupAt, backupSize }
  *   GET  /api/lift/:code/backup  -> the backup as the phone sent it
+ *   POST /api/lift/:code/ask     -> Claude suggests exercises (src/lift-ask.js)
  *   Morning's block (liftForMorning) -> { next, nextDay, today, week, last, at }
  *   GET  /api/hub/lift/day       Bearer HUB_SECRET_DAY -> { plan: { name, date } | null, workouts: [{ id, name, start, end }], at }  for Day's gym blocks
  *
@@ -23,6 +24,7 @@ import { safeEqual, bearer, CODE } from './todo.js';
 import { local } from './morning.js';
 import { grant, XP } from './hiscores.js';
 import { cleanEvent, putEvent } from './events.js';
+import { handleLiftAsk } from './lift-ask.js';
 
 const STATE = 'lift:state';
 const BACKUP = 'lift:backup';
@@ -178,6 +180,7 @@ export async function handleLift(request, env, rest, json, now = Date.now()) {
     const b = await env.HUB_KV.get(BACKUP, 'json');
     return b ? json(b, request) : json({ error: 'no backup yet' }, request, 404);
   }
+  if (rest[1] === 'ask') return handleLiftAsk(request, env, json, now);
   if (rest.length === 2) return json({ error: 'not found' }, request, 404);
   if (request.method === 'GET') {
     const st = await env.HUB_KV.get(STATE, 'json');
