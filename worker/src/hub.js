@@ -74,7 +74,8 @@ export function pick(payload, fields) {
 const parseFields = (s) => { try { const a = JSON.parse(s); return Array.isArray(a) ? a : []; } catch (e) { return []; } };
 
 /* Store, match, enqueue. Returns the response body and status. */
-export async function acceptEvent(env, ev) {
+/* `feed: false` keeps the event out of Morning's Lately feed (the Energy dial's taps). */
+export async function acceptEvent(env, ev, { feed = true } = {}) {
   const ins = await env.HUB_DB.prepare(
     'INSERT INTO events (id, source, type, summary, payload, caused_by, hops, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING'
   ).bind(ev.id, ev.source, ev.type, ev.summary, JSON.stringify(ev.payload), ev.caused_by, ev.hops, ev.at).run();
@@ -99,7 +100,7 @@ export async function acceptEvent(env, ev) {
     }
     queued = messages.length;
   }
-  try {
+  if (feed) try {
     await putEvent(env, { source: ev.source, kind: ev.type.split('.')[0].slice(0, 16), who: '', text: ev.summary.slice(0, 140), at: ev.at });
   } catch (e) { /* the feed line is a nicety; the event is stored */ }
   return { status: 200, body: { ok: true, id: ev.id, queued } };

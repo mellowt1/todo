@@ -97,6 +97,12 @@
  *   POST /api/door/:code/lock    <- { id, at, word?, photo? }     POST /api/door/:code/remove <- { id }
  *   GET  /api/door/:code         -> { locks, next: { title, start, remindAt } | null }
  *
+ * Energy dial (src/energy.js; the to-do's code, Day with Bearer <HUB_SECRET_DAY>): wired, normal or
+ * drained, held by the hub as energy.set events for 4 hours; Give me one picks a task that fits.
+ *   GET  /api/energy/:code ?pick=1      POST /api/energy/:code <- { level, source }
+ *   POST /api/energy/:code/pick <- { mode, skip, current?, skipped?, source }   POST /api/energy/:code/suggest
+ *   GET/POST /api/hub/energy/day[/pick]
+ *
  * Digest (src/digest.js; Bearer <BEAT_TOKEN>): GET /api/hub/digest, the last week in the hub, masked.
  * The PC writes it into Claude Code's memory every morning and feeds it to the Sunday weekly fix.
  *
@@ -155,6 +161,7 @@ import { handleLessons, handleLesson, weekLessons } from './lessons.js';
 import { handleLift, handleLiftDay, liftForMorning } from './lift.js';
 import { handleDoor, doorCron } from './door.js';
 import { handleDigest } from './digest.js';
+import { handleEnergy, handleEnergyDay } from './energy.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -361,6 +368,7 @@ const MODULES = {
     if (path === 'lift/day') return handleLiftDay(request, env, json);
     if (path === 'digest') return handleDigest(request, env, json);
     if (path === 'todo/day') return handleTodoDay(request, env, json);
+    if (rest[0] === 'energy' && rest[1] === 'day') return handleEnergyDay(request, env, rest.slice(2), json);
     return handleHub(request, env, rest, url, json);
   },
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
@@ -368,6 +376,7 @@ const MODULES = {
   tidy: (request, env, rest) => handleTidy(request, env, rest, json),
   talk: (request, env, rest) => handleTalk(request, env, rest, json),
   lessons: (request, env, rest) => handleLessons(request, env, rest, json),
+  energy: (request, env, rest) => handleEnergy(request, env, rest, json),
   admin: handleAdmin,
 };
 

@@ -38,6 +38,7 @@ const Tidy = z.object({
   due: z.string().nullable().describe('YYYY-MM-DD when the line names a day or date, else null'),
   time: z.string().nullable().describe('HH:MM, 24-hour, when the line names a clock time, else null'),
   kind: z.enum(['task', 'ask', 'write']).describe('task: something to do or remember (the default). ask: a question for Claude to answer now. write: Paul asks Claude to write a message for him'),
+  energy: z.enum(['wired', 'normal', 'drained']).describe('the energy the task takes: wired (needs real focus), normal (ordinary, some thinking), drained (small and easy)'),
 });
 export const KINDS = ['task', 'ask', 'write'];
 
@@ -51,6 +52,7 @@ export const SYSTEM = [
   'If the line names a clock time (14:00, 2pm, half 3, om drie uur, a las 5), take it out of the name too and give it as time, 24-hour HH:MM. A time with no day: due is today if the time is still to come, else tomorrow. Never guess a time from words such as morning or evening. Otherwise time is null.',
   'Never add anything he did not write. If the line is already clean, return it unchanged.',
   'kind: almost every line is "task", also a note to himself phrased as a question ("call mum?", "ask Mark about Saturday", "text Olivia"). Use "ask" only when he asks you a question that wants an answer now ("what do I have on Thursday?", "how long do I boil an egg", "wat is de deadline van de huurtoeslag"). Use "write" only when he asks you to write the words of a message, email or reply for him ("write to the landlord that the heater is broken", "draft a WhatsApp to mum saying I land at 8", "mail de gemeente dat ik verhuisd ben"). When unsure, "task".',
+  'energy: your guess at the energy the task takes, which Paul confirms himself. "wired": needs real focus or drive (building, writing, applying for a job, a hard conversation, anything long or new). "normal": an ordinary task with some thinking (a meeting, booking, sorting out an account). "drained": small and easy, fine on a tired evening (buy, text, return, look up one thing). When unsure between two, the lower one.',
   'Check every word for spelling, also short ones. Examples (today Saturday 2026-10-17):',
   '"dad: fix his printr" -> name "Dad: fix his printer", due null, time null, kind "task"',
   '"remind me to buy cat food tmrw" -> name "Buy cat food", due "2026-10-18", time null, kind "task"',
@@ -126,5 +128,7 @@ export async function handleTidy(request, env, rest, json, now = Date.now()) {
   const kind = KINDS.includes(got.out.kind) ? got.out.kind : 'task';
   if (kind !== 'task') return json({ text: typed, changed: false, kind }, request); // the app hands it to Desk as typed
   const text = toText(got.out, typed, local(now).date);
-  return json({ text, changed: text !== typed, kind }, request);
+  // A guess only: the app stores it as energyGuess and Paul confirms it (Energy dial, src/energy.js).
+  const energy = ['wired', 'normal', 'drained'].includes(got.out.energy) ? got.out.energy : null;
+  return json({ text, changed: text !== typed, kind, energy }, request);
 }

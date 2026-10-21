@@ -40,6 +40,7 @@ import { noDashes } from './mask.js';
 import { mirrorFor } from './mirror.js';
 import { lessonsFor } from './lessons.js';
 import { grantWeek } from './hiscores.js';
+import { energyFor } from './energy.js';
 
 const DAY = 24 * 3600 * 1000;
 export const QUIET_DAYS = 14;
@@ -167,7 +168,7 @@ export async function weekBlock(env, now = Date.now()) {
   const today = local(now).date;
   const monday = mondayOf(today);
   const nextMon = addDays(monday, 7);
-  const [doc, marks, vac, cal, para, mirror, lessons] = await Promise.all([
+  const [doc, marks, vac, cal, para, mirror, lessons, energy] = await Promise.all([
     exportList(env),
     env.HUB_DB ? readMarks(env) : new Map(),
     env.HUB_DB
@@ -178,6 +179,7 @@ export async function weekBlock(env, now = Date.now()) {
     env.HUB_KV.get(PARA_PREFIX + monday, 'json'),
     mirrorFor(env, monday),
     lessonsFor(env).catch(() => null),
+    energyFor(env, monday, now).catch(() => null),
   ]);
   const items = Object.values(doc.items);
   const ids = new Map(await Promise.all(vac.map(async (r) => [r.id, await todoTaskId(r.id)])));
@@ -199,6 +201,7 @@ export async function weekBlock(env, now = Date.now()) {
     paragraph: para && typeof para.text === 'string' ? para.text : null,
     mirror,
     lessons,
+    energy, // the dial's week: level per day and part, src/energy.js energyWeek
   };
 }
 

@@ -23,9 +23,9 @@ test('toText: capital, no full stop, no dashes, the date as the ending, a kept e
 test('the route: tidies, says whether it changed, counts usage; intake tasks pass through', async () => {
   const e = env();
   let seen;
-  _setTidier(async (_e, text) => { seen = text; return { out: { name: 'Book the bike service', due: '2026-10-20' }, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }; });
+  _setTidier(async (_e, text) => { seen = text; return { out: { name: 'Book the bike service', due: '2026-10-20', energy: 'normal' }, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }; });
   let r = await post(e, `tidy/${CODE}`, { text: '  book bike servise monday ' });
-  assert.deepEqual(await r.json(), { text: 'Book the bike service · 2026-10-20', changed: true, kind: 'task' });
+  assert.deepEqual(await r.json(), { text: 'Book the bike service · 2026-10-20', changed: true, kind: 'task', energy: 'normal' }, 'the energy is a guess for the app to show');
   assert.equal(seen, 'book bike servise monday');
   assert.ok([...e.HUB_KV.m.keys()].some((k) => k.startsWith('tidy:usage:')));
   r = await post(e, `tidy/${CODE}`, { text: 'Pay the CJIB fine · 2026-10-21 [intake]' });

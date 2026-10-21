@@ -5,13 +5,19 @@
  * Stored document, one KV key per list (todo:<code>):
  *   { items: { [id]: Item }, tombs: { [id]: deletedAt }, rev, updated }
  *
- * Item: { id, text, section, done, doneAt, updatedAt, pos, link? }
+ * Item: { id, text, section, done, doneAt, updatedAt, pos, link?, energy?, energyGuess? }
  *   section  "today" | "soon" | "someday" (a done task keeps the section it came from)
  *   doneAt   ms since epoch, or null while open
  *   pos      ms since epoch, sort key inside a section (newest on top)
  *   link     optional http(s) URL (a vacancy's page, set by the hub). An upsert without
  *            `link` keeps the stored one, so an app that does not know links never drops it;
  *            `link: null` removes it.
+ *   energy   optional "wired" | "normal" | "drained": the energy the task takes, confirmed by
+ *            Paul (Energy dial, src/energy.js, 2026-10-21). Only a confirmed level is ever picked.
+ *   energyGuess  optional, the same three: a suggestion (Tidy, or the one-off pass over old tasks)
+ *            that Paul has not confirmed yet. The app shows it outlined.
+ *            Both behave like `link`: an upsert without the field keeps the stored one, `null`
+ *            removes it, so an app or hub job that does not know them never drops them.
  *
  * Every op carries its own updatedAt. For each task the newest updatedAt wins, so an
  * offline phone and a desktop never overwrite each other's work on other tasks.
@@ -19,6 +25,8 @@
  */
 
 export const SECTIONS = ['today', 'soon', 'someday'];
+export const ENERGY = ['wired', 'normal', 'drained'];
+const KEEP = ['link', 'energy', 'energyGuess']; // left out of an upsert: the stored value stays
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
@@ -88,6 +96,13 @@ export function cleanOp(raw, now = Date.now()) {
     item.link = cleanLink(it.link);
     if (item.link === null) return null;
   }
+  for (const f of ['energy', 'energyGuess']) {
+    if (it[f] === null) item[f] = null;
+    else if (it[f] !== undefined) {
+      if (!ENERGY.includes(it[f])) return null;
+      item[f] = it[f];
+    }
+  }
   return { op: 'upsert', item };
 }
 
@@ -120,8 +135,10 @@ export function applyOps(doc, ops) {
       if (tomb !== undefined && tomb >= item.updatedAt) continue;
       if (cur && cur.updatedAt >= item.updatedAt) continue;
       const next = { ...item };
-      if (next.link === undefined && cur && cur.link) next.link = cur.link;
-      if (next.link === null) delete next.link;
+      for (const f of KEEP) {
+        if (next[f] === undefined && cur && cur[f]) next[f] = cur[f];
+        if (next[f] === null) delete next[f];
+      }
       doc.items[item.id] = next;
       if (tomb !== undefined) delete doc.tombs[item.id];
       changed = true;
