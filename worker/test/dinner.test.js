@@ -65,7 +65,7 @@ const kitchenRead = async (e) => (await worker.fetch(new Request('https://hub.ex
 test('the two rules are seeded: day dinner.away and dinner.back go to kitchen with date and title', async () => {
   const e = env();
   const r = await (await get(e, 'admin/rules', ADMIN)).json();
-  const mine = r.rules.filter((x) => x.source === 'day');
+  const mine = r.rules.filter((x) => x.source === 'day' && x.target === 'kitchen'); // Day also sorts mail (0011)
   assert.deepEqual(mine.map((x) => [x.id, x.type, x.target, x.fields, x.enabled]), [
     ['day-dinner-away-kitchen', 'dinner.away', 'kitchen', ['date', 'title'], true],
     ['day-dinner-back-kitchen', 'dinner.back', 'kitchen', ['date', 'title'], true],

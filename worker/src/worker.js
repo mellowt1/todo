@@ -112,6 +112,10 @@
  *   GET/POST /api/waiting/:code     POST /api/waiting/:code/:id <- { action: resolve | snooze | still }
  *   GET/POST /api/hub/waiting/day
  *
+ * Email in (src/mail.js; the `email` handler, EMAIL_ALLOW): mail forwarded to hub@ becomes a task
+ * (todo:), a read-later line (later:), a Waiting on item (wait:) or waits in Day (no prefix).
+ *   GET /api/mail/:code   POST /api/mail/:code/:id <- { action: done | drop }   GET/POST /api/hub/mail/day[/:id]
+ *
  * Digest (src/digest.js; Bearer <BEAT_TOKEN>): GET /api/hub/digest, the last week in the hub, masked.
  * The PC writes it into Claude Code's memory every morning and feeds it to the Sunday weekly fix.
  *
@@ -174,6 +178,7 @@ import { handleDoor, doorCron } from './door.js';
 import { handleDigest } from './digest.js';
 import { handleEnergy, handleEnergyDay } from './energy.js';
 import { handleWaiting, handleWaitingDay, waitingCron, waitingForMorning } from './waiting.js';
+import { receiveMail, handleMail, handleMailDay, mailForMorning } from './mail.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -366,7 +371,7 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning, waiting: waitingForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning, waiting: waitingForMorning, mail: mailForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
   hiscores: (request, env, rest) => handleHiscores(request, env, rest, json),
   lift: (request, env, rest) => handleLift(request, env, rest, json),
   door: (request, env, rest) => handleDoor(request, env, rest, json),
@@ -382,6 +387,7 @@ const MODULES = {
     if (path === 'todo/day') return handleTodoDay(request, env, json);
     if (rest[0] === 'energy' && rest[1] === 'day') return handleEnergyDay(request, env, rest.slice(2), json);
     if (path === 'waiting/day') return handleWaitingDay(request, env, json);
+    if (rest[0] === 'mail' && rest[1] === 'day') return handleMailDay(request, env, rest.slice(2), json);
     return handleHub(request, env, rest, url, json);
   },
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
@@ -391,6 +397,7 @@ const MODULES = {
   lessons: (request, env, rest) => handleLessons(request, env, rest, json),
   energy: (request, env, rest) => handleEnergy(request, env, rest, json),
   waiting: (request, env, rest) => handleWaiting(request, env, rest, json),
+  mail: (request, env, rest) => handleMail(request, env, rest, json),
   admin: handleAdmin,
 };
 
@@ -416,6 +423,15 @@ export default {
     const jobs = [weekCron(env), waitingCron(env),repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env).then(() => laneMoves(env)), weekLessons(env)]; // the last three run once, then skip (lanes: src/lanes.js)
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
+  },
+  /* Email in (src/mail.js): Cloudflare Email Routing hands hub@ mail here. Nothing is ever sent
+   * back: a failure is logged without content and the mail is let go, never bounced. */
+  async email(message, env) {
+    try {
+      await receiveMail(message, env);
+    } catch (e) {
+      console.log('mail failed', String(e && e.name));
+    }
   },
   async queue(batch, env) {
     await consume(batch, env);

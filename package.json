@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
+    "postal-mime": "4.0.4",
     "zod": "^4.6.5"
   }
 }
