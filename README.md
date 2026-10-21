@@ -171,6 +171,10 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `POST /api/energy/:code/pick` | the code | `{ mode: "next" \| "surprise", skip, current?, skipped?, source }`; `skipped` is stored as `energy.skipped` |
 | `POST /api/energy/:code/suggest` | the code | one Claude Haiku pass that writes `energyGuess` on open tasks with neither level nor guess, at most once a day |
 | `GET/POST /api/hub/energy/day[/pick]` | `Bearer HUB_SECRET_DAY` | the same for Day, through the Odysseus backend |
+| `GET /api/waiting/:code` | the code | Waiting on: `{ items, open, due, names }`, open items oldest first |
+| `POST /api/waiting/:code` | the code | `{ who, what, channel, chaseDays?, forWhom?, source, sourceItem? }`, stored in D1 `waiting` |
+| `POST /api/waiting/:code/:id` | the code | `{ action: "resolve" \| "snooze" \| "still", days? }`; resolve ticks the open chase task off |
+| `GET/POST /api/hub/waiting/day` | `Bearer HUB_SECRET_DAY` | Day: `{ open, due, dueWho }` and quick add |
 | `/api/morning/...` | | see Morning Screen above |
 | `/api/kitchen/...`, `/api/admin/kitchen/...` | | see Kitchen above |
 | `/api/german/...` | | see German calls above |
