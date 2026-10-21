@@ -88,6 +88,10 @@
  * Dates (src/due.js): every cron run moves open tasks whose date (" · YYYY-MM-DD" in the text) has
  * come from Soon or Someday into Today, once per date.
  *
+ * Repeats (src/repeat.js): every cron run, before the dates, makes the next one of a ticked repeating
+ * task the app did not make, keeps one open bins task from the bin calendar, and once merged the Thema
+ * avond tasks into one.
+ *
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
@@ -154,6 +158,7 @@ import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
 import { dueCron } from './due.js';
+import { repeatCron } from './repeat.js';
 import { handleTidy } from './tidy.js';
 import { handleTodoDay } from './dayplan.js';
 import { handleTalk } from './talk.js';
@@ -399,7 +404,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env), dueCron(env), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

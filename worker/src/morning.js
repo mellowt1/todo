@@ -728,7 +728,7 @@ export function binsBlock(list, now) {
   return { collections };
 }
 
-async function bins(env, now) {
+export async function bins(env, now) {
   const a = parseAddress(env.BIN_ADDRESS);
   if (!a) return null;
   const list = await cached(env, 'cache:bins:' + hash(a.postcode + a.number + a.extra), TTL.bins, STALE.bins, now, async () => {
