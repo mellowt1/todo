@@ -2225,6 +2225,7 @@
   let cardId = null;
   let card = null; // the open card, or { error } / null while it loads
   let cardDone = null; // { date, how } while Done is asking
+  let cardChanging = false; // the next step's card shows the options again (Change)
   const HOWS = [['paid', 'Paid'], ['form sent', 'Form sent'], ['called', 'Called']];
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -2252,6 +2253,7 @@
     cardId = id;
     card = null;
     cardDone = null;
+    cardChanging = false;
     renderCard();
     const a = document.activeElement;
     openSheet($('card'), 0, list.contains(a) ? a : desk.matches ? row : null);
@@ -2309,9 +2311,26 @@
     ].map(([k, label, sub, v]) => '<div class="card-fact"><span class="card-k">' + esc(label) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>' +
       (v ? '<span class="card-v">' + esc(v) + '</span><button class="card-copy" data-copy="' + k + '" aria-label="Copy ' + esc(label.toLowerCase()) + '">Copy</button>'
          : '<span class="card-v none">not on file</span><span></span>') + '</div>').join('');
-    const opts = card.options.length ? '<div class="meta">The letter offers</div><div class="card-opts" role="radiogroup" aria-label="Options">' +
-      card.options.map((o, i) => '<button class="card-opt" role="radio" aria-checked="' + (card.pick === i) + '" data-pick="' + i + '"' + (card.done ? ' disabled' : '') + '>' +
-        '<span class="card-dot" aria-hidden="true"></span><span><b>' + esc(o.title) + '</b>' + (o.detail ? '<span>' + esc(o.detail) + '</span>' : '') + '</span></button>').join('') + '</div>' : '';
+    // A choice closes the letter (2026-10-21): the options are Choose buttons; the pick ticks this
+    // task and brings in the next step on the deadline, which opens this card with the choice
+    // stamped and a Change. A done letter keeps the old read-only list.
+    const ch = card.chosen;
+    const onNext = !!(ch && ch.isNext);
+    let opts = '';
+    if (card.options.length && card.done) {
+      opts = '<div class="meta">The letter offers</div><div class="card-opts" role="radiogroup" aria-label="Options">' +
+        card.options.map((o, i) => '<button class="card-opt" role="radio" aria-checked="' + (card.pick === i) + '" disabled>' +
+          '<span class="card-dot" aria-hidden="true"></span><span><b>' + esc(o.title) + '</b>' + (o.detail ? '<span>' + esc(o.detail) + '</span>' : '') + '</span></button>').join('') + '</div>';
+    } else if (card.options.length && onNext && !cardChanging) {
+      opts = '<div class="card-chosen"><span>You chose <b>' + esc(ch.title) + '</b>' + (ch.on ? ' on ' + esc(shortDay(ch.on)) : '') + '</span>' +
+        '<button class="card-change" data-act="change">Change</button></div>';
+    } else if (card.options.length) {
+      opts = '<div class="meta">' + (onNext ? 'Choose again. The next step changes with it.' : 'Choose one. It closes this letter and adds the next step on the deadline.') + '</div>' +
+        '<div class="card-opts" role="group" aria-label="The letter offers">' +
+        card.options.map((o, i) => '<button class="card-opt card-choose" data-choose="' + i + '" aria-pressed="' + (card.pick === i) + '">' +
+          '<span><b>' + esc(o.title) + '</b>' + (o.detail ? '<span>' + esc(o.detail) + '</span>' : '') + '</span><span class="card-choose-go">' + (onNext && card.pick === i ? 'Chosen' : 'Choose') + '</span></button>').join('') + '</div>' +
+        (cardChanging ? '<button class="card-edit" data-act="keep">Keep ' + esc(ch.title.toLowerCase()) + '</button>' : '');
+    }
     const portal = card.portal ? '<a class="card-portal" href="' + esc(card.portal.url) + '" target="_blank" rel="noopener noreferrer"><span>' + esc(card.portal.name) +
       '<small>' + esc(card.portal.host) + '</small></span><span class="card-open">Open ›</span></a>' : '';
     let foot;
@@ -2323,10 +2342,14 @@
         '<div class="meta">How</div><div class="card-hows" role="group" aria-label="How">' +
         HOWS.map(([v, l]) => '<button data-how="' + v + '" aria-pressed="' + (cardDone.how === v) + '">' + l + '</button>').join('') + '</div>' +
         '<div class="card-ask-row"><button class="card-cancel" data-act="cancel">Cancel</button><button class="card-save" data-act="save"' + (cardDone.how ? '' : ' disabled') + '>Save</button></div></div>';
+    } else if (card.options.length && !onNext) {
+      foot = '<p class="card-note">This card only prepares. Paying or sending happens elsewhere.</p>'; // choosing closes it
     } else {
       foot = '<button class="card-done" data-act="done">Done</button><p class="card-note">This card only prepares. Paying or sending happens elsewhere.</p>';
     }
-    body.innerHTML = '<p class="card-want">' + esc(card.want) + '</p>' + due + '<div class="card-facts">' + facts + '</div>' + opts + portal + foot +
+    // The next step's card leads with the step itself; the letter's own card with what it wants.
+    const want = onNext && items[cardId] ? nameParts(items[cardId]).name : card.want;
+    body.innerHTML = '<p class="card-want">' + esc(want) + '</p>' + due + '<div class="card-facts">' + facts + '</div>' + opts + portal + foot +
       '<button class="card-edit" data-act="edit">Edit task</button>';
   }
 
@@ -2336,7 +2359,36 @@
     const d = await r.json().catch(() => null);
     if (!r.ok || !d || !d.card) throw new Error((d && d.error) || 'status ' + r.status);
     if (cardId === id) { card = d.card; renderCard(); }
-    return d.card;
+    return d;
+  }
+  // Undo of a choice: the letter's task opens again and the next step goes (any of the two ids works).
+  async function unchoose(id) {
+    try {
+      const r = await fetch(API + '/api/intake/' + code + '/card/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unchoose: true }) });
+      if (!r.ok) throw new Error('status ' + r.status);
+      poll();
+      say('Undone.');
+    } catch (e) { toast(navigator.onLine ? 'Couldn’t undo that. Try again.' : 'Needs a connection.'); }
+  }
+  async function chooseOption(i, b) {
+    const onNext = !!(card.chosen && card.chosen.isNext);
+    if (onNext && card.pick === i) { cardChanging = false; renderCard(); return; }
+    const title = card.options[i].title;
+    const due = card.due;
+    for (const x of $('cardBody').querySelectorAll('[data-choose]')) x.disabled = true;
+    b.querySelector('.card-choose-go').textContent = 'Choosing…';
+    try {
+      const d = await cardPost({ choose: i });
+      cardChanging = false;
+      poll(); // the Worker ticked the letter and added the next step; draw them
+      loadCards(); // the next step opens as this card too
+      if (onNext) { renderCard(); say('Changed to ' + title + '.'); return; }
+      const next = d.next && d.next.id;
+      closeCard(() => toast('Chose ' + title.toLowerCase() + '. Next step added' + (due ? ' for ' + shortDay(due) : '') + '.', next ? () => unchoose(next) : null, next));
+    } catch (err) {
+      renderCard();
+      toast(navigator.onLine ? 'Couldn’t save that. Try again.' : 'Needs a connection.');
+    }
   }
 
   $('cardBody').addEventListener('click', async (e) => {
@@ -2364,8 +2416,11 @@
       try { await cardPost({ pick: i }); say('Saved'); } catch (err) { card.pick = was; renderCard(); toast('Couldn’t save that. Try again.'); }
       return;
     }
+    if (b.dataset.choose !== undefined) { chooseOption(+b.dataset.choose, b); return; }
     if (b.dataset.how) { cardDone.how = b.dataset.how; cardDone.date = $('cardDate').value || cardDone.date; renderCard(); return; }
     const act = b.dataset.act;
+    if (act === 'change') { cardChanging = true; renderCard(); return; }
+    if (act === 'keep') { cardChanging = false; renderCard(); return; }
     if (act === 'edit') { const id = cardId; closeCard(() => openEdit(id)); return; }
     if (act === 'done') { cardDone = { date: localDay(), how: null }; renderCard(); $('cardDate').focus({ preventScroll: true }); return; }
     if (act === 'cancel') { cardDone = null; renderCard(); return; }

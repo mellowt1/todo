@@ -510,6 +510,14 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 .card-save { background: var(--accent); color: var(--on-accent); }
 .card-save:disabled { opacity: 0.45; }
 .card-cancel { border: 1px solid var(--sep); color: var(--text); }
+/* A choice closes the letter (2026-10-21): Choose buttons, then the choice stamped on the next step. */
+.card-choose { grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 64px; }
+.card-choose-go { font-size: 15px; font-weight: 600; color: var(--accent-text); white-space: nowrap; }
+.card-choose[aria-pressed="true"] { border-color: var(--accent-text); background: var(--accent-soft); }
+.card-choose:disabled { opacity: 0.6; }
+.card-chosen { display: flex; align-items: center; gap: 10px; padding: 4px 6px 4px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 15px; }
+.card-chosen > span { flex: 1; min-width: 0; }
+.card-change { min-height: 44px; padding: 0 10px; color: var(--accent-text); font-size: 15px; font-weight: 600; }
 .card-stamp { padding: 14px; border-radius: 14px; background: var(--accent-soft); color: var(--accent-text); font-size: 16px; font-weight: 600; }
 .card-edit { align-self: center; min-height: 44px; padding: 0 12px; color: var(--secondary); font-size: 15px; }
 .card-copy, .card-opt, .card-hows button { transition: background-color var(--dur-press) ease, border-color var(--dur-press) ease; }

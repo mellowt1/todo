@@ -33,6 +33,7 @@ function world() {
   let rev = 1;
   return {
     posts: [],
+    items,
     route(req) {
       const u = new URL(req.url());
       const p = u.pathname;
@@ -42,14 +43,33 @@ function world() {
         rev++;
         return { items: Object.values(items), rev, updated: new Date().toISOString(), rejected: [] };
       }
-      if (p === `/api/intake/${CODE}/cards`) return { tasks: ['letter000001'] };
-      if (p === `/api/intake/${CODE}/card/letter000001`) {
-        if (req.method() === 'GET') return { card };
+      // A choice closes the letter: the mocked Worker ticks it and adds the next step (as letters.js).
+      const NEXT = 'letter000001next';
+      if (p === `/api/intake/${CODE}/cards`) return { tasks: items[NEXT] ? ['letter000001', NEXT] : ['letter000001'] };
+      const m = p.match(new RegExp(`^/api/intake/${CODE}/card/(letter000001(?:next)?)$`));
+      if (m) {
+        const view = () => ({ ...card, taskId: m[1], chosen: card.pick !== null && items[NEXT] ? { title: card.options[card.pick].title, on: day(0), isNext: m[1] === NEXT, from: 'letter000001', next: NEXT } : null, done: m[1] === NEXT ? card.nextDone : card.done });
+        if (req.method() === 'GET') return { card: view() };
         const body = req.postDataJSON();
         this.posts.push(body);
-        if ('pick' in body) card.pick = body.pick;
-        if (body.done) { card.done = body.done; items.letter000001 = { ...items.letter000001, done: true, doneAt: Date.now(), updatedAt: Date.now() }; rev++; }
-        return { ok: true, card };
+        const t = Date.now();
+        if ('choose' in body) {
+          card.pick = body.choose;
+          const text = (body.choose === 1 ? 'Set up the payment plan (Belastingdienst)' : 'Pay at once (Belastingdienst)') + ' · ' + day(27);
+          items[NEXT] = { ...(items[NEXT] || { id: NEXT, section: 'soon', done: false, doneAt: null, pos: t }), text, updatedAt: t };
+          items.letter000001 = { ...items.letter000001, done: true, doneAt: t, updatedAt: t };
+          rev++;
+          return { ok: true, card: view(), next: { id: NEXT, text, from: 'letter000001' } };
+        }
+        if (body.unchoose) {
+          card.pick = null;
+          delete items[NEXT];
+          items.letter000001 = { ...items.letter000001, done: false, doneAt: null, updatedAt: t };
+          rev++;
+          return { ok: true, card: { ...card, taskId: 'letter000001', chosen: null } };
+        }
+        if (body.done) { card.nextDone = body.done; items[NEXT] = { ...items[NEXT], done: true, doneAt: t, updatedAt: t }; rev++; }
+        return { ok: true, card: view() };
       }
       if (p === `/api/intake/${CODE}`) return { items: [] };
       return null;
@@ -91,9 +111,43 @@ for (const [name, viewport, scheme] of [['card-phone', { width: 390, height: 844
   await page.click('.card-copy[data-copy="amount"]');
   check(await page.evaluate(() => navigator.clipboard.readText()) === '1247,00', name + ': amount copies as 1247,00');
 
-  await page.click('.card-opt[data-pick="1"]');
-  await page.waitForTimeout(200);
-  check(await page.getAttribute('.card-opt[data-pick="1"]', 'aria-checked') === 'true' && w.posts.at(-1).pick === 1, name + ': option picked and saved');
+  // The options are choices; the letter itself has no Done.
+  check((await page.$$('.card-choose')).length === 2 && !(await page.$('.card-done')), name + ': two Choose buttons, no Done on the letter');
+  await page.click('.card-choose[data-choose="1"]');
+  await page.waitForFunction(() => document.getElementById('card').hidden);
+  check(w.posts.at(-1).choose === 1, name + ': the choice is sent');
+  await page.waitForTimeout(300);
+  const said = await page.textContent('#toastText');
+  check(/^Chose pay in instalments\. Next step added for \d+ \w{3}\.$/.test(said), name + ': toast ' + said);
+  await page.waitForFunction(() => !document.querySelector('#list .row[data-id="letter000001"]'));
+  check(w.items.letter000001next && w.items.letter000001next.section === 'soon', name + ': the letter is ticked off, the next step is in Soon');
+  await page.screenshot({ path: file(name + '-chosen') });
+  // Undo takes it all back.
+  await page.click('#toastUndo');
+  await page.waitForSelector('.row[data-id="letter000001"]');
+  check(w.posts.at(-1).unchoose === true && !w.items.letter000001next, name + ': Undo brings the letter back and the next step goes');
+
+  // Choose again, then the next step's card in Soon: the choice stamped, Change, Done.
+  await page.waitForTimeout(5500);
+  await page.click('.row[data-id="letter000001"] .text');
+  await page.waitForSelector('#card:not([hidden]) .card-choose');
+  await page.click('.card-choose[data-choose="1"]');
+  await page.waitForFunction(() => document.getElementById('card').hidden);
+  await page.locator('[data-section="soon"]:visible').first().click();
+  await page.waitForSelector('.row[data-id="letter000001next"]');
+  await page.waitForTimeout(2200); // the card list reloads
+  await page.click('.row[data-id="letter000001next"] .text');
+  await page.waitForSelector('#card:not([hidden]) .card-chosen');
+  check((await page.textContent('.card-chosen > span')).startsWith('You chose Pay in instalments') && (await page.textContent('.card-want')) === 'Set up the payment plan (Belastingdienst)', name + ': the next step leads with itself and shows the choice');
+  check(!!(await page.$('.card-done')) && (await page.$$('.card-copy')).length === 3, name + ': with Done and the copy buttons');
+  await page.locator('#card .sheet').screenshot({ path: file(name + '-next') });
+  await page.click('.card-change');
+  check((await page.$$('.card-choose')).length === 2, name + ': Change shows the options again');
+  await page.click('.card-choose[data-choose="0"]');
+  await page.waitForSelector('.card-chosen');
+  check(w.posts.at(-1).choose === 0 && (await page.textContent('.card-chosen > span')).startsWith('You chose Pay at once'), name + ': changed to pay at once');
+  await page.waitForTimeout(1500);
+  check((await page.textContent('.row[data-id="letter000001next"] .tname')) === 'Pay at once (Belastingdienst)', name + ': the next step is reworded');
 
   await page.click('.card-done');
   check(await page.isDisabled('.card-save'), name + ': Save waits for how');
@@ -102,12 +156,13 @@ for (const [name, viewport, scheme] of [['card-phone', { width: 390, height: 844
   await page.click('.card-save');
   await page.waitForSelector('.card-stamp');
   const stamp = await page.textContent('.card-stamp');
-  check(/^✓ Done \d+ \w{3} · paid · pay in instalments$/.test(stamp), name + ': stamp ' + stamp);
+  check(/^✓ Done \d+ \w{3} · paid · pay at once$/.test(stamp), name + ': stamp ' + stamp);
   check(w.posts.at(-1).done && w.posts.at(-1).done.how === 'paid' && w.posts.at(-1).done.date === day(0), name + ': done sent with today and paid');
   await page.click('#cardClose');
   await page.waitForTimeout(1500);
-  check(!(await page.$('#list .row[data-id="letter000001"]')), name + ': the task is ticked off the list');
+  check(!(await page.$('#list .row[data-id="letter000001next"]')), name + ': the next step is ticked off the list');
 
+  await page.locator('[data-section="today"]:visible').first().click();
   await page.click('.row[data-id="plain0000001"] .text');
   await page.waitForSelector('#edit:not([hidden])');
   check(await page.$eval('#card', (e) => e.hidden), name + ': a normal task opens the edit sheet');

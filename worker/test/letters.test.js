@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import worker from '../src/worker.js';
 import { _setReader, dayOf, intakeCatchUp, CATCHUP_KEY } from '../src/intake.js';
-import { validIban, inQuotes, cardFromRecord, portalFor } from '../src/letters.js';
+import { validIban, inQuotes, cardFromRecord, portalFor, _setNexter, nextText } from '../src/letters.js';
 import { maskSecrets } from '../src/mask.js';
 import { CONFIG } from '../src/dinner.js';
 import { memNamespace } from './mem.js';
@@ -42,6 +42,7 @@ function memKV() {
     m,
     async get(k, type) { const v = m.get(k); return v === undefined ? null : type === 'json' ? JSON.parse(v) : v; },
     async put(k, v) { m.set(k, v); },
+    async delete(k) { m.delete(k); },
     async list({ prefix = '' } = {}) { return { keys: [...m.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })) }; },
   };
 }
@@ -174,6 +175,70 @@ test('the card: pick an option, then Done with date and how ticks the task', asy
   const [after] = await items(e);
   assert.equal(after.done, true);
   assert.equal((await call(e, `/api/intake/${CODE}/card/nosuchtask1`)).status, 404);
+});
+
+test('a choice closes the letter: the next step comes in on the deadline, the same card, change and Undo', async () => {
+  const e = env();
+  _setReader(read(letter()));
+  const asked = [];
+  _setNexter(async (env, card, option) => { asked.push(option.title); return { task: option.title === 'Pay in instalments' ? 'Set up the EUR 21 a month payment plan (Belastingdienst).' : null, usage: null }; });
+  try {
+    await drop(e);
+    const [task] = await items(e);
+    const post = (id, body) => call(e, `/api/intake/${CODE}/card/${id}`, { method: 'POST', body: JSON.stringify(body) });
+    assert.equal((await post(task.id, { choose: 7 })).status, 400);
+
+    let out = await (await post(task.id, { choose: 1 })).json();
+    const nextId = task.id.slice(0, 24) + 'next';
+    assert.deepEqual(out.next, { id: nextId, text: `Set up the EUR 21 a month payment plan (Belastingdienst) · ${plus(27)}`, from: task.id });
+    assert.equal(out.card.pick, 1);
+    assert.equal(out.card.chosen.title, 'Pay in instalments');
+    assert.equal(out.card.chosen.isNext, false);
+    let list = await items(e);
+    assert.equal(list.find((i) => i.id === task.id).done, true);
+    const next = list.find((i) => i.id === nextId);
+    assert.equal(next.section, 'soon');
+    assert.equal(next.done, false);
+    assert.ok(!/NL91|5123/.test(next.text)); // no IBAN or reference in a task's text
+    // The next step opens the same card, the choice stamped.
+    assert.ok((await (await call(e, `/api/intake/${CODE}/cards`)).json()).tasks.includes(nextId));
+    let card = (await (await call(e, `/api/intake/${CODE}/card/${nextId}`)).json()).card;
+    assert.equal(card.iban, IBAN);
+    assert.equal(card.chosen.isNext, true);
+
+    // Change, from the next step's card: the same task, new words (the template when Claude has none).
+    out = await (await post(nextId, { choose: 0 })).json();
+    assert.equal(out.next.id, nextId);
+    assert.equal(out.next.text, `Pay at once (Belastingdienst) · ${plus(27)}`);
+    list = await items(e);
+    assert.equal(list.filter((i) => !i.done).length, 1);
+    assert.equal(list.find((i) => i.id === nextId).text, `Pay at once (Belastingdienst) · ${plus(27)}`);
+
+    // Undo: no pick, the letter's task open again, the next step gone.
+    out = await (await post(nextId, { unchoose: true })).json();
+    assert.equal(out.card.taskId, task.id);
+    assert.equal(out.card.pick, null);
+    assert.equal(out.card.chosen, null);
+    list = await items(e);
+    assert.equal(list.find((i) => i.id === task.id).done, false);
+    assert.equal(list.find((i) => i.id === nextId), undefined);
+    assert.ok(!(await (await call(e, `/api/intake/${CODE}/cards`)).json()).tasks.includes(nextId));
+    assert.equal((await post(task.id, { unchoose: true })).status, 404);
+
+    // Chosen again after the Undo: the next step comes back under the same id.
+    out = await (await post(task.id, { choose: 1 })).json();
+    assert.equal((await items(e)).find((i) => i.id === nextId).done, false);
+    assert.deepEqual(asked, ['Pay in instalments', 'Pay at once', 'Pay in instalments']);
+  } finally {
+    _setNexter(null);
+  }
+});
+
+test('nextText: Claude\'s words cleaned and masked, the template when there are none', () => {
+  const card = { sender: 'Belastingdienst', due: '2026-11-06' };
+  assert.equal(nextText('pay NL91 ABNA 0417 1643 00 - today.', card, { title: 'Pay at once' }), 'Pay IBAN ··4300, today · 2026-11-06');
+  assert.equal(nextText(null, card, { title: 'Pay at once' }), 'Pay at once (Belastingdienst) · 2026-11-06');
+  assert.equal(nextText('', { sender: null, due: null }, { title: 'Call them' }), 'Call them');
 });
 
 test('dropping a letter read before cards fills in its card, with no new tasks', async () => {
