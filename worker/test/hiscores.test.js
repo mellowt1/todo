@@ -82,11 +82,17 @@ test('to-dos: ticks are Woodcutting, Apply tasks are Slayer, the date label is d
     b: { id: 'b1', text: 'Apply: Analyst (A ministry) · 2026-10-30', done: true, doneAt: SAT },
     c: { id: 'c1', text: 'Open', done: false, doneAt: null },
     d: { id: 'd1', text: 'Pay to NL86 INGB 0002 4455 88', done: true, doneAt: SAT },
+    e: { id: 'e1', text: 'Apply for the policy adviser job', done: true, doneAt: SAT },
+    f: { id: 'f1', text: 'Sollicitatiebrief sturen', done: true, doneAt: SAT },
+    g: { id: 'g1', text: 'Applying sunscreen', done: true, doneAt: SAT },
   });
   assert.deepEqual(rows.map((r) => [r.id, r.skill, r.xp, r.what]), [
     ['wc:a1', 'woodcutting', 100, 'Pay the rent'],
     ['sl:b1', 'slayer', 4000, 'Analyst (A ministry)'],
     ['wc:d1', 'woodcutting', 100, 'Pay to IBAN ··5588'],
+    ['sl:e1', 'slayer', 4000, 'Apply for the policy adviser job'],
+    ['sl:f1', 'slayer', 4000, 'Sollicitatiebrief sturen'],
+    ['wc:g1', 'woodcutting', 100, 'Applying sunscreen'],
   ]);
 });
 

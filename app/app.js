@@ -576,7 +576,7 @@
   const SKILL = { woodcutting: 'Woodcutting', slayer: 'Slayer', attack: 'Attack', defence: 'Defence' };
   // What a task pays when ticked at `at` (an open task: now), biggest first.
   function pays(it, at) {
-    const out = [/^apply:/i.test(it.text) ? { skill: 'slayer', xp: XP_RULES.apply } : { skill: 'woodcutting', xp: XP_RULES.task }];
+    const out = [/^(apply|sollicit\w*)\b/i.test(it.text) ?{ skill: 'slayer', xp: XP_RULES.apply } : { skill: 'woodcutting', xp: XP_RULES.task }];
     if (Number.isFinite(it.pos) && at - it.pos >= OLD_MS) out.push({ skill: 'attack', xp: XP_RULES.oldTask });
     if (INTAKE_MARK.test(it.text)) out.push({ skill: 'defence', xp: XP_RULES.letterTask });
     return out.sort((a, b) => b.xp - a.xp);

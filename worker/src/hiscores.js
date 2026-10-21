@@ -15,7 +15,7 @@
  *   hunter        an Arsenal ticket drop alert (hourly)    800   hu:<event id>
  *   strength      a gym visit, once a day (POST .../gym)  1000  st:<date>
  *   woodcutting   a to-do ticked off                      100   wc:<task id>
- *   slayer        an "Apply:" to-do ticked off           4000   sl:<task id>
+ *   slayer        a job application ticked off (APPLY)  4000   sl:<task id>
  *   cooking       Paul's Kitchen dinner, once the day is over: a recipe 800, a pizza night 500;
  *                 none on a night Day said he was out     ck:<date>
  *   prayer        a Feeling face that day                  450   pr:<date>
@@ -97,11 +97,15 @@ export function levelOf(xp) {
 const iso = (ms) => new Date(ms).toISOString();
 const line = (s, n = 80) => maskSecrets(String(s || '')).replace(/\s+/g, ' ').trim().slice(0, n);
 
+/* A job application (Paul, 2026-10-21): "Apply: …", "Apply for …", "Sollicitatie …", not
+ * "Applying sunscreen". worker/src/waiting.js and app/app.js pays() use the same rule. */
+export const APPLY = /^(apply|sollicit\w*)\b/i;
+
 export function taskRows(items) {
   const out = [];
   for (const i of Object.values(items || {})) {
     if (!i || !i.done || !Number.isFinite(i.doneAt) || typeof i.text !== 'string') continue;
-    const apply = /^apply:/i.test(i.text);
+    const apply = APPLY.test(i.text);
     const text = i.text.replace(/\s*\[intake\]$/, '').replace(/\s·\s\d{4}-\d{2}-\d{2}$/, '');
     out.push(apply
       ? { id: 'sl:' + i.id, skill: 'slayer', xp: XP.apply, at: iso(i.doneAt), what: line(text.replace(/^apply:\s*/i, '')) }
