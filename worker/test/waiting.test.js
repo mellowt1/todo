@@ -165,18 +165,22 @@ test('a chase task deleted from the list counts as still waiting', async () => {
   assert.ok((await doc(e)).items[await chaseTaskId(item.id, 2)], 'the second chase came a gap later');
 });
 
-test('an Apply: task ticked after the start makes one item, first chase after 14 days; older ticks never', async () => {
+test('Apply tasks ticked since 1 October make one item each (the old ones too), first chase 14 days after the tick; September never', async () => {
   const e = env();
   await waitingCron(e, NOW); // the start
   await seed(e, [
     { id: 'apply000001', text: 'Apply: Policy officer (Ministry of Defence) · 2026-10-30', section: 'soon', done: true, doneAt: NOW + DAY, updatedAt: NOW + DAY, pos: NOW - DAY },
-    { id: 'apply000002', text: 'Apply: Old one (Old org)', section: 'soon', done: true, doneAt: NOW - DAY, updatedAt: NOW - DAY, pos: NOW - 9 * DAY },
+    { id: 'apply000002', text: 'Apply for nato position', section: 'soon', done: true, doneAt: Date.parse('2026-10-08T10:00:00Z'), updatedAt: NOW - DAY, pos: NOW - 19 * DAY },
+    { id: 'apply000003', text: 'Apply: September one (Old org)', section: 'soon', done: true, doneAt: Date.parse('2026-09-20T10:00:00Z'), updatedAt: NOW - 30 * DAY, pos: NOW - 40 * DAY },
     { id: 'plain000001', text: 'Buy stamps', section: 'today', done: true, doneAt: NOW + DAY, updatedAt: NOW + DAY, pos: NOW },
   ]);
-  assert.equal((await waitingCron(e, NOW + DAY + 60e3)).made, 1);
+  assert.equal((await waitingCron(e, NOW + DAY + 60e3)).made, 2);
   assert.equal((await waitingCron(e, NOW + DAY + 120e3)).made, 0, 'once per task');
-  const rows = e.HUB_DB.db.prepare('SELECT who, what, channel, since, next_chase, source, source_item FROM waiting').all();
-  assert.deepEqual(rows.map((r) => ({ ...r })), [{ who: 'Ministry of Defence', what: 'the Policy officer application', channel: 'email', since: '2026-10-22', next_chase: '2026-11-05', source: 'apply', source_item: 'apply000001' }]);
+  const rows = e.HUB_DB.db.prepare('SELECT who, what, channel, since, next_chase, source, source_item FROM waiting ORDER BY source_item').all();
+  assert.deepEqual(rows.map((r) => ({ ...r })), [
+    { who: 'Ministry of Defence', what: 'the Policy officer application', channel: 'email', since: '2026-10-22', next_chase: '2026-11-05', source: 'apply', source_item: 'apply000001' },
+    { who: 'the employer', what: 'the nato position application', channel: 'email', since: '2026-10-08', next_chase: '2026-10-22', source: 'apply', source_item: 'apply000002' },
+  ]);
 });
 
 test('"Sent, now waiting" from a task: the task id is kept, a second one for the same task is refused', async () => {

@@ -15,7 +15,7 @@
  *   - an open item whose chase day has come, with no chase task out, gets one in To-do: "Chase
  *     <who> about <what>", energy drained, in Today; for someone else "<Name>: Chase ..." in Soon
  *     (the light Others lane groups it). The task carries `waiting` = the item's id.
- *   - an "Apply: ..." task ticked off since this feature started makes an item for that employer,
+ *   - an "Apply ..." or "Sollicit..." task ticked off since 1 October makes an item for that employer,
  *     email, first chase after APPLY_DAYS.
  *   - a chase task deleted from the list counts as "still waiting": the next chase comes a gap later.
  *
@@ -40,6 +40,9 @@ const SOURCES = ['todo', 'morning'];
 const MAX_WHO = 60;
 const MAX_WHAT = 160;
 const APPLY_SINCE_KEY = 'waiting:apply-since'; // ms: Apply ticks before this never make an item
+// The first run starts from here, so the applications Paul already sent in October get a wait too
+// (Paul, 2026-10-21: "add the old one"). Each counts from the day it was ticked off.
+export const APPLY_BACKFILL_FROM = Date.parse('2026-09-30T22:00:00Z'); // 1 October, Amsterdam
 // Paul writes "Apply: ...", "Apply for nato position" or "Sollicit..." (the same start as Slayer XP).
 const APPLY = /^(apply|sollicit\w*)\b\s*:?\s*(?:(?:for|to|at|bij|voor|naar)\s+)?/i;
 const INTAKE_MARK = /\s*\[intake\]$/;
@@ -204,7 +207,7 @@ export async function waitingCron(env, now = Date.now()) {
   // Apply: ... ticked off after the start: one item each (the unique source_item keeps it once).
   let made = 0;
   let since = Number(await env.HUB_KV.get(APPLY_SINCE_KEY));
-  if (!since) { since = now; await env.HUB_KV.put(APPLY_SINCE_KEY, String(now)); }
+  if (!since) { since = Math.min(APPLY_BACKFILL_FROM, now); await env.HUB_KV.put(APPLY_SINCE_KEY, String(since)); }
   for (const it of Object.values(items)) {
     if (!it.done || !it.doneAt || it.doneAt < since || it.waiting) continue;
     const a = fromApply(it.text);
