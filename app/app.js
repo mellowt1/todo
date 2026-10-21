@@ -11,8 +11,14 @@
   'use strict';
 
   const SECTIONS = ['today', 'soon', 'someday'];
-  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done' };
-  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.' };
+  // Lanes (2026-10-21): tasks kept apart from the three sections, all on one Lanes tab on the
+  // phone (grouped), a line each in the PC sidebar. A lane is a task's section like any other.
+  const LANES = ['build'];
+  const PLACES = SECTIONS.concat(LANES); // everywhere a task can be
+  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done', lanes: 'Lanes', build: 'Build' };
+  // Where a new task lands: the section on screen, or the first lane on the Lanes tab.
+  const addTo = () => (ui.section === 'lanes' ? LANES[0] : ui.section);
+  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.', lanes: 'Nothing in the lanes.', build: 'No app ideas waiting.' };
   const LEVELS = ['wired', 'normal', 'drained'];
   const LNAME = { wired: 'Wired', normal: 'Normal', drained: 'Drained' };
   const FILL = { wired: 12, normal: 7, drained: 2.5 };
@@ -207,13 +213,14 @@
     return p.due ? p.due + ' ' + (p.time || '') : null;
   }
   function openIn(section) {
+    if (section === 'lanes') return LANES.flatMap((l) => openIn(l)); // grouped, lane by lane
     const rows = Object.values(items).filter((i) => !i.done && i.section === section);
     if (section === 'someday') return rows.sort((a, b) => b.pos - a.pos);
     const d = new Date(now());
     const end = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '~';
     const key = new Map(rows.map((it) => {
       const k = dueKey(it);
-      return [it.id, k && (section === 'soon' || k < end) ? k : null];
+      return [it.id, k && (section !== 'today' || k < end) ? k : null]; // Soon and the lanes: every date
     }));
     // Soon: "this week" tasks first (2026-10-21), sorted the same way among themselves.
     const wk = (it) => (section === 'soon' && it.week === true ? 0 : 1);
@@ -232,7 +239,7 @@
     if (!text) return;
     const id = newId();
     justAdded.add(id);
-    upsert({ id, text, section: ui.section, done: false, doneAt: null, pos: now() });
+    upsert({ id, text, section: addTo(), done: false, doneAt: null, pos: now() });
     tidyLater(id, text);
     return id;
   }
@@ -810,7 +817,7 @@
     renderProgress();
     renderEnergy();
     renderWaitLine();
-    if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
+    if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[addTo()];
     $('install').hidden = !(view === 'list' && showInstall());
   }
 
@@ -858,7 +865,11 @@
       const label = (i) => (flagged && i === 0 ? '<li class="sublabel sublabel-week">This week<span>' + flagged + ' left</span></li>'
         : i === dated ? '<li class="sublabel">Dated</li>'
         : i === undated && i > 0 ? '<li class="sublabel">No date</li>' : '');
-      html = rows.map((it, i) => label(i) + rowHtml(it, justAdded.has(it.id))).join('');
+      // The Lanes tab: a head for each lane that has tasks, with its count.
+      const lanesTab = ui.section === 'lanes';
+      const laneHead = (it, i) => (i === 0 || rows[i - 1].section !== it.section
+        ? '<li class="sublabel sublabel-lane">' + LABEL[it.section] + '<span>' + rows.filter((r) => r.section === it.section).length + '</span></li>' : '');
+      html = rows.map((it, i) => (lanesTab ? laneHead(it, i) : label(i)) + rowHtml(it, justAdded.has(it.id))).join('');
       if (!rows.length) {
         emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
           : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];
@@ -1553,7 +1564,7 @@
   });
   for (const nav of document.querySelectorAll('.nav-item')) {
     const s = nav.dataset.section;
-    if (!SECTIONS.includes(s)) continue;
+    if (!PLACES.includes(s)) continue;
     nav.addEventListener('dragover', (e) => {
       if (e.dataTransfer.types.includes('application/x-todo-id')) { e.preventDefault(); nav.classList.add('drop'); }
     });
@@ -1587,7 +1598,7 @@
     menuOn = true;
     menuOpener = anchor || row;
     expand(row, true);
-    menu.innerHTML = '<div class="meta menu-title">Move to</div>' + SECTIONS.map((s) =>
+    menu.innerHTML = '<div class="meta menu-title">Move to</div>' + PLACES.map((s) =>
       '<button class="sec" role="menuitem" data-move="' + s + '"' + (s === it.section ? ' aria-current="true" aria-disabled="true"' : '') + '>' + LABEL[s] + '</button>').join('') +
       '<div class="menu-sep"></div><button class="sec sec-week" role="menuitemcheckbox" data-week aria-checked="' + (it.week === true) + '">' +
       WEEK_ICON.replace('role="img" aria-label="This week"', 'aria-hidden="true"') + (it.week === true ? 'Not this week' : 'This week') + '</button>';
@@ -1867,7 +1878,7 @@
   // The label crossfades only when its words change.
   function capLabel() {
     const l = $('capLabel');
-    const t = (capAdded.length ? 'Added to ' : 'Adds to ') + LABEL[ui.section];
+    const t = (capAdded.length ? 'Added to ' : 'Adds to ') + LABEL[addTo()];
     if (l.textContent === t) return;
     l.textContent = t;
     if (!$('capture').hidden) play(l, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
@@ -1928,7 +1939,7 @@
       capAdded.push(v);
       addCapLine(v, id);
       capInput.value = '';
-      say('Added to ' + LABEL[ui.section] + '.');
+      say('Added to ' + LABEL[addTo()] + '.');
     } else if (e.key === 'Escape') {
       e.stopPropagation();
       closeCapture();
@@ -1967,7 +1978,7 @@
   inlineInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
-      if (cleanText(inlineInput.value)) say('Added to ' + LABEL[ui.section] + '.');
+      if (cleanText(inlineInput.value)) say('Added to ' + LABEL[addTo()] + '.');
       addTask(inlineInput.value);
       inlineInput.value = '';
     } else if (e.key === 'Escape') {
@@ -2010,10 +2021,14 @@
     else $('editClose').focus({ preventScroll: true }); // on the phone the keyboard waits for a tap in the text
   }
   function paintEditSeg(section) {
-    for (const b of document.querySelectorAll('#editSeg button')) {
-      const on = b.dataset.section === section;
-      b.setAttribute('aria-checked', String(on));
-      b.tabIndex = on ? 0 : -1; // one tab stop; the arrows move inside
+    for (const seg of [$('editSeg'), $('editLane')]) {
+      const bs = Array.from(seg.querySelectorAll('button'));
+      for (const b of bs) {
+        const on = b.dataset.section === section;
+        b.setAttribute('aria-checked', String(on));
+        b.tabIndex = on ? 0 : -1; // one tab stop; the arrows move inside
+      }
+      if (!bs.some((b) => b.dataset.section === section)) bs[0].tabIndex = 0; // the other group still takes a tab
     }
   }
   $('editSeg').addEventListener('keydown', (e) => {
@@ -2156,7 +2171,7 @@
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEdit(); }
   });
   $('editClose').addEventListener('click', closeEdit);
-  for (const b of document.querySelectorAll('#editSeg button')) {
+  for (const b of document.querySelectorAll('#editSeg button, #editLane button')) {
     b.addEventListener('click', () => {
       const it = items[editId];
       if (!it || it.section === b.dataset.section) return;
@@ -2582,7 +2597,7 @@
   function keepAsTask(typed, section) {
     const id = newId();
     justAdded.add(id);
-    upsert({ id, text: typed, section: SECTIONS.includes(section) ? section : ui.section, done: false, doneAt: null, pos: now() });
+    upsert({ id, text: typed, section: PLACES.includes(section) ? section : addTo(), done: false, doneAt: null, pos: now() });
     tidyLater(id, typed, true); // tidied like any task, never sent to Claude again
   }
   // The answer waits for the capture sheet (or any other) to close, then opens.
@@ -3159,6 +3174,7 @@
     const k = e.key;
     if (k === 'n' || k === 'N') { e.preventDefault(); openAdd(); return; }
     if (k === '1' || k === '2' || k === '3') { setSection(SECTIONS[Number(k) - 1]); say(LABEL[SECTIONS[Number(k) - 1]]); return; }
+    if (k === '4') { setSection(desk.matches ? LANES[0] : 'lanes'); say(LABEL[ui.section]); return; }
     if (k === 'ArrowDown' || k === 'ArrowUp') {
       const rs = rows();
       if (!rs.length) return;

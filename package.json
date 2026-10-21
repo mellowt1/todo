@@ -20,7 +20,8 @@
     "energy-check": "node scripts/energy-check.mjs",
     "repeat-check": "node scripts/repeat-check.mjs",
     "week-check": "node scripts/week-check.mjs",
-    "waiting-check": "node scripts/waiting-check.mjs"
+    "waiting-check": "node scripts/waiting-check.mjs",
+    "lanes-check": "node scripts/lanes-check.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

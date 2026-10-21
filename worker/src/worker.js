@@ -162,6 +162,7 @@ import { intakeCatchUp } from './intake.js';
 import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
+import { laneMoves } from './lanes.js';
 import { dueCron } from './due.js';
 import { repeatCron } from './repeat.js';
 import { handleTidy } from './tidy.js';
@@ -412,7 +413,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env), waitingCron(env),repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), waitingCron(env),repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env).then(() => laneMoves(env)), weekLessons(env)]; // the last three run once, then skip (lanes: src/lanes.js)
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

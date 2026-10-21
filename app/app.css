@@ -362,6 +362,12 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 .sublabel-week span { font-weight: 400; color: var(--secondary); }
 .tweek { color: var(--accent-text); align-self: center; }
 .menu-sep { height: 0.5px; background: var(--sep); margin: 4px 0; }
+/* Lanes (2026-10-21): the edit sheet's lane group, the Lanes tab's heads, the sidebar's lane lines. */
+.seg-lane::before { width: calc((100% - 8px - (var(--n) - 1) * 4px) / var(--n)); }
+.seg:not(:has(> [aria-checked="true"], > [aria-current="page"], > [aria-selected="true"]))::before { opacity: 0; }
+.sublabel-lane { display: flex; justify-content: space-between; }
+.sublabel-lane span { font-weight: 400; }
+.nav-head { padding: 14px 12px 4px; }
 .menu button.sec-week { display: flex; align-items: center; gap: 10px; color: var(--accent-text); font-weight: 600; }
 textarea#editText {
   border: 0; outline: none; resize: none; font-size: var(--fs-body); line-height: 1.35; background: var(--field); border-radius: 12px; padding: 12px 14px;
