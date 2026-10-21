@@ -107,6 +107,11 @@
  *   POST /api/energy/:code/pick <- { mode, skip, current?, skipped?, source }   POST /api/energy/:code/suggest
  *   GET/POST /api/hub/energy/day[/pick]
  *
+ * Waiting on (src/waiting.js; the to-do's code, Day with Bearer <HUB_SECRET_DAY>): things Paul sent,
+ * in D1 `waiting`; the cron puts a chase task in To-do when one is due and closes it both ways.
+ *   GET/POST /api/waiting/:code     POST /api/waiting/:code/:id <- { action: resolve | snooze | still }
+ *   GET/POST /api/hub/waiting/day
+ *
  * Digest (src/digest.js; Bearer <BEAT_TOKEN>): GET /api/hub/digest, the last week in the hub, masked.
  * The PC writes it into Claude Code's memory every morning and feeds it to the Sunday weekly fix.
  *
@@ -167,6 +172,7 @@ import { handleLift, handleLiftDay, liftForMorning } from './lift.js';
 import { handleDoor, doorCron } from './door.js';
 import { handleDigest } from './digest.js';
 import { handleEnergy, handleEnergyDay } from './energy.js';
+import { handleWaiting, handleWaitingDay, waitingCron, waitingForMorning } from './waiting.js';
 
 export { TodoList } from './list.js';
 export { KitchenStore } from './kitchen-store.js';
@@ -359,7 +365,7 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
+  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning, waiting: waitingForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
   hiscores: (request, env, rest) => handleHiscores(request, env, rest, json),
   lift: (request, env, rest) => handleLift(request, env, rest, json),
   door: (request, env, rest) => handleDoor(request, env, rest, json),
@@ -374,6 +380,7 @@ const MODULES = {
     if (path === 'digest') return handleDigest(request, env, json);
     if (path === 'todo/day') return handleTodoDay(request, env, json);
     if (rest[0] === 'energy' && rest[1] === 'day') return handleEnergyDay(request, env, rest.slice(2), json);
+    if (path === 'waiting/day') return handleWaitingDay(request, env, json);
     return handleHub(request, env, rest, url, json);
   },
   desk: (request, env, rest) => handleDesk(request, env, rest, json),
@@ -382,6 +389,7 @@ const MODULES = {
   talk: (request, env, rest) => handleTalk(request, env, rest, json),
   lessons: (request, env, rest) => handleLessons(request, env, rest, json),
   energy: (request, env, rest) => handleEnergy(request, env, rest, json),
+  waiting: (request, env, rest) => handleWaiting(request, env, rest, json),
   admin: handleAdmin,
 };
 
@@ -404,7 +412,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env), repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), waitingCron(env),repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

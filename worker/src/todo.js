@@ -25,6 +25,8 @@
  *   week     optional true: "this week" (2026-10-21), on top of Soon until the Sunday reset asks
  *            to keep it or take it off (src/week.js). Behaves like `link`.
  *            Both behave like `link` too.
+ *   waiting  optional, the id of the Waiting on item a chase task belongs to (src/waiting.js); the
+ *            app asks "did they answer?" when it is ticked. Behaves like `link` too.
  *
  * Every op carries its own updatedAt. For each task the newest updatedAt wins, so an
  * offline phone and a desktop never overwrite each other's work on other tasks.
@@ -35,7 +37,7 @@ export const SECTIONS = ['today', 'soon', 'someday'];
 export const ENERGY = ['wired', 'normal', 'drained'];
 export const REPEATS = ['week', '2weeks', 'month', 'bins'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week']; // left out of an upsert: the stored value stays
+const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week', 'waiting']; // left out of an upsert: the stored value stays
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
@@ -127,6 +129,11 @@ export function cleanOp(raw, now = Date.now()) {
   else if (it.series !== undefined) {
     if (typeof it.series !== 'string' || !ID.test(it.series)) return null;
     item.series = it.series;
+  }
+  if (it.waiting === null) item.waiting = null;
+  else if (it.waiting !== undefined) {
+    if (typeof it.waiting !== 'string' || !ID.test(it.waiting)) return null;
+    item.waiting = it.waiting;
   }
   return { op: 'upsert', item };
 }

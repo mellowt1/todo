@@ -334,7 +334,7 @@ test('the cron: the Sunday reset every run, the hourly jobs only at :23', async 
   let settled;
   await worker.scheduled({ scheduledTime: Date.parse('2026-10-18T16:08:00Z') }, e, { waitUntil: (p) => { settled = p; } });
   const r = await settled;
-  assert.equal(r.length, 7); // the Sunday reset, dates into Today, Door's reminders, the Mirror, the once-only intake catch-up and Others retirement, the lessons
+  assert.equal(r.length, 8); // the Sunday reset, Waiting on chases, dates into Today, Door's reminders, the Mirror, the once-only intake catch-up and Others retirement, the lessons
   await worker.scheduled({ scheduledTime: Date.parse('2026-10-18T16:23:00Z') }, e, { waitUntil: (p) => { settled = p; } });
-  assert.equal((await settled).length, 10);
+  assert.equal((await settled).length, 11);
 });
