@@ -349,6 +349,20 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 .rep-end:not(.set) input { position: absolute; opacity: 0; width: 1px; pointer-events: none; }
 .rep-note { margin: -6px 2px 0; font-size: var(--fs-meta); color: var(--secondary); line-height: 1.4; }
 .trep { color: var(--secondary); align-self: center; }
+/* This week (2026-10-21): a switch in the edit sheet, a group on top of Soon, a flag elsewhere. */
+.week-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 6px 14px; border-radius: 12px; background: var(--field); margin-top: -4px; }
+.week-words { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-body); }
+.week-words small { font-size: var(--fs-meta); color: var(--secondary); }
+.switch { appearance: none; -webkit-appearance: none; position: relative; flex-shrink: 0; width: 51px; height: 31px; margin: 0; border-radius: 16px; background: var(--sep); cursor: pointer; transition: background var(--dur-press) ease; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 14px; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform var(--dur-move) var(--ease); }
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(20px); }
+.switch:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.sublabel-week { color: var(--accent-text); display: flex; justify-content: space-between; }
+.sublabel-week span { font-weight: 400; color: var(--secondary); }
+.tweek { color: var(--accent-text); align-self: center; }
+.menu-sep { height: 0.5px; background: var(--sep); margin: 4px 0; }
+.menu button.sec-week { display: flex; align-items: center; gap: 10px; color: var(--accent-text); font-weight: 600; }
 textarea#editText {
   border: 0; outline: none; resize: none; font-size: var(--fs-body); line-height: 1.35; background: var(--field); border-radius: 12px; padding: 12px 14px;
   caret-color: var(--accent-text); touch-action: auto;

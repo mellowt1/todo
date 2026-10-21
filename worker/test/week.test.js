@@ -188,6 +188,34 @@ test('Do this week: to the top of Soon, off Gone quiet; Undo puts it back with i
   assert.equal(e.HUB_DB.db.prepare('SELECT COUNT(*) AS n FROM week_marks').get().n, 0);
 });
 
+test('this week: flagged open tasks; Keep holds the flag and leaves the list, Unflag takes it off with Undo', async () => {
+  const e = env();
+  await seed(e, [
+    task('flagged00001', 'Book the flights', 'soon', SUN - DAY, null, { week: true }),
+    task('flagged00002', 'Call the plumber', 'today', SUN - 2 * DAY, null, { week: true }),
+    task('flagdone0001', 'Done and flagged', 'soon', SUN - DAY, SUN - 3600000, { week: true }),
+    task('plain0000001', 'Not flagged', 'soon', SUN - DAY),
+  ]);
+  let w = await weekBlock(e, SUN);
+  assert.deepEqual(w.thisWeek.map((x) => x.id), ['flagged00001', 'flagged00002']);
+  assert.deepEqual(w.thisWeek[0], { id: 'flagged00001', text: 'Book the flights', section: 'soon' });
+
+  const kept = await actOnWeek(e, { id: 'flagged00001', action: 'keep' }, SUN);
+  assert.deepEqual(kept.week.thisWeek.map((x) => x.id), ['flagged00002']);
+  assert.equal((await read(e)).items.flagged00001.week, true);
+
+  const off = await actOnWeek(e, { id: 'flagged00002', action: 'unflag' }, SUN + 1000);
+  assert.deepEqual(off.week.thisWeek, []);
+  assert.equal((await read(e)).items.flagged00002.week, undefined);
+  await actOnWeek(e, { id: 'flagged00002', action: 'undo' }, SUN + 2000);
+  assert.equal((await read(e)).items.flagged00002.week, true);
+
+  // Next Sunday the kept one shows again.
+  w = await weekBlock(e, SUN + 7 * DAY);
+  assert.ok(w.thisWeek.some((x) => x.id === 'flagged00001'));
+  assert.equal((await actOnWeek(e, { id: 'flagdone0001', action: 'unflag' }, SUN)).status, 404);
+});
+
 test('Undo after another change leaves the newer change alone', async () => {
   const e = env();
   await seed(e, BASIC);

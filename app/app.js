@@ -189,6 +189,7 @@
       ...(it.energy !== undefined ? { energy: it.energy } : {}),
       ...(it.energyGuess !== undefined ? { energyGuess: it.energyGuess } : {}),
       ...(it.repeat !== undefined ? { repeat: it.repeat } : {}), // null takes a repeat off
+      ...(it.week !== undefined ? { week: it.week === true ? true : null } : {}), // "this week"
       ...(it.series ? { series: it.series } : {}),
     } });
   }
@@ -213,7 +214,10 @@
       const k = dueKey(it);
       return [it.id, k && (section === 'soon' || k < end) ? k : null];
     }));
+    // Soon: "this week" tasks first (2026-10-21), sorted the same way among themselves.
+    const wk = (it) => (section === 'soon' && it.week === true ? 0 : 1);
     return rows.sort((a, b) => {
+      if (wk(a) !== wk(b)) return wk(a) - wk(b);
       const ka = key.get(a.id), kb = key.get(b.id);
       if (ka && kb) return ka < kb ? -1 : ka > kb ? 1 : b.pos - a.pos;
       if (ka || kb) return ka ? -1 : 1;
@@ -279,7 +283,7 @@
     const at = now();
     const row = byId(id);
     if (row && view === 'list') xpDrop(row, pays(it, at));
-    upsert(Object.assign({}, it, { done: true, doneAt: at }));
+    upsert(Object.assign({}, it, { done: true, doneAt: at }, it.week ? { week: null } : {})); // done takes the flag off; Undo puts it back
     // A repeating task: the next one on the schedule comes in now; Undo takes both back.
     const next = nextOf(it, ymd(new Date(at)), at);
     if (next && !items[next.id]) upsert(next);
@@ -293,6 +297,15 @@
     const prev = Object.assign({}, it);
     upsert(Object.assign({}, it, { section, pos: now() }));
     if (withToast) toast('Moved to ' + LABEL[section] + '.', () => upsert(prev), id);
+  }
+
+  // "This week" on or off (2026-10-21). In Soon the task joins or leaves the group on top.
+  function setWeek(id, on, withToast = true) {
+    const it = items[id];
+    if (!it || it.done || (it.week === true) === on) return;
+    const prev = Object.assign({}, it);
+    upsert(Object.assign({}, it, { week: on ? true : null }));
+    if (withToast) toast(on ? 'Flagged for this week.' : 'Off this week.', () => upsert(Object.assign({}, prev, { week: prev.week === true ? true : null })), id);
   }
 
   function reopen(id) {
@@ -551,6 +564,7 @@
     return { id: series.slice(0, 20) + date.replace(/-/g, ''), text, section: date <= today ? 'today' : 'soon', done: false, doneAt: null, pos: at, repeat: it.repeat, series };
   }
   const longDay = (d) => { const t = new Date(d + 'T12:00:00'); return DAYS[t.getDay()] + ' ' + t.getDate() + ' ' + MONTHS[t.getMonth()]; };
+  const WEEK_ICON = '<svg class="ic tweek" width="13" height="13" viewBox="0 0 16 16" role="img" aria-label="This week"><path d="M3.5 14V2.5M3.5 2.5h8.2l-1.8 3 1.8 3H3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const REPEAT_ICON = '<svg class="ic trep" width="13" height="13" viewBox="0 0 16 16" role="img" aria-label="Repeats"><path d="M3 7.5A5 5 0 0 1 12.2 4.6M13 8.5A5 5 0 0 1 3.8 11.4M12.6 1.8v3.2H9.4M3.4 14.2V11h3.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   /* ---------- Hiscores ----------
@@ -622,6 +636,7 @@
   function textHtml(it, withSkill = true) {
     const p = nameParts(it);
     let meta = '';
+    if (it.week === true && !it.done && it.section !== 'soon') meta += WEEK_ICON; // Soon has its group
     if (it.repeat && !it.done) meta += REPEAT_ICON;
     if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + (p.time ? ' ' + p.time : '') + '">' + d.words + (p.time ? ' ' + p.time : '') + '</span>'; }
     // The confirmed energy level, a small battery (a guess shows only in the edit sheet).
@@ -828,8 +843,18 @@
       const rows = openIn(ui.section);
       ids = new Set(rows.map((it) => it.id));
       // Soon: a quiet "No date" label where the undated tasks start, when there are both.
-      const undated = ui.section === 'soon' ? rows.findIndex((it) => !dueKey(it)) : -1;
-      html = rows.map((it, i) => (i === undated && i > 0 ? '<li class="sublabel">No date</li>' : '') + rowHtml(it, justAdded.has(it.id))).join('');
+      // Soon's labels: "This week" on top when anything is flagged, then "Dated" (only under This
+      // week), then a quiet "No date" where the undated tasks start, when there are both.
+      const soon = ui.section === 'soon';
+      const flagged = soon ? rows.filter((it) => it.week === true).length : 0;
+      const rest = rows.slice(flagged);
+      const dated = flagged && rest.length && dueKey(rest[0]) ? flagged : -1;
+      const firstUndated = rest.findIndex((it) => !dueKey(it));
+      const undated = soon && firstUndated >= 0 ? flagged + firstUndated : -1;
+      const label = (i) => (flagged && i === 0 ? '<li class="sublabel sublabel-week">This week<span>' + flagged + ' left</span></li>'
+        : i === dated ? '<li class="sublabel">Dated</li>'
+        : i === undated && i > 0 ? '<li class="sublabel">No date</li>' : '');
+      html = rows.map((it, i) => label(i) + rowHtml(it, justAdded.has(it.id))).join('');
       if (!rows.length) {
         emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
           : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];
@@ -1559,7 +1584,9 @@
     menuOpener = anchor || row;
     expand(row, true);
     menu.innerHTML = '<div class="meta menu-title">Move to</div>' + SECTIONS.map((s) =>
-      '<button class="sec" role="menuitem" data-move="' + s + '"' + (s === it.section ? ' aria-current="true" aria-disabled="true"' : '') + '>' + LABEL[s] + '</button>').join('');
+      '<button class="sec" role="menuitem" data-move="' + s + '"' + (s === it.section ? ' aria-current="true" aria-disabled="true"' : '') + '>' + LABEL[s] + '</button>').join('') +
+      '<div class="menu-sep"></div><button class="sec sec-week" role="menuitemcheckbox" data-week aria-checked="' + (it.week === true) + '">' +
+      WEEK_ICON.replace('role="img" aria-label="This week"', 'aria-hidden="true"') + (it.week === true ? 'Not this week' : 'This week') + '</button>';
     rest(menu); // a menu still leaving comes back
     menu.classList.remove('leaving');
     menu.hidden = false;
@@ -1614,6 +1641,7 @@
     const b = e.target.closest('button.sec');
     if (!b || !menuOn) return;
     const row = menuRow;
+    if (b.hasAttribute('data-week')) { if (row) setWeek(row.dataset.id, !(items[row.dataset.id] && items[row.dataset.id].week === true)); closeMenu(); return; }
     // The leaving lock goes on before closeMenu lets go, so the slide plays on the row on screen.
     if (row && !b.hasAttribute('aria-current') && slideOut(row, -1)) moveTo(row.dataset.id, b.dataset.move);
     closeMenu();
@@ -1966,6 +1994,7 @@
     repStarted = false;
     $('editRepeat').classList.add('instant');
     paintRepeat(it);
+    $('editWeek').checked = it.week === true;
     requestAnimationFrame(() => $('editRepeat').classList.remove('instant'));
     const a = document.activeElement;
     openSheet($('edit'), undefined, list.contains(a) ? a : desk.matches ? row : null);
@@ -2049,6 +2078,7 @@
     repWrite(next);
   }
   for (const b of document.querySelectorAll('#editRepeat button')) b.addEventListener('click', () => setRepeat(b.dataset.every));
+  $('editWeek').addEventListener('change', () => { saveEditText(); if (editId) setWeek(editId, $('editWeek').checked, false); });
   repDate.addEventListener('change', () => {
     const it = items[editId];
     if (!it) return;

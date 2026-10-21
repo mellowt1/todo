@@ -7,6 +7,7 @@
  *   done       tasks ticked off since Monday 00:00 (Amsterdam), grouped by section
  *   quiet      open tasks untouched for 14 days or more, oldest first, minus those given a new date
  *   vacancies  tasks the digest-vacancy-todo rule made this week, with their link and state
+ *   thisWeek   open tasks flagged "this week" (2026-10-21), minus the ones kept this Sunday
  *   next       Day's events from next Monday to next Sunday, titles and times only
  *   paragraph  three sentences Claude writes once each Sunday from the sections above and Desk's
  *              log (src/desk.js): what got done, what slipped, one suggestion. Read only; null
@@ -20,7 +21,9 @@
  *                "later1" | "later2" | "later4"   New date: back in Today 1, 2 or 4 weeks after the
  *                           coming Monday (on Sunday 18 Oct: 26 Oct, 2 Nov, 16 Nov); the task is not written
  *                "delete"   deletes the task (the page has asked once)
- *                "undo"     takes back the last soon or later on this task
+ *                "undo"     takes back the last soon, later or unflag on this task
+ *                "keep"     a "this week" task stays flagged for next week (KV week:kept:<monday>)
+ *                "unflag"   takes the "this week" flag off (writes the task; Undo puts it back)
  *
  * The cron (every 15 minutes, weekCron) moves tasks whose date has come into Today, tidies
  * week_marks, and on Sunday sends one ntfy push at sunday_reset_time, never inside quiet_hours
@@ -49,6 +52,7 @@ const MAX_QUIET = 100;
 const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const PUSHED_KEY = 'week:pushed';
 const LATER = { later1: 1, later2: 2, later4: 4 };
+export const KEPT_PREFIX = 'week:kept:';
 
 /* ---------- Dates ---------- */
 
@@ -113,6 +117,14 @@ export function quietSection(items, marks, now) {
   return out.sort((a, b) => b.days - a.days).slice(0, MAX_QUIET);
 }
 
+/* Open "this week" tasks, minus the ones Paul kept for next week this Sunday. */
+export function flaggedSection(items, kept) {
+  const skip = new Set(Array.isArray(kept) ? kept : []);
+  return items.filter((i) => !i.done && i.week === true && !skip.has(i.id))
+    .sort((a, b) => b.pos - a.pos)
+    .map((i) => ({ id: i.id, text: i.text, section: i.section }));
+}
+
 /* rows: D1 events (id, payload, at); ids: event id -> task id. */
 export function vacancySection(rows, ids, doc, now) {
   const out = [];
@@ -168,7 +180,7 @@ export async function weekBlock(env, now = Date.now()) {
   const today = local(now).date;
   const monday = mondayOf(today);
   const nextMon = addDays(monday, 7);
-  const [doc, marks, vac, cal, para, mirror, lessons, energy] = await Promise.all([
+  const [doc, marks, vac, cal, para, mirror, lessons, energy, kept] = await Promise.all([
     exportList(env),
     env.HUB_DB ? readMarks(env) : new Map(),
     env.HUB_DB
@@ -180,6 +192,7 @@ export async function weekBlock(env, now = Date.now()) {
     mirrorFor(env, monday),
     lessonsFor(env).catch(() => null),
     energyFor(env, monday, now).catch(() => null),
+    env.HUB_KV.get(KEPT_PREFIX + monday, 'json'),
   ]);
   const items = Object.values(doc.items);
   const ids = new Map(await Promise.all(vac.map(async (r) => [r.id, await todoTaskId(r.id)])));
@@ -191,6 +204,7 @@ export async function weekBlock(env, now = Date.now()) {
     done: doneSection(items, zoned(monday)),
     quiet: quietSection(items, marks, now),
     vacancies: vacancySection(vac, ids, doc, now),
+    thisWeek: flaggedSection(items, kept),
     next: {
       from: nextMon,
       to: addDays(nextMon, 6),
@@ -217,7 +231,7 @@ export async function weekForMorning(env, now, request) {
 export async function actOnWeek(env, body, now = Date.now()) {
   if (!body || typeof body !== 'object' || typeof body.id !== 'string' || !ID.test(body.id)) return { status: 400, error: 'id required' };
   const action = body.action;
-  if (!['soon', 'delete', 'undo', ...Object.keys(LATER)].includes(action)) return { status: 400, error: 'action must be soon, later1, later2, later4, delete or undo' };
+  if (!['soon', 'delete', 'undo', 'keep', 'unflag', ...Object.keys(LATER)].includes(action)) return { status: 400, error: 'action must be soon, later1, later2, later4, delete, keep, unflag or undo' };
   if (!env.TODO_CODE || !env.HUB_DB) return { status: 503, error: 'not configured' };
   const id = body.id;
   const db = env.HUB_DB;
@@ -242,6 +256,20 @@ export async function actOnWeek(env, body, now = Date.now()) {
         await db.prepare('DELETE FROM week_marks WHERE task_id = ?').bind(id).run();
       }
     }
+  } else if (action === 'keep') {
+    if (!item || item.done) return { status: 404, error: 'that task is gone or done' };
+    const key = KEPT_PREFIX + mondayOf(local(now).date);
+    const kept = (await env.HUB_KV.get(key, 'json')) || [];
+    if (!kept.includes(id)) kept.push(id);
+    await env.HUB_KV.put(key, JSON.stringify(kept), { expirationTtl: 14 * 86400 });
+  } else if (action === 'unflag') {
+    if (!item || item.done) return { status: 404, error: 'that task is gone or done' };
+    const at = Math.max(now, item.updatedAt + 1);
+    const op = cleanOp({ op: 'upsert', item: { ...item, week: null, updatedAt: at } }, now);
+    if (!op) return { status: 500, error: 'cannot unflag it' };
+    await applyOp(env, op);
+    await db.prepare("INSERT INTO week_marks (task_id, kind, until, prev, at) VALUES (?, 'moved', NULL, ?, ?) ON CONFLICT(task_id) DO UPDATE SET kind = 'moved', until = NULL, prev = excluded.prev, at = excluded.at")
+      .bind(id, JSON.stringify(item), at).run();
   } else if (action === 'delete') {
     if (item) await applyOp(env, { op: 'delete', item: { id, updatedAt: Math.max(now, item.updatedAt + 1) } });
     await db.prepare('DELETE FROM week_marks WHERE task_id = ?').bind(id).run();

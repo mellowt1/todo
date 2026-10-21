@@ -22,6 +22,8 @@
  *            (2026-10-21, src/repeat.js): ticking the task off makes the next one on the schedule,
  *            from the date in its text. "bins" is the hub's bin-calendar task; the hub makes the next.
  *   series   optional, the id of the first task of a repeat, so every next one gets a fixed id.
+ *   week     optional true: "this week" (2026-10-21), on top of Soon until the Sunday reset asks
+ *            to keep it or take it off (src/week.js). Behaves like `link`.
  *            Both behave like `link` too.
  *
  * Every op carries its own updatedAt. For each task the newest updatedAt wins, so an
@@ -33,7 +35,7 @@ export const SECTIONS = ['today', 'soon', 'someday'];
 export const ENERGY = ['wired', 'normal', 'drained'];
 export const REPEATS = ['week', '2weeks', 'month', 'bins'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series']; // left out of an upsert: the stored value stays
+const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week']; // left out of an upsert: the stored value stays
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
@@ -115,6 +117,11 @@ export function cleanOp(raw, now = Date.now()) {
     const r = cleanRepeat(it.repeat);
     if (!r) return null;
     item.repeat = r;
+  }
+  if (it.week === null || it.week === false) item.week = null;
+  else if (it.week !== undefined) {
+    if (it.week !== true) return null;
+    item.week = true;
   }
   if (it.series === null) item.series = null;
   else if (it.series !== undefined) {

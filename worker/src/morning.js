@@ -192,6 +192,8 @@ export async function todosBlock(env, now = Date.now()) {
     items,
     updated: d.updated || null,
     doneToday: { count: doneToday.length, items: doneToday.slice(0, WINS_SHOWN).map((i) => maskSecrets(i.text)) },
+    // "This week" (2026-10-21): how many flagged tasks are still open, for one line under Today.
+    week: { left: d.items.filter((i) => !i.done && i.week === true).length },
     yesterday: { count: won.length, items: won.slice(0, WINS_SHOWN).map((i) => maskSecrets(i.text)) },
   };
 }

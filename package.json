@@ -18,7 +18,8 @@
     "ask-check": "node scripts/ask-check.mjs",
     "due-check": "node scripts/due-check.mjs",
     "energy-check": "node scripts/energy-check.mjs",
-    "repeat-check": "node scripts/repeat-check.mjs"
+    "repeat-check": "node scripts/repeat-check.mjs",
+    "week-check": "node scripts/week-check.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
