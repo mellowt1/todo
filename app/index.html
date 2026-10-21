@@ -74,6 +74,8 @@
         </div>
         <button id="energySort" class="energy-sort meta" hidden></button>
       </div>
+      <!-- Waiting on (app.js, Waiting): Soon only. -->
+      <button id="waitLine" class="wait-line list-only" hidden></button>
       <div id="pillSlot" class="slot"><div class="slot-clip">
         <div id="pill" class="pill" hidden><svg class="ic" width="16" height="16"><use href="#i-offline"/></svg><span></span></div>
       </div></div>
@@ -190,6 +192,7 @@
       <p id="editFromSummary"></p>
       <ul id="editFromQuotes"></ul>
     </div>
+    <button id="editWait" class="wait-open"><span>Sent, now waiting<small>Ticks this off and chases it later</small></span><span class="card-open">›</span></button>
     <button id="editApply" class="apply-open" hidden><span>Prepare on the PC<small>CV, letter in Word and a checklist, in a folder</small></span><span class="card-open">Open ›</span></button>
     <div class="grow"></div>
     <button id="editDelete" class="danger-btn">Delete task</button>
@@ -260,6 +263,70 @@
     <p class="sort-intro">A guess is outlined. Tap it to confirm, or tap another. Nothing is saved until you tap.</p>
     <p id="sortCount" class="meta"></p>
     <ul id="sortList" class="sort-list"></ul>
+  </div>
+</div>
+
+<!-- Waiting on: something sent, waiting to hear back (app.js, Waiting). The hub holds the list. -->
+<div id="wait" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet wait-sheet" role="dialog" aria-labelledby="waitHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="waitHead" class="meta">Sent, now waiting</span>
+      <button id="waitCancel" class="text-btn">Cancel</button>
+    </div>
+    <p id="waitFrom" class="wait-from" hidden></p>
+    <label for="waitWho" class="meta">Waiting on</label>
+    <input id="waitWho" type="text" maxlength="60" autocomplete="off" autocapitalize="words" placeholder="Who">
+    <div id="waitNames" class="wait-chips"></div>
+    <label for="waitWhat" class="meta">About</label>
+    <input id="waitWhat" type="text" maxlength="160" autocomplete="off" placeholder="What">
+    <div class="meta" id="waitHowHead">How I sent it</div>
+    <div id="waitHow" class="seg seg4" role="radiogroup" aria-labelledby="waitHowHead">
+      <button role="radio" aria-checked="true" data-v="email">Email</button>
+      <button role="radio" aria-checked="false" data-v="phone">Phone</button>
+      <button role="radio" aria-checked="false" data-v="letter">Letter</button>
+      <button role="radio" aria-checked="false" data-v="in-person">In person</button>
+    </div>
+    <div class="meta" id="waitAfterHead">Chase after</div>
+    <div id="waitAfter" class="wait-chips" role="radiogroup" aria-labelledby="waitAfterHead">
+      <button role="radio" aria-checked="false" data-v="3">3 days</button>
+      <button role="radio" aria-checked="true" data-v="7">7 days</button>
+      <button role="radio" aria-checked="false" data-v="14">14 days</button>
+    </div>
+    <div class="meta" id="waitForHead">For</div>
+    <div id="waitFor" class="seg seg2" role="radiogroup" aria-labelledby="waitForHead">
+      <button role="radio" aria-checked="true" data-v="me">Me</button>
+      <button role="radio" aria-checked="false" data-v="else">Someone else</button>
+    </div>
+    <input id="waitForName" type="text" maxlength="40" autocomplete="off" autocapitalize="words" placeholder="Their name" aria-label="Who it is for" hidden>
+    <p id="waitErr" class="wait-err" role="alert" hidden></p>
+    <button id="waitSave" class="pick-do">Done, now waiting</button>
+  </div>
+</div>
+
+<div id="waitList" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet" role="dialog" aria-labelledby="waitListHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="waitListHead" class="meta">Waiting on, oldest first</span>
+      <button id="waitListClose" class="text-btn">Close</button>
+    </div>
+    <ul id="waitRows" class="wait-rows" aria-live="polite"></ul>
+    <button id="waitAdd" class="pick-again">Add something I am waiting on</button>
+  </div>
+</div>
+
+<div id="answered" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet" role="dialog" aria-labelledby="ansQ">
+    <div class="grabber"></div>
+    <span id="ansMeta" class="meta"></span>
+    <p id="ansQ" class="pick-name"></p>
+    <button id="ansYes" class="pick-do">Yes, done waiting</button>
+    <button id="ansStill" class="pick-again"></button>
+    <button id="ansLater" class="text-btn">Not now</button>
   </div>
 </div>
 

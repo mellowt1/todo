@@ -675,3 +675,29 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .sort-btns button { height: 40px; border-radius: 9px; background: var(--surface); color: var(--text); font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 5px; }
 .sort-btns button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .tbatt { align-self: center; display: inline-flex; color: var(--secondary); }
+
+/* ---------- Waiting on (app.js, Waiting) ---------- */
+.seg2::before { width: calc((100% - 12px) / 2); }
+.wait-line { align-self: flex-start; min-height: 36px; margin-top: 4px; color: var(--accent-text); font-size: 15px; font-weight: 600; text-align: left; }
+.wait-line[hidden] { display: none; }
+.wait-open { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 56px; padding: 8px 14px; border-radius: 12px; background: var(--surface); color: var(--text); font-size: var(--fs-body); text-align: left; }
+.wait-open[hidden] { display: none; }
+.wait-open small { display: block; font-size: var(--fs-meta); color: var(--secondary); }
+.wait-sheet > .meta { margin-bottom: -8px; }
+.wait-sheet input[type="text"] { height: 46px; padding: 0 14px; border-radius: 12px; background: var(--surface); color: var(--text); font-size: var(--fs-body); border: 1.5px solid transparent; }
+.wait-sheet input[type="text"]:focus { border-color: var(--accent-text); outline: none; }
+.wait-sheet input[hidden] { display: none; }
+.wait-from { margin: -4px 0 0; font-size: 15px; color: var(--secondary); line-height: 1.35; }
+.wait-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wait-chips:empty { display: none; }
+.wait-chips button { min-height: 36px; padding: 0 14px; border-radius: 18px; background: var(--surface); color: var(--text); font-size: 15px; }
+.wait-chips button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.wait-err { margin: 0; color: var(--danger); font-size: 15px; }
+.wait-rows { margin: 0; padding: 0; list-style: none; }
+.wait-row { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 0.5px solid var(--sep); }
+.wait-row .wr-top { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-body); line-height: 1.3; }
+.wait-row .wr-due { flex-shrink: 0; font-size: var(--fs-meta); font-weight: 600; color: var(--amber-ink); padding-top: 2px; }
+.wait-row .wr-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.wait-row .wr-btns button { min-height: 36px; padding: 0 14px; border-radius: 9px; background: var(--surface); color: var(--text); font-size: 15px; }
+.wait-row .wr-btns button:active, .wait-chips button:active, .wait-open:active { opacity: 0.55; }
+.wait-empty { margin: 8px 0; color: var(--secondary); font-size: 15px; }

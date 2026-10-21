@@ -191,6 +191,7 @@
       ...(it.repeat !== undefined ? { repeat: it.repeat } : {}), // null takes a repeat off
       ...(it.week !== undefined ? { week: it.week === true ? true : null } : {}), // "this week"
       ...(it.series ? { series: it.series } : {}),
+      ...(it.waiting ? { waiting: it.waiting } : {}), // a chase task's Waiting on item, set by the hub
     } });
   }
 
@@ -289,6 +290,7 @@
     if (next && !items[next.id]) upsert(next);
     else if (next) { toast('Done.', () => upsert(prev), id); return; }
     toast(next ? 'Done. Next: ' + longDay(nameParts(next).due) + '.' : 'Done.', () => { upsert(prev); if (next) remove(next.id); }, id);
+    if (it.waiting) askAnswered(it); // a chase task: did they answer?
   }
 
   function moveTo(id, section, withToast = true) {
@@ -423,6 +425,7 @@
       if (!d.unchanged) applyServer(d);
       if (!loaded) { loaded = true; render(); }
       loadEnergy(); // the dial may have been set in Morning or Day
+      if (++pollCount % 6 === 1) loadWaiting(); // Waiting on, about once a minute
       if (!st.queue.length) settle();
     } catch (e) {
       if (!loaded) { loaded = true; render(); }
@@ -806,6 +809,7 @@
     }
     renderProgress();
     renderEnergy();
+    renderWaitLine();
     if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
     $('install').hidden = !(view === 'list' && showInstall());
   }
@@ -1988,6 +1992,7 @@
     showFrom(it);
     $('editApply').hidden = !isApply(it);
     paintEditEnergy(it);
+    $('editWait').hidden = !!it.waiting; // a chase task is already part of one
     const seg = $('editSeg');
     seg.classList.add('instant');
     paintEditSeg(it.section);
@@ -2871,6 +2876,183 @@
     upsert(Object.assign({}, it, { energy: level, energyGuess: level ? null : it.energyGuess }));
   });
 
+  /* ---------- Waiting ----------
+   * Waiting on (Paul, 2026-10-21): something sent, waiting to hear back. The hub holds the list
+   * (worker/src/waiting.js) and puts a "Chase ..." task in Today on its day. Here: "Sent, now waiting"
+   * in the edit sheet (ticks the task off), a line on Soon that opens the list (They answered,
+   * Snooze), and "did they answer?" when a chase task is ticked. Every write needs a connection. */
+  let pollCount = 0;
+  let waiting = Object.assign({ items: [], open: 0, due: 0, names: [] }, store.get('todo.waiting') || {});
+  const CHANNEL = { email: 'Email', phone: 'Phone', letter: 'Letter', 'in-person': 'In person' };
+  async function loadWaiting() {
+    if (!navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/waiting/' + code, { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!Array.isArray(d.items)) return;
+      waiting = { items: d.items, open: d.open, due: d.due, names: d.names || [] };
+      store.set('todo.waiting', waiting);
+      renderChrome();
+      if (!$('waitList').hidden) renderWaitRows();
+    } catch (e) { /* the last copy stays */ }
+  }
+  async function waitPost(path, body) {
+    const r = await fetch(API + '/api/waiting/' + code + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ source: 'todo' }, body)) });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) throw new Error((d && d.error) || 'status ' + r.status);
+    return d;
+  }
+  function renderWaitLine() {
+    const on = view === 'list' && ui.section === 'soon' && loaded && waiting.open > 0;
+    $('waitLine').hidden = !on;
+    if (on) $('waitLine').textContent = 'Waiting on ' + waiting.open + (waiting.due ? ' · ' + waiting.due + (waiting.due === 1 ? ' chase due' : ' chases due') : '');
+  }
+
+  // The form: from a task (edit sheet) or on its own (the list's Add).
+  let waitTask = null; // the task it came from, or null
+  let waitBusy = false;
+  function pickIn(group, v) {
+    for (const b of $(group).querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.v === v));
+  }
+  const picked = (group) => { const b = $(group).querySelector('[aria-checked="true"]'); return b ? b.dataset.v : null; };
+  function openWait(taskId) {
+    const it = taskId ? items[taskId] : null;
+    waitTask = it ? it.id : null;
+    $('waitFrom').hidden = !it;
+    if (it) $('waitFrom').textContent = 'From the task: ' + nameParts(it).name;
+    $('waitWho').value = '';
+    $('waitWhat').value = it ? nameParts(it).name : '';
+    pickIn('waitHow', 'email');
+    pickIn('waitAfter', '7');
+    pickIn('waitFor', 'me');
+    $('waitForName').hidden = true;
+    $('waitForName').value = '';
+    $('waitErr').hidden = true;
+    $('waitNames').innerHTML = waiting.names.map((n) => '<button type="button" data-name="' + esc(n) + '">' + esc(n) + '</button>').join('');
+    $('waitSave').textContent = it ? 'Done, now waiting' : 'Add';
+    openSheet($('wait'), undefined, null);
+    if (desk.matches) $('waitWho').focus();
+    else $('waitCancel').focus({ preventScroll: true });
+  }
+  function closeWait(after) { waitTask = null; closeSheet($('wait'), after); }
+  for (const g of ['waitHow', 'waitAfter', 'waitFor']) {
+    $(g).addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-v]');
+      if (!b) return;
+      pickIn(g, b.dataset.v);
+      if (g === 'waitFor') { $('waitForName').hidden = b.dataset.v !== 'else'; if (b.dataset.v === 'else') $('waitForName').focus(); }
+    });
+  }
+  $('waitNames').addEventListener('click', (e) => { const b = e.target.closest('button[data-name]'); if (b) { $('waitWho').value = b.dataset.name; $('waitErr').hidden = true; $('waitWhat').focus(); } });
+  $('wait').addEventListener('input', () => { $('waitErr').hidden = true; }); // a fix clears the note
+  $('waitCancel').addEventListener('click', () => closeWait());
+  $('wait').querySelector('.scrim').addEventListener('click', () => closeWait());
+  $('waitSave').addEventListener('click', async () => {
+    if (waitBusy) return;
+    const who = cleanText($('waitWho').value).slice(0, 60);
+    const what = cleanText($('waitWhat').value).slice(0, 160);
+    const err = (t) => { $('waitErr').textContent = t; $('waitErr').hidden = false; };
+    if (!who) return err('Who are you waiting on?');
+    if (!what) return err('What is it about?');
+    const forElse = picked('waitFor') === 'else';
+    const forWhom = forElse ? cleanText($('waitForName').value).slice(0, 40) : '';
+    if (forElse && !forWhom) return err('Who is it for?');
+    if (!navigator.onLine) return err('Needs a connection. Nothing was lost; try again when you are back online.');
+    waitBusy = true;
+    $('waitSave').disabled = true;
+    const task = waitTask;
+    try {
+      await waitPost('', { who, what, channel: picked('waitHow'), chaseDays: Number(picked('waitAfter')), ...(forWhom ? { forWhom } : {}), ...(task ? { sourceItem: task } : {}) });
+      closeWait(() => { if (task && items[task] && !items[task].done) markDone(task); else toast('Waiting on ' + who + '.'); });
+      loadWaiting();
+    } catch (e) {
+      err(String(e.message) === 'that task already has one' ? 'This task is already waiting.' : 'Could not save: ' + e.message);
+    } finally {
+      waitBusy = false;
+      $('waitSave').disabled = false;
+    }
+  });
+  $('editWait').addEventListener('click', () => {
+    const id = editId;
+    if (id) closeEdit(() => openWait(id));
+  });
+
+  // The list: oldest first, They answered and Snooze.
+  let snoozeOpen = null;
+  function renderWaitRows() {
+    if (!waiting.items.length) { $('waitRows').innerHTML = '<li class="wait-empty">Nothing you are waiting on.</li>'; return; }
+    $('waitRows').innerHTML = waiting.items.map((w) => {
+      const meta = [w.forWhom ? 'For ' + esc(w.forWhom) : '', CHANNEL[w.channel], 'since ' + shortDay(w.since), w.chases ? (w.chases === 1 ? 'chased once' : 'chased ' + w.chases + ' times') : '', w.chaseDue ? '' : 'chase on ' + shortDay(w.nextChase)].filter(Boolean).join(' · ');
+      const btns = snoozeOpen === w.id
+        ? '<button data-act="snooze" data-days="3">3 days</button><button data-act="snooze" data-days="7">1 week</button><button data-act="snooze" data-days="14">2 weeks</button>'
+        : '<button data-act="resolve">They answered</button><button data-act="snoozing">Snooze</button>';
+      return '<li class="wait-row" data-id="' + w.id + '"><div class="wr-top"><span><b>' + esc(w.who) + '</b> about ' + esc(w.what) + '</span>' +
+        (w.chaseDue ? '<span class="wr-due">Chase due</span>' : '') + '</div><span class="meta">' + meta + '</span><div class="wr-btns">' + btns + '</div></li>';
+    }).join('');
+  }
+  function openWaitList() {
+    snoozeOpen = null;
+    renderWaitRows();
+    openSheet($('waitList'), 0, $('waitLine'));
+    $('waitListClose').focus({ preventScroll: true });
+    loadWaiting();
+  }
+  function closeWaitList(after) { closeSheet($('waitList'), after); }
+  $('waitLine').addEventListener('click', openWaitList);
+  $('waitListClose').addEventListener('click', () => closeWaitList());
+  $('waitList').querySelector('.scrim').addEventListener('click', () => closeWaitList());
+  $('waitAdd').addEventListener('click', () => closeWaitList(() => openWait(null)));
+  $('waitRows').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-act]');
+    const li = b && b.closest('[data-id]');
+    if (!li || b.disabled) return;
+    const id = li.dataset.id;
+    if (b.dataset.act === 'snoozing') { snoozeOpen = id; renderWaitRows(); const f = $('waitRows').querySelector('[data-id="' + id + '"] button'); if (f) f.focus(); return; }
+    if (!navigator.onLine) { toast('Needs a connection.'); return; }
+    b.disabled = true;
+    try {
+      if (b.dataset.act === 'resolve') { await waitPost('/' + id, { action: 'resolve' }); say('Done waiting'); poll(); }
+      else { await waitPost('/' + id, { action: 'snooze', days: Number(b.dataset.days) }); say('Snoozed'); poll(); }
+      snoozeOpen = null;
+      await loadWaiting();
+    } catch (err) {
+      b.disabled = false;
+      toast('Could not do that. Try again.');
+    }
+  });
+
+  // A chase task ticked: did they answer? Yes resolves the item, Still waiting chases again a gap later.
+  let ansItem = null;
+  async function askAnswered(task) {
+    if (!waiting.items.some((x) => x.id === task.waiting)) await loadWaiting(); // made since the last read
+    const w = waiting.items.find((x) => x.id === task.waiting);
+    const name = w ? w.who : '';
+    ansItem = { id: task.waiting, gap: w ? w.chaseDays : null };
+    $('ansMeta').textContent = w ? 'Chased. Waiting since ' + shortDay(w.since) + ', ' + (CHANNEL[w.channel] || '').toLowerCase() : 'Chased';
+    $('ansQ').textContent = w ? 'Did ' + name + ' answer about ' + w.what + '?' : 'Did they answer?';
+    $('ansStill').textContent = 'Still waiting, chase again' + (ansItem.gap ? ' in ' + ansItem.gap + ' days' : '');
+    const open = () => { openSheet($('answered'), 0, null); $('ansYes').focus({ preventScroll: true }); };
+    if (modals.size) setTimeout(open, 400); else open();
+  }
+  function closeAnswered() { ansItem = null; closeSheet($('answered')); }
+  async function answer(action) {
+    const a = ansItem;
+    if (!a) return;
+    closeAnswered();
+    try {
+      await waitPost('/' + a.id, { action });
+      toast(action === 'resolve' ? 'Done waiting.' : 'Chase again later.');
+      loadWaiting();
+    } catch (e) {
+      toast(navigator.onLine ? 'Could not save that. Use the Waiting on list on Soon.' : 'Needs a connection. Use the Waiting on list on Soon later.');
+    }
+  }
+  $('ansYes').addEventListener('click', () => answer('resolve'));
+  $('ansStill').addEventListener('click', () => answer('still'));
+  $('ansLater').addEventListener('click', closeAnswered);
+  $('answered').querySelector('.scrim').addEventListener('click', closeAnswered);
+
   /* ---------- Keyboard (desktop) ---------- */
   function rows() { return Array.from(list.querySelectorAll(view === 'done' ? '.drow' : '.row:not(.skeleton)')); }
   const isField = (el) => !!el && (/^(input|textarea|select)$/i.test(el.tagName || '') || el.isContentEditable);
@@ -2892,12 +3074,15 @@
       if (!$('ask').hidden) { closeAsk(); return; }
       if (!$('pick').hidden) { closePick(); return; }
       if (!$('sort').hidden) { closeSort(); return; }
+      if (!$('answered').hidden) { closeAnswered(); return; }
+      if (!$('wait').hidden) { closeWait(); return; }
+      if (!$('waitList').hidden) { closeWaitList(); return; }
       if (!$('capture').hidden) { closeCapture(); return; }
       closeReveal();
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('ask')) || shown($('pick')) || shown($('sort')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('ask')) || shown($('pick')) || shown($('sort')) || shown($('wait')) || shown($('waitList')) || shown($('answered')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
       const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -3124,6 +3309,7 @@
     } else {
       newDay();
       poll();
+      loadWaiting();
       startPolling();
     }
   });
@@ -3142,6 +3328,7 @@
   startPolling();
   setTimeout(loadRecs, 1500); // after the list, never before it
   setTimeout(loadCards, 1600);
+  setTimeout(loadWaiting, 1700);
 
   if ('serviceWorker' in navigator && (!isLocal || params.has('sw'))) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
