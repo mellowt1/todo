@@ -620,3 +620,32 @@ body.ready #progressFill { transition: transform var(--dur-move) var(--ease); }
 .edit-from li { font-size: var(--fs-meta); color: var(--secondary); padding-left: 10px; border-left: 2px solid var(--sep); line-height: 1.35; }
 /* Desktop: a file dragged over the list can be dropped on it. */
 main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: -2px; border-radius: 12px; min-height: 120px; }
+
+/* ---------- Energy dial (app.js, Energy) ----------
+   The dial reuses .seg; with no level on, the thumb hides. A guess (Tidy, or the one-off pass)
+   is outlined until Paul taps it. */
+.energy { display: flex; flex-direction: column; margin-top: 12px; }
+.energy-seg button { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.seg.energy-seg:not(:has([aria-checked="true"]))::before { opacity: 0; }
+.energy-seg button.guess, .sort-btns button.guess { outline: 1.5px dashed var(--accent-text); outline-offset: -3px; font-weight: 600; }
+.batt { flex-shrink: 0; }
+.energy-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.energy-sort { align-self: flex-start; min-height: 32px; margin-top: -6px; color: var(--accent-text); text-align: left; }
+.energy-note { margin: -8px 0 0; }
+.pick-name { margin: 6px 0 0; font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pick-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 18px; font-size: 15px; color: var(--secondary); }
+.pick-do { width: 100%; height: 50px; border-radius: 12px; background: var(--accent); color: var(--on-accent); font-size: var(--fs-body); font-weight: 600; }
+.pick-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.pick-two button, .pick-again { height: 46px; border-radius: 12px; background: var(--surface); color: var(--text); font-size: 16px; }
+.pick-again { width: 100%; margin-top: 18px; font-weight: 600; }
+.pick-do:active, .pick-two button:active, .pick-again:active, .sort-btns button:active { opacity: 0.55; }
+.sort-intro { margin: 0; font-size: 15px; line-height: 1.35; color: var(--secondary); }
+.sort-list { margin: 0; padding: 0; list-style: none; }
+.sort-row { padding: 12px 0; border-top: 0.5px solid var(--sep); }
+.sort-name { display: flex; justify-content: space-between; gap: 10px; font-size: 16px; line-height: 1.3; }
+.sort-row.set .sort-name > span:first-child { color: var(--secondary); }
+.sort-where { flex-shrink: 0; font-size: 12px; color: var(--secondary); padding-top: 2px; }
+.sort-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.sort-btns button { height: 40px; border-radius: 9px; background: var(--surface); color: var(--text); font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.sort-btns button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.tbatt { align-self: center; display: inline-flex; color: var(--secondary); }

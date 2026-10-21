@@ -16,7 +16,8 @@
     "apply-check": "node scripts/apply-check.mjs",
     "tidy-check": "node scripts/tidy-check.mjs",
     "ask-check": "node scripts/ask-check.mjs",
-    "due-check": "node scripts/due-check.mjs"
+    "due-check": "node scripts/due-check.mjs",
+    "energy-check": "node scripts/energy-check.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

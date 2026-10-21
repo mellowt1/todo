@@ -166,6 +166,11 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `POST /api/todo/:code/ops` | the code | `{ ops: [{ op: "upsert" \| "delete", item }] }`, returns `{ rev, updated, items, rejected }`; `rejected` lists the indexes of ops that failed validation, the rest still land |
 | `GET /api/todo/open` | `Bearer TODO_READ_TOKEN` | open tasks only, `[{ text, section }]`. No done history, no writes. The token works here and nowhere else. |
 | `GET /api/admin/todo/export` | `Bearer ADMIN_TOKEN` | the whole stored document, tombstones included, for backups |
+| `GET /api/energy/:code` | the code | the Energy dial: `{ level, setAt, until, source }`, `?pick=1` adds `pick: { task, count, left, position }` |
+| `POST /api/energy/:code` | the code | `{ level: "wired" \| "normal" \| "drained" \| null, source: "todo" \| "morning" }`, stored as a hub event, on for 4 hours |
+| `POST /api/energy/:code/pick` | the code | `{ mode: "next" \| "surprise", skip, current?, skipped?, source }`; `skipped` is stored as `energy.skipped` |
+| `POST /api/energy/:code/suggest` | the code | one Claude Haiku pass that writes `energyGuess` on open tasks with neither level nor guess, at most once a day |
+| `GET/POST /api/hub/energy/day[/pick]` | `Bearer HUB_SECRET_DAY` | the same for Day, through the Odysseus backend |
 | `/api/morning/...` | | see Morning Screen above |
 | `/api/kitchen/...`, `/api/admin/kitchen/...` | | see Kitchen above |
 | `/api/german/...` | | see German calls above |

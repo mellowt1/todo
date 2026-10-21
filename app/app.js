@@ -13,6 +13,14 @@
   const SECTIONS = ['today', 'soon', 'someday'];
   const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done' };
   const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.' };
+  const LEVELS = ['wired', 'normal', 'drained'];
+  const LNAME = { wired: 'Wired', normal: 'Normal', drained: 'Drained' };
+  const FILL = { wired: 12, normal: 7, drained: 2.5 };
+  // A battery whose fill is the level. label: an image with a name; without, decoration.
+  const battSvg = (level, label) => '<svg class="batt" width="20" height="12" viewBox="0 0 20 12"' + (label ? ' role="img" aria-label="' + label + '"' : ' aria-hidden="true"') + '>' +
+    '<rect x="0.75" y="0.75" width="16" height="10.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+    '<rect x="17.5" y="3.75" width="1.75" height="4.5" rx="0.8" fill="currentColor"/>' +
+    '<rect x="2.75" y="2.75" width="' + FILL[level] + '" height="6.5" rx="1.2" fill="currentColor"/></svg>';
   const MAX_TEXT = 500;
   const MAX_BATCH = 200;
   const MAX_BODY = 150000;
@@ -177,6 +185,9 @@
       id: it.id, text: it.text, section: it.section, done: !!it.done,
       doneAt: it.done ? it.doneAt : null, pos: it.pos, updatedAt: stamp(),
       ...(it.link ? { link: it.link } : {}), // set by the hub (a vacancy's page); the app only keeps it
+      // The Energy dial: a confirmed level and a guess. Left out, the hub keeps them; null clears.
+      ...(it.energy !== undefined ? { energy: it.energy } : {}),
+      ...(it.energyGuess !== undefined ? { energyGuess: it.energyGuess } : {}),
     } });
   }
 
@@ -234,8 +245,11 @@
       const d = r.ok ? await r.json() : null;
       const it = items[id];
       if (!edit && d && (d.kind === 'ask' || d.kind === 'write') && it && !it.done && it.text === typed) return toDesk(id, typed, d.kind);
-      if (!d || !d.changed || !d.text || !it || it.done || it.text !== typed) return;
-      upsert(Object.assign({}, it, { text: d.text }));
+      if (!d || !it || it.done || it.text !== typed) return;
+      // Tidy also guesses the energy the task takes; it shows outlined until Paul confirms it.
+      const guess = LEVELS.includes(d.energy) && !it.energy && !it.energyGuess ? { energyGuess: d.energy } : null;
+      if (!d.changed || !d.text) { if (guess) upsert(Object.assign({}, it, guess)); return; }
+      upsert(Object.assign({}, it, { text: d.text }, guess));
       tidied[id] = d.text;
       const undo = () => { const cur = items[id]; if (cur) { upsert(Object.assign({}, cur, { text: typed })); teach('undone', d.text, typed); } delete tidied[id]; };
       if (!$('capture').hidden && !capClosing) return capTidied(id, typed, d.text, undo);
@@ -385,6 +399,7 @@
       if (!r.ok || !d) throw new Error('status ' + r.status);
       if (!d.unchanged) applyServer(d);
       if (!loaded) { loaded = true; render(); }
+      loadEnergy(); // the dial may have been set in Morning or Day
       if (!st.queue.length) settle();
     } catch (e) {
       if (!loaded) { loaded = true; render(); }
@@ -563,6 +578,8 @@
     const p = nameParts(it);
     let meta = '';
     if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + (p.time ? ' ' + p.time : '') + '">' + d.words + (p.time ? ' ' + p.time : '') + '</span>'; }
+    // The confirmed energy level, a small battery (a guess shows only in the edit sheet).
+    if (withSkill && !it.done && LEVELS.includes(it.energy)) meta += '<span class="tbatt" title="' + LNAME[it.energy] + ' energy">' + battSvg(it.energy, LNAME[it.energy] + ' energy') + '</span>';
     // One slot at the right: the skill the task pays most into (a letter's Defence, an Apply's Slayer).
     if (withSkill) meta += skillSlot(it);
     return '<span class="tname">' + esc(p.name) + '</span>' + (meta ? '<span class="tmeta">' + meta + '</span>' : '');
@@ -700,6 +717,7 @@
       if (!it || it.done || view !== 'list' || it.section !== ui.section) closeReveal();
     }
     renderChrome();
+    if (sortOpen) renderSort();
     if (leaving.size || pressed || menuRow || revealed) { renderQueued = true; return; }
     renderQueued = false;
     renderList();
@@ -726,6 +744,7 @@
       c.textContent = n ? String(n) : '';
     }
     renderProgress();
+    renderEnergy();
     if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[ui.section];
     $('install').hidden = !(view === 'list' && showInstall());
   }
@@ -1894,6 +1913,7 @@
     editText.value = it.text.replace(INTAKE_MARK, ''); // the mark stays on the task, not in the box
     showFrom(it);
     $('editApply').hidden = !isApply(it);
+    paintEditEnergy(it);
     const seg = $('editSeg');
     seg.classList.add('instant');
     paintEditSeg(it.section);
@@ -2426,6 +2446,265 @@
   $('askClose').addEventListener('click', closeAsk);
   $('ask').querySelector('.scrim').addEventListener('click', closeAsk);
 
+  /* ---------- Energy ----------
+   * The dial (Paul, 2026-10-21): wired, normal or drained. The hub holds the level for every app
+   * (worker/src/energy.js) for 4 hours; tapping the level that is on clears it. Here it sits on
+   * Today, with Give me one: one open task whose confirmed level matches. The pick is made on the
+   * phone, so it works offline, with the hub's order copied from pickPool: Today then Soon, dated
+   * by date, then the rest newest first, tasks for someone else last. Change both together.
+   * "Not this one" is told to the hub, which counts it as a skip on that task. */
+  const HOURS = 4;
+  let energy = Object.assign({ level: null, until: null, source: null }, store.get('todo.energy') || {});
+  let energyPending = null; // a tap not yet stored by the hub: { level }
+  const levelOn = () => (energy.level && Date.parse(energy.until) > now() ? energy.level : null);
+  const hm = (iso) => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const SOURCE_NAME = { morning: 'Morning', day: 'Day' };
+  for (const seg of [$('energySeg'), $('editEnergy')]) {
+    for (const b of seg.querySelectorAll('button')) b.innerHTML = battSvg(b.dataset.level) + '<span>' + LNAME[b.dataset.level] + '</span>';
+  }
+  const unsorted = () => Object.values(items).filter((i) => !i.done && !LEVELS.includes(i.energy));
+
+  function renderEnergy() {
+    const on = view === 'list' && ui.section === 'today' && loaded;
+    $('energy').hidden = !on;
+    if (!on) return;
+    const level = levelOn();
+    for (const b of $('energySeg').querySelectorAll('button')) {
+      const sel = b.dataset.level === level;
+      b.setAttribute('aria-checked', String(sel));
+      b.tabIndex = sel || (!level && b.dataset.level === 'wired') ? 0 : -1;
+    }
+    $('energyText').textContent = level
+      ? LNAME[level] + ' until ' + hm(energy.until) + (SOURCE_NAME[energy.source] ? ', set in ' + SOURCE_NAME[energy.source] : '')
+      : 'How much energy have you got?';
+    $('giveOne').hidden = !level;
+    const n = unsorted().length;
+    $('energySort').hidden = !n;
+    $('energySort').textContent = n === 1 ? '1 task has no level yet. Sort it' : n + ' tasks have no level yet. Sort them';
+  }
+
+  function takeEnergy(d) {
+    if (!d || !('level' in d)) return;
+    const was = levelOn();
+    energy = { level: d.level, until: d.until, source: d.source };
+    store.set('todo.energy', energy);
+    if (was !== levelOn()) { pickSkip = []; renderChrome(); if (!$('pick').hidden) closePick(); }
+  }
+  async function loadEnergy() {
+    if (energyPending) return sendEnergy();
+    try {
+      const r = await fetch(API + '/api/energy/' + code, { cache: 'no-store' });
+      if (r.ok) takeEnergy(await r.json());
+    } catch (e) { /* the last known level stays */ }
+    if (energy.level && !levelOn()) renderChrome(); // four hours ran out
+  }
+  async function sendEnergy() {
+    const p = energyPending;
+    if (!p || !navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/energy/' + code, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level: p.level, source: 'todo' }) });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (energyPending === p) { energyPending = null; takeEnergy(d); }
+    } catch (e) { /* tried again on the next poll */ }
+  }
+  function setLevel(level) {
+    const next = levelOn() === level ? null : level; // the level that is on: off again
+    energy = next ? { level: next, until: new Date(now() + HOURS * 3600000).toISOString(), source: 'todo' } : { level: null, until: null, source: null };
+    store.set('todo.energy', energy);
+    energyPending = { level: next };
+    pickSkip = [];
+    renderChrome();
+    say(next ? 'Energy ' + LNAME[next] : 'Energy cleared');
+    sendEnergy();
+  }
+  for (const b of $('energySeg').querySelectorAll('button')) b.addEventListener('click', () => setLevel(b.dataset.level));
+  $('energySeg').addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key]; // Up and Down still walk the list
+    if (!step) return;
+    e.preventDefault();
+    const bs = Array.from($('energySeg').querySelectorAll('button'));
+    const i = Math.max(0, bs.indexOf(document.activeElement));
+    bs[(i + step + bs.length) % bs.length].focus(); // moving does not set a level; Space or Enter does
+  });
+
+  // Copied from worker/src/energy.js (forSomeoneElse, pickPool).
+  const PERSON = /^\p{Lu}[\p{L}'-]{1,23}: /u;
+  const NOT_A_PERSON = new Set(['Apply', 'Choose', 'Pay', 'Note', 'Read', 'Call', 'Sollicitatie']);
+  function forSomeoneElse(it) {
+    if (it.section === 'others') return true;
+    const m = it.text.match(PERSON);
+    return !!m && !NOT_A_PERSON.has(m[0].slice(0, -2));
+  }
+  function pickPool(level) {
+    const rows = Object.values(items).filter((it) => !it.done && it.energy === level && (it.section === 'today' || it.section === 'soon'))
+      .map((it) => ({ it, others: forSomeoneElse(it) ? 1 : 0, sec: it.section === 'today' ? 0 : 1, key: dueKey(it) }));
+    rows.sort((a, b) => a.others - b.others || a.sec - b.sec || (a.key ? 0 : 1) - (b.key ? 0 : 1)
+      || (a.key && b.key ? a.key.localeCompare(b.key) : 0) || b.it.pos - a.it.pos);
+    return rows.map((r) => r.it);
+  }
+
+  let pickSkip = [];  // turned down this round, for this level
+  let pickCur = null; // the task on screen
+  function pickNext(mode) {
+    const level = levelOn();
+    const pool = level ? pickPool(level) : [];
+    const left = pool.filter((it) => !pickSkip.includes(it.id));
+    let it = left[0] || null;
+    if (mode === 'surprise' && left.length > 1) {
+      const others = left.filter((x) => x.id !== pickCur);
+      it = others[Math.floor(Math.random() * others.length)];
+    }
+    pickCur = it ? it.id : null;
+    return { it, count: pool.length, position: pool.length - left.length + 1, level };
+  }
+  let pickShown = null;
+  function renderPick(p) {
+    pickShown = p;
+    const L = p.level ? LNAME[p.level] : '';
+    $('pickHead').innerHTML = p.level ? battSvg(p.level) + ' ' + esc(L) + (p.it ? ' · ' + p.position + ' of ' + p.count + ' that fit' : '') : '';
+    let html;
+    if (p.it) {
+      const n = nameParts(p.it);
+      const due = n.due ? 'due ' + dueLabel(n.due).words.toLowerCase().replace(/^(\d+ )(\w)/, (m, a, b) => a + b.toUpperCase()) + (n.time ? ' ' + n.time : '') : '';
+      html = '<p class="pick-name">' + esc(n.name) + '</p>' +
+        '<div class="pick-meta">' + skillSlot(p.it) + '<span>' + LABEL[p.it.section] + '</span>' + (due ? '<span>· ' + esc(due) + '</span>' : '') + '</div>' +
+        '<button class="pick-do" data-act="do">' + (p.it.section === 'today' ? 'Do this one' : 'Do this one (moves it to Today)') + '</button>' +
+        '<div class="pick-two"><button data-act="skip">Not this one</button><button data-act="surprise">Surprise me</button></div>';
+    } else if (p.count) {
+      html = '<p class="pick-name">That was every task that fits ' + L.toLowerCase() + '.</p>' +
+        '<p class="meta">Each one you turned down counts once. Start again to see them in the same order.</p>' +
+        '<button class="pick-again" data-act="again">Start again</button>';
+    } else {
+      html = '<p class="pick-name">No task fits ' + L.toLowerCase() + ' yet.</p>' +
+        '<p class="meta">Only tasks with a confirmed level can be picked. Give tasks a level in their edit sheet, or sort them all at once.</p>' +
+        '<button class="pick-again" data-act="sort">Sort energy</button>';
+    }
+    $('pickBody').innerHTML = html;
+  }
+  function openPick() {
+    if (!levelOn()) return;
+    pickSkip = [];
+    renderPick(pickNext('next'));
+    openSheet($('pick'), 0, $('giveOne'));
+    $('pickClose').focus({ preventScroll: true });
+  }
+  function closePick(after) { pickShown = null; closeSheet($('pick'), after); }
+  function tellSkip(id) {
+    if (!navigator.onLine) return;
+    fetch(API + '/api/energy/' + code + '/pick', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'next', skip: [id], current: id, skipped: id, source: 'todo' }) }).catch(() => {});
+  }
+  $('giveOne').addEventListener('click', openPick);
+  $('pickClose').addEventListener('click', () => closePick());
+  $('pick').querySelector('.scrim').addEventListener('click', () => closePick());
+  $('pickBody').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || !pickShown) return;
+    const act = b.dataset.act;
+    const it = pickShown.it;
+    if (act === 'skip' && it) { tellSkip(it.id); pickSkip.push(it.id); renderPick(pickNext('next')); }
+    else if (act === 'surprise' && it) renderPick(pickNext('surprise'));
+    else if (act === 'again') { pickSkip = []; renderPick(pickNext('next')); }
+    else if (act === 'sort') closePick(openSort);
+    else if (act === 'do' && it) {
+      const id = it.id;
+      closePick(() => {
+        if (items[id] && items[id].section !== 'today') moveTo(id, 'today');
+        const row = byId(id);
+        if (row) { row.scrollIntoView({ block: 'nearest', behavior: M.reduced ? 'auto' : 'smooth' }); if (keyed) focusRow(row); }
+      });
+    }
+  });
+
+  // The edit sheet: tap a level to confirm it (a guess goes), tap the one that is on to clear it.
+  function paintEditEnergy(it) {
+    const guess = !LEVELS.includes(it.energy) && LEVELS.includes(it.energyGuess) ? it.energyGuess : null;
+    for (const b of $('editEnergy').querySelectorAll('button')) {
+      const on = b.dataset.level === it.energy;
+      b.setAttribute('aria-checked', String(on));
+      b.classList.toggle('guess', b.dataset.level === guess);
+      b.tabIndex = on || (!it.energy && b.dataset.level === (guess || 'wired')) ? 0 : -1;
+    }
+    $('editEnergyNote').hidden = !guess;
+  }
+  for (const b of $('editEnergy').querySelectorAll('button')) {
+    b.addEventListener('click', () => {
+      const it = items[editId];
+      if (!it) return;
+      saveEditText();
+      const cur = items[editId];
+      const level = cur.energy === b.dataset.level ? null : b.dataset.level;
+      upsert(Object.assign({}, cur, { energy: level, energyGuess: level ? null : cur.energyGuess }));
+      paintEditEnergy(items[editId]);
+    });
+  }
+  $('editEnergy').addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const bs = Array.from($('editEnergy').querySelectorAll('button'));
+    const i = Math.max(0, bs.indexOf(document.activeElement));
+    bs[(i + step + bs.length) % bs.length].focus();
+  });
+
+  // Sort: every open task with three buttons. On open, tasks with neither a level nor a guess are
+  // sent once for a guess (POST /api/energy/:code/suggest, Claude Haiku, at most once a day).
+  let sortOpen = false;
+  let sortAsked = false;
+  // The ones still without a level first, then the rest; each part in list order. The order is
+  // taken when the sheet opens, so a row never jumps away under a tap.
+  let sortOrder = [];
+  function sortRows() {
+    const all = SECTIONS.flatMap((s) => openIn(s));
+    const rank = new Map(sortOrder.map((id, i) => [id, i]));
+    return all.sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
+  }
+  function renderSort() {
+    const rows = sortRows();
+    const set = rows.filter((i) => LEVELS.includes(i.energy)).length;
+    $('sortCount').textContent = set + ' of ' + rows.length + ' open tasks have a level';
+    $('sortList').innerHTML = rows.map((it) => {
+      const guess = !LEVELS.includes(it.energy) && LEVELS.includes(it.energyGuess) ? it.energyGuess : null;
+      const name = nameParts(it).name;
+      return '<li class="sort-row' + (it.energy ? ' set' : '') + '" data-id="' + it.id + '">' +
+        '<div class="sort-name"><span>' + esc(name) + '</span><span class="sort-where">' + LABEL[it.section] + '</span></div>' +
+        '<div class="sort-btns" role="radiogroup" aria-label="Energy for ' + esc(name) + '">' + LEVELS.map((l) =>
+          '<button role="radio" data-level="' + l + '" aria-checked="' + (it.energy === l) + '"' + (l === guess ? ' class="guess"' : '') + '>' + battSvg(l) + LNAME[l] + '</button>').join('') +
+        '</div></li>';
+    }).join('');
+  }
+  async function askGuesses() {
+    if (sortAsked || !navigator.onLine) return;
+    if (!Object.values(items).some((i) => !i.done && !i.energy && !i.energyGuess)) return;
+    sortAsked = true;
+    try {
+      const r = await fetch(API + '/api/energy/' + code + '/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (r.ok) await poll(); // the guesses are on the tasks now
+    } catch (e) { /* they stay blank; Paul can still pick */ }
+  }
+  function openSort() {
+    const all = SECTIONS.flatMap((s) => openIn(s));
+    sortOrder = all.filter((i) => !LEVELS.includes(i.energy)).concat(all.filter((i) => LEVELS.includes(i.energy))).map((i) => i.id);
+    sortOpen = true;
+    renderSort();
+    openSheet($('sort'), 0, $('energySort'));
+    $('sortClose').focus({ preventScroll: true });
+    askGuesses();
+  }
+  function closeSort() { if (!sortOpen) return; sortOpen = false; closeSheet($('sort')); }
+  $('energySort').addEventListener('click', openSort);
+  $('sortClose').addEventListener('click', closeSort);
+  $('sort').querySelector('.scrim').addEventListener('click', closeSort);
+  $('sortList').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-level]');
+    const li = b && b.closest('[data-id]');
+    const it = li && items[li.dataset.id];
+    if (!it) return;
+    const level = it.energy === b.dataset.level ? null : b.dataset.level;
+    upsert(Object.assign({}, it, { energy: level, energyGuess: level ? null : it.energyGuess }));
+  });
+
   /* ---------- Keyboard (desktop) ---------- */
   function rows() { return Array.from(list.querySelectorAll(view === 'done' ? '.drow' : '.row:not(.skeleton)')); }
   const isField = (el) => !!el && (/^(input|textarea|select)$/i.test(el.tagName || '') || el.isContentEditable);
@@ -2445,12 +2724,14 @@
       if (!$('card').hidden) { closeCard(); return; }
       if (!$('apply').hidden) { closeApply(); return; }
       if (!$('ask').hidden) { closeAsk(); return; }
+      if (!$('pick').hidden) { closePick(); return; }
+      if (!$('sort').hidden) { closeSort(); return; }
       if (!$('capture').hidden) { closeCapture(); return; }
       closeReveal();
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('ask')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('ask')) || shown($('pick')) || shown($('sort')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
       const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

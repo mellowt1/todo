@@ -61,6 +61,19 @@
         <span id="progressText" class="meta"></span>
         <span class="pbar" aria-hidden="true"><span id="progressFill"></span></span>
       </div>
+      <!-- The Energy dial (app.js, Energy): the hub holds the level for every app. Today only. -->
+      <div id="energy" class="energy list-only" hidden>
+        <div id="energySeg" class="seg energy-seg" role="radiogroup" aria-label="Energy">
+          <button role="radio" aria-checked="false" data-level="wired"></button>
+          <button role="radio" aria-checked="false" data-level="normal"></button>
+          <button role="radio" aria-checked="false" data-level="drained"></button>
+        </div>
+        <div class="energy-line">
+          <span id="energyText" class="meta"></span>
+          <button id="giveOne" class="text-btn" hidden>Give me one</button>
+        </div>
+        <button id="energySort" class="energy-sort meta" hidden></button>
+      </div>
       <div id="pillSlot" class="slot"><div class="slot-clip">
         <div id="pill" class="pill" hidden><svg class="ic" width="16" height="16"><use href="#i-offline"/></svg><span></span></div>
       </div></div>
@@ -152,6 +165,13 @@
       <button role="radio" data-section="soon">Soon</button>
       <button role="radio" data-section="someday">Someday</button>
     </div>
+    <div class="meta">Energy it takes</div>
+    <div id="editEnergy" class="seg energy-seg" role="radiogroup" aria-label="Energy it takes" aria-describedby="editEnergyNote">
+      <button role="radio" aria-checked="false" data-level="wired"></button>
+      <button role="radio" aria-checked="false" data-level="normal"></button>
+      <button role="radio" aria-checked="false" data-level="drained"></button>
+    </div>
+    <p id="editEnergyNote" class="meta energy-note" hidden>A guess. Tap it to confirm, or pick another.</p>
     <div id="editFrom" class="edit-from" hidden>
       <div class="meta">Read from <span id="editFromKind"></span></div>
       <p id="editFromSummary"></p>
@@ -199,6 +219,34 @@
       <button id="askClose" class="text-btn">Close</button>
     </div>
     <div id="askBody" class="card-body" aria-live="polite"></div>
+  </div>
+</div>
+
+<!-- Give me one: one open task that fits the energy level (app.js, Energy). -->
+<div id="pick" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet pick-sheet" role="dialog" aria-labelledby="pickHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="pickHead" class="meta"></span>
+      <button id="pickClose" class="text-btn">Close</button>
+    </div>
+    <div id="pickBody" aria-live="polite"></div>
+  </div>
+</div>
+
+<!-- Energy for each open task: a guess shows outlined, nothing counts until Paul taps (app.js, Energy). -->
+<div id="sort" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet sort-sheet" role="dialog" aria-labelledby="sortHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="sortHead" class="meta">Energy</span>
+      <button id="sortClose" class="text-btn">Done</button>
+    </div>
+    <p class="sort-intro">A guess is outlined. Tap it to confirm, or tap another. Nothing is saved until you tap.</p>
+    <p id="sortCount" class="meta"></p>
+    <ul id="sortList" class="sort-list"></ul>
   </div>
 </div>
 

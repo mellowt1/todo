@@ -16,7 +16,8 @@ Replace the iOS Notes to-do page with the simplest possible list: capture in one
 3. **Move between sections.** Move a task to Today, Soon or Someday in one gesture or tap.
 
 ## Must nots
-* No tags, no priorities.
+* No tags, no priorities. One exception (Paul, 2026-10-21, the Energy dial, `worker/src/energy.js`): a task may carry one energy level, wired, normal or drained, set in its edit sheet or on the Energy sorting screen. A guess (Tidy's, or the one-off Claude Haiku pass over old tasks) shows outlined and counts for nothing until Paul taps it. No minutes field (wait for the Dread meter).
+* The dial on Today sets Paul's level for every app (the hub holds it for 4 hours; tapping it again clears it). Give me one picks one open task with that confirmed level: Today first, then Soon, never Someday; dated by date, then undated newest first; tasks for someone else last. Not this one goes to the next and is told to the hub as a skip; Surprise me picks at random within the level. Do this one moves a Soon pick into Today.
 * No accounts or login. Access is a private link with a code, like Runway.
 * A task may carry one link, set only by the hub (`worker/src/hub.js`, 2026-10-12: a vacancy from the Defence digest becomes "Apply: ..." in Soon). The row shows a small icon that opens it; the app never edits links.
 * No AI inside the list. The list itself stays dumb and fast. Intake (a Worker route, `worker/src/intake.js`, 2026-10-11) may feed it tasks read from a PDF, a photo or pasted text; in the app that is one paper-clip button and nothing more.
