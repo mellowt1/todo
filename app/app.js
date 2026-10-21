@@ -177,6 +177,8 @@
       id: it.id, text: it.text, section: it.section, done: !!it.done,
       doneAt: it.done ? it.doneAt : null, pos: it.pos, updatedAt: stamp(),
       ...(it.link ? { link: it.link } : {}), // set by the hub (a vacancy's page); the app only keeps it
+      ...(it.repeat !== undefined ? { repeat: it.repeat } : {}), // null takes a repeat off
+      ...(it.series ? { series: it.series } : {}),
     } });
   }
 
@@ -264,7 +266,11 @@
     const row = byId(id);
     if (row && view === 'list') xpDrop(row, pays(it, at));
     upsert(Object.assign({}, it, { done: true, doneAt: at }));
-    toast('Done.', () => upsert(prev), id);
+    // A repeating task: the next one on the schedule comes in now; Undo takes both back.
+    const next = nextOf(it, ymd(new Date(at)), at);
+    if (next && !items[next.id]) upsert(next);
+    else if (next) { toast('Done.', () => upsert(prev), id); return; }
+    toast(next ? 'Done. Next: ' + longDay(nameParts(next).due) + '.' : 'Done.', () => { upsert(prev); if (next) remove(next.id); }, id);
   }
 
   function moveTo(id, section, withToast = true) {
@@ -280,7 +286,11 @@
     if (!it || !it.done) return;
     const prev = Object.assign({}, it);
     upsert(Object.assign({}, it, { done: false, doneAt: null, pos: now() }));
-    toast('Reopened in ' + LABEL[it.section] + '.', () => upsert(prev), id);
+    // A repeating task's next one goes again while it is still open, so there are never two.
+    const next = nextOf(it, ymd(new Date(it.doneAt)), now());
+    const made = next && items[next.id] && !items[next.id].done ? Object.assign({}, items[next.id]) : null;
+    if (made) remove(made.id);
+    toast('Reopened in ' + LABEL[it.section] + '.', () => { upsert(prev); if (made) upsert(made); }, id);
   }
 
   /* ---------- Sync ---------- */
@@ -493,6 +503,41 @@
     return { name: name || it.text, due: m ? m[1] : null, time: m && m[2] ? m[2] + ':' + m[3] : null };
   }
 
+  /* ---------- Repeats ----------
+   * The same rules as worker/src/repeat.js (nextDate, successor): change both together. The next
+   * one is on the schedule from the task's date, missed ones skipped, and stops after `until`. Its
+   * id is fixed by the series and the date, so the hub's back-up never makes a second one. Bins
+   * ("every: bins") come from the hub's bin calendar, never from here. */
+  const REPEAT_STEP = { week: 7, '2weeks': 14 };
+  const REPEAT_LABEL = { week: 'Weekly', '2weeks': '2 weeks', month: 'Monthly' };
+  const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const plusDays = (date, n) => new Date(Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10) + n)).toISOString().slice(0, 10);
+  function plusMonths(date, n) {
+    const [y, m, d] = date.split('-').map(Number);
+    const last = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(y, m - 1 + n, Math.min(d, last))).toISOString().slice(0, 10);
+  }
+  function nextDate(due, every, today, until) {
+    let k = 1;
+    let next;
+    do { next = every === 'month' ? plusMonths(due, k) : plusDays(due, REPEAT_STEP[every] * k); k++; } while (next < today && k < 1000);
+    return until && next > until ? null : next;
+  }
+  function nextOf(it, today, at) {
+    if (!it.repeat || !(REPEAT_STEP[it.repeat.every] || it.repeat.every === 'month')) return null;
+    const mark = it.text.match(INTAKE_MARK);
+    const body = mark ? it.text.slice(0, mark.index) : it.text;
+    const m = body.match(DUE);
+    if (!m) return null;
+    const date = nextDate(m[1], it.repeat.every, today, it.repeat.until);
+    if (!date) return null;
+    const text = (body.slice(0, m.index) + ' · ' + date + (m[2] ? ' ' + m[2] + ':' + m[3] : '') + (mark ? mark[0] : '')).slice(0, MAX_TEXT);
+    const series = it.series || it.id;
+    return { id: series.slice(0, 20) + date.replace(/-/g, ''), text, section: date <= today ? 'today' : 'soon', done: false, doneAt: null, pos: at, repeat: it.repeat, series };
+  }
+  const longDay = (d) => { const t = new Date(d + 'T12:00:00'); return DAYS[t.getDay()] + ' ' + t.getDate() + ' ' + MONTHS[t.getMonth()]; };
+  const REPEAT_ICON = '<svg class="ic trep" width="13" height="13" viewBox="0 0 16 16" role="img" aria-label="Repeats"><path d="M3 7.5A5 5 0 0 1 12.2 4.6M13 8.5A5 5 0 0 1 3.8 11.4M12.6 1.8v3.2H9.4M3.4 14.2V11h3.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
   /* ---------- Hiscores ----------
    * The hub pays XP into Paul's real-life Hiscores for every task ticked off; the list shows what
    * a task pays and what the day earned. These rules are worker/src/hiscores.js taskRows(),
@@ -562,6 +607,7 @@
   function textHtml(it, withSkill = true) {
     const p = nameParts(it);
     let meta = '';
+    if (it.repeat && !it.done) meta += REPEAT_ICON;
     if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + (p.time ? ' ' + p.time : '') + '">' + d.words + (p.time ? ' ' + p.time : '') + '</span>'; }
     // One slot at the right: the skill the task pays most into (a letter's Defence, an Apply's Slayer).
     if (withSkill) meta += skillSlot(it);
@@ -1897,6 +1943,10 @@
     const seg = $('editSeg');
     seg.classList.add('instant');
     paintEditSeg(it.section);
+    repStarted = false;
+    $('editRepeat').classList.add('instant');
+    paintRepeat(it);
+    requestAnimationFrame(() => $('editRepeat').classList.remove('instant'));
     const a = document.activeElement;
     openSheet($('edit'), undefined, list.contains(a) ? a : desk.matches ? row : null);
     // The thumb takes its place in this frame; it glides again from the next one.
@@ -1921,6 +1971,92 @@
     const b = bs[(i + step + bs.length) % bs.length];
     b.focus();
     b.click(); // a radio group: the arrow picks as it moves
+  });
+  /* Repeat in the edit sheet (2026-10-21). The date lives in the text, as Tidy writes it: the date
+   * field rewrites that ending, and a repeat on a task with no date starts today (the field shows
+   * it, to change). Bins come from the bin calendar, so their sheet only says so. */
+  const repDate = $('repDate');
+  const repUntil = $('repUntil');
+  let repStarted = false; // this sheet gave the task its first date
+  function withDate(text, date) {
+    const mark = text.match(INTAKE_MARK);
+    const body = mark ? text.slice(0, mark.index) : text;
+    const m = body.match(DUE);
+    const head = m ? body.slice(0, m.index) : body;
+    return cleanText(head + ' · ' + date + (m && m[2] ? ' ' + m[2] + ':' + m[3] : '') + (mark ? mark[0] : ''));
+  }
+  function paintRepeat(it) {
+    const r = it.repeat || null;
+    const bins = !!r && r.every === 'bins';
+    $('editRepeatHead').hidden = bins;
+    $('editRepeat').hidden = bins;
+    for (const b of document.querySelectorAll('#editRepeat button')) {
+      const on = (r && !bins ? r.every : '') === b.dataset.every;
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+    }
+    const more = !!r && !bins;
+    $('editRepeatMore').hidden = !more;
+    const note = $('repNote');
+    note.hidden = !bins && !more;
+    if (bins) { note.textContent = 'From the bin calendar. Tick it off and the next collection’s comes in.'; return; }
+    if (!more) return;
+    const due = nameParts(it).due;
+    $('repDateLabel').textContent = repStarted ? 'First date' : 'Next';
+    repDate.value = due || '';
+    repUntil.value = r.until || '';
+    repUntil.closest('.rep-end').classList.toggle('set', !!r.until);
+    $('repUntilClear').textContent = r.until ? 'Clear' : 'Never';
+    // The dates that follow, so the schedule can be checked at a glance.
+    const after = [];
+    for (let d = due, i = 0; d && i < 3; i++) { d = nextDate(d, r.every, d, r.until); if (d) after.push(shortDay(d)); }
+    note.textContent = !due ? '' : !after.length ? 'This is the last one.'
+      : 'Then ' + after.join(', ') + (r.until && after.length < 3 ? ', and it stops.' : ' and so on.');
+  }
+  // Writes a change made in the sheet; text the sheet wrote itself is not "edited" (no Tidy).
+  function repWrite(next) {
+    if (editFrom && items[editId] && editFrom.text === items[editId].text) editFrom.text = next.text;
+    upsert(next);
+    editText.value = next.text.replace(INTAKE_MARK, '');
+    paintRepeat(items[editId]);
+  }
+  function setRepeat(every) {
+    saveEditText();
+    const it = items[editId];
+    if (!it || ((it.repeat && it.repeat.every) || '') === every) return;
+    const next = Object.assign({}, it, { repeat: every ? { every, until: (it.repeat && it.repeat.until) || null } : null });
+    if (every && !nameParts(it).due) { next.text = withDate(it.text, ymd(new Date())); repStarted = true; }
+    repWrite(next);
+  }
+  for (const b of document.querySelectorAll('#editRepeat button')) b.addEventListener('click', () => setRepeat(b.dataset.every));
+  repDate.addEventListener('change', () => {
+    const it = items[editId];
+    if (!it) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(repDate.value)) { paintRepeat(it); return; } // cleared: the date stays
+    saveEditText();
+    repWrite(Object.assign({}, items[editId], { text: withDate(items[editId].text, repDate.value) }));
+  });
+  repUntil.addEventListener('change', () => {
+    const it = items[editId];
+    if (!it || !it.repeat) return;
+    const until = /^\d{4}-\d{2}-\d{2}$/.test(repUntil.value) ? repUntil.value : null;
+    repWrite(Object.assign({}, it, { repeat: { every: it.repeat.every, until } }));
+  });
+  $('repUntilClear').addEventListener('click', () => {
+    const it = items[editId];
+    if (!it || !it.repeat) return;
+    if (it.repeat.until) { repWrite(Object.assign({}, it, { repeat: { every: it.repeat.every, until: null } })); return; }
+    try { repUntil.showPicker(); } catch (e) { repUntil.focus(); }
+  });
+  $('editRepeat').addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const bs = Array.from($('editRepeat').querySelectorAll('button'));
+    const i = Math.max(0, bs.indexOf(document.activeElement));
+    const b = bs[(i + step + bs.length) % bs.length];
+    b.focus();
+    b.click();
   });
   function saveEditText() {
     clearTimeout(editTimer);

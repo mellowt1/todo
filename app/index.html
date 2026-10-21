@@ -152,6 +152,18 @@
       <button role="radio" data-section="soon">Soon</button>
       <button role="radio" data-section="someday">Someday</button>
     </div>
+    <div class="meta" id="editRepeatHead">Repeat</div>
+    <div id="editRepeat" class="seg seg4" role="radiogroup" aria-labelledby="editRepeatHead">
+      <button role="radio" data-every="">Never</button>
+      <button role="radio" data-every="week">Weekly</button>
+      <button role="radio" data-every="2weeks">2 weeks</button>
+      <button role="radio" data-every="month">Monthly</button>
+    </div>
+    <div id="editRepeatMore" class="rep-more" hidden>
+      <label class="rep-row"><span id="repDateLabel">Next</span><input id="repDate" type="date"></label>
+      <div class="rep-row"><label for="repUntil">Ends</label><span class="rep-end"><input id="repUntil" type="date"><button id="repUntilClear" type="button" class="text-btn">Never</button></span></div>
+    </div>
+    <p id="repNote" class="rep-note" aria-live="polite" hidden></p>
     <div id="editFrom" class="edit-from" hidden>
       <div class="meta">Read from <span id="editFromKind"></span></div>
       <p id="editFromSummary"></p>

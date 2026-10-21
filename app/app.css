@@ -267,6 +267,7 @@ body.view-done .list { padding-bottom: calc(var(--bottom) + 72px); }
 .seg { position: relative; display: flex; gap: 4px; height: 44px; padding: 4px; border-radius: 12px; background: var(--surface); --i: 0; }
 .seg:has(> :nth-child(2):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 1; }
 .seg:has(> :nth-child(3):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 2; }
+.seg:has(> :nth-child(4):is([aria-selected="true"], [aria-checked="true"], [aria-current="page"])) { --i: 3; }
 .seg::before {
   content: ""; position: absolute; top: 4px; left: 4px; height: 36px; width: calc((100% - 16px) / 3); border-radius: 9px;
   background: var(--accent); transform: translateX(calc(var(--i) * (100% + 4px)));
@@ -337,6 +338,17 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 /* Keyboard up: the sheet fits in what is left of the screen, so Close stays on it. */
 .edit-sheet.kb { min-height: 0; max-height: calc(var(--vvh) - env(safe-area-inset-top) - 12px); padding-bottom: 16px; }
 .edit-sheet > .meta { margin-bottom: -8px; }
+/* Repeat (2026-10-21): four choices, then the date the next one is on and when it ends. */
+.seg4::before { width: calc((100% - 20px) / 4); }
+.seg4 button { font-size: 15px; }
+.rep-more { display: flex; flex-direction: column; border-radius: 12px; background: var(--field); margin-top: -6px; }
+.rep-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 0 14px; font-size: var(--fs-body); }
+.rep-row + .rep-row { border-top: 0.5px solid var(--sep); }
+.rep-row input { font: inherit; color: var(--accent-text); background: none; border: 0; text-align: right; min-height: 44px; }
+.rep-end { display: inline-flex; align-items: center; gap: 8px; }
+.rep-end:not(.set) input { position: absolute; opacity: 0; width: 1px; pointer-events: none; }
+.rep-note { margin: -6px 2px 0; font-size: var(--fs-meta); color: var(--secondary); line-height: 1.4; }
+.trep { color: var(--secondary); align-self: center; }
 textarea#editText {
   border: 0; outline: none; resize: none; font-size: var(--fs-body); line-height: 1.35; background: var(--field); border-radius: 12px; padding: 12px 14px;
   caret-color: var(--accent-text); touch-action: auto;
