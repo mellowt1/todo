@@ -184,8 +184,28 @@
     enqueue({ op: 'delete', item: { id, updatedAt: stamp() } });
   }
 
+  // Dates drive placement (2026-10-21). Soon: dated tasks first, by date and time, then the rest,
+  // newest first. Today: what is due today or earlier first, then the rest. Someday: newest first.
+  // The hub moves a task into Today on its day (worker/src/due.js).
+  function dueKey(it) {
+    const p = nameParts(it);
+    return p.due ? p.due + ' ' + (p.time || '') : null;
+  }
   function openIn(section) {
-    return Object.values(items).filter((i) => !i.done && i.section === section).sort((a, b) => b.pos - a.pos);
+    const rows = Object.values(items).filter((i) => !i.done && i.section === section);
+    if (section === 'someday') return rows.sort((a, b) => b.pos - a.pos);
+    const d = new Date(now());
+    const end = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '~';
+    const key = new Map(rows.map((it) => {
+      const k = dueKey(it);
+      return [it.id, k && (section === 'soon' || k < end) ? k : null];
+    }));
+    return rows.sort((a, b) => {
+      const ka = key.get(a.id), kb = key.get(b.id);
+      if (ka && kb) return ka < kb ? -1 : ka > kb ? 1 : b.pos - a.pos;
+      if (ka || kb) return ka ? -1 : 1;
+      return b.pos - a.pos;
+    });
   }
 
   /* ---------- Actions ---------- */
@@ -742,7 +762,9 @@
     } else if (view === 'list') {
       const rows = openIn(ui.section);
       ids = new Set(rows.map((it) => it.id));
-      html = rows.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
+      // Soon: a quiet "No date" label where the undated tasks start, when there are both.
+      const undated = ui.section === 'soon' ? rows.findIndex((it) => !dueKey(it)) : -1;
+      html = rows.map((it, i) => (i === undated && i > 0 ? '<li class="sublabel">No date</li>' : '') + rowHtml(it, justAdded.has(it.id))).join('');
       if (!rows.length) {
         emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
           : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];

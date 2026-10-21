@@ -85,6 +85,9 @@
  * Paul taps "Write with Claude"; short sections to read at the psychologist come back. Stores no text.
  *   POST /api/talk/:code   <- { range, entries: [{ day, time, mood, text, bring }] }  -> { sections }
  *
+ * Dates (src/due.js): every cron run moves open tasks whose date (" · YYYY-MM-DD" in the text) has
+ * come from Soon or Someday into Today, once per date.
+ *
  * Sunday reset (src/week.js): every cron run moves tasks given a new date into Today on their day,
  * and on Sunday one ntfy push says the week is ready, at sunday_reset_time outside quiet_hours.
  *
@@ -144,6 +147,7 @@ import { intakeCatchUp } from './intake.js';
 import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
+import { dueCron } from './due.js';
 import { handleTidy } from './tidy.js';
 import { handleTodoDay } from './dayplan.js';
 import { handleTalk } from './talk.js';
@@ -386,7 +390,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
+    const jobs = [weekCron(env), dueCron(env), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env), weekLessons(env)]; // the last two run once, then skip
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

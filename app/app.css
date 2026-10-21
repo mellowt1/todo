@@ -118,6 +118,8 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 }
 .list:empty { padding-bottom: 0; }
 .row { position: relative; overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* Soon: where the undated tasks start (2026-10-21). Plain text, like the Done day heads. */
+.sublabel { list-style: none; padding: 18px var(--gut-r) 6px calc(var(--gut-l) + 38px); font-size: var(--fs-meta); font-weight: 600; color: var(--secondary); }
 /* Hairlines start at the text, and stay there while a row swipes. */
 .row + .row::before { content: ""; position: absolute; z-index: 2; left: calc(var(--gut-l) + 38px); right: var(--gut-r); top: 0; border-top: 0.5px solid var(--sep); pointer-events: none; }
 .row-inner {
@@ -412,6 +414,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
   .drow:hover { background: var(--surface); }
   .drow:hover::before, .drow:hover + .drow::before { opacity: 0; transition-duration: 0ms; }
   .dhead { padding-left: 0; }
+  .sublabel { padding: 10px 12px 6px 50px; }
   .row-inner { align-items: center; padding: 0 12px; border-radius: 10px; min-height: 52px; }
   .row .text { padding: 14px 0; cursor: pointer; }
   .circle, .circle-static, .dcheck { width: 22px; height: 22px; border-radius: 11px; }
