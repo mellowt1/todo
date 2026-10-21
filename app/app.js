@@ -2897,7 +2897,7 @@
   // taken when the sheet opens, so a row never jumps away under a tap.
   let sortOrder = [];
   function sortRows() {
-    const all = SECTIONS.flatMap((s) => openIn(s));
+    const all = PLACES.flatMap((s) => openIn(s));
     const rank = new Map(sortOrder.map((id, i) => [id, i]));
     return all.sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
   }
@@ -2925,7 +2925,7 @@
     } catch (e) { /* they stay blank; Paul can still pick */ }
   }
   function openSort() {
-    const all = SECTIONS.flatMap((s) => openIn(s));
+    const all = PLACES.flatMap((s) => openIn(s));
     sortOrder = all.filter((i) => !LEVELS.includes(i.energy)).concat(all.filter((i) => LEVELS.includes(i.energy))).map((i) => i.id);
     sortOpen = true;
     renderSort();
