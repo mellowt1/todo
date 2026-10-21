@@ -175,6 +175,10 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `POST /api/waiting/:code` | the code | `{ who, what, channel, chaseDays?, forWhom?, source, sourceItem? }`, stored in D1 `waiting` |
 | `POST /api/waiting/:code/:id` | the code | `{ action: "resolve" \| "snooze" \| "still", days? }`; resolve ticks the open chase task off |
 | `GET/POST /api/hub/waiting/day` | `Bearer HUB_SECRET_DAY` | Day: `{ open, due, dueWho }` and quick add |
+| `GET /api/mail/:code` | the code | Email in: `{ later, triage }`, read-later mails for Morning and the count waiting in Day |
+| `POST /api/mail/:code/:id` | the code | `{ action: "done" \| "drop" }` on a read-later mail |
+| `GET/POST /api/hub/mail/day[/:id]` | `Bearer HUB_SECRET_DAY` | Day's Mail to sort; `{ as: task \| later \| wait \| drop }` goes through the queue |
+| `email()` | `EMAIL_ALLOW` | Cloudflare Email Routing hands hub@ mail to the Worker; mail from any other address is dropped, nothing is ever sent back |
 | `/api/morning/...` | | see Morning Screen above |
 | `/api/kitchen/...`, `/api/admin/kitchen/...` | | see Kitchen above |
 | `/api/german/...` | | see German calls above |
