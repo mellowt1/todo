@@ -75,6 +75,9 @@ export const REACTS = {
   // contact logged from To-do or the hub shows on Morning's map.
   'person.added': ['hub'], 'person.updated': ['hub'], 'person.deleted': ['hub'], 'person.imported': ['hub'],
   'person.reach': ['todo'], 'person.contacted': ['morning'], 'tie.added': ['hub'], 'tie.removed': ['hub'],
+  // Skills gap (a Morning page; Track this role in To-do): reading and checking happen in the hub.
+  'skills.tracked': ['hub'], 'skills.read': ['morning'], 'skills.matched': ['morning'], 'skills.side': ['hub'],
+  'gap.step': ['hub'], 'gap.task': ['todo'], 'gap.options': ['hub'], 'gap.closed': ['hub'], 'gap.reopened': ['hub'],
 };
 // The rule targets that are stars. The mail target is the hub's own work; REACTS says where mail goes.
 const TARGET_STAR = { todo: 'todo', kitchen: 'kitchen' };
@@ -93,6 +96,8 @@ export const LABELS = {
   'person.added': 'Person added', 'person.updated': 'Person changed', 'person.deleted': 'Person removed',
   'person.imported': 'LinkedIn import', 'person.reach': 'Reach out task', 'person.contacted': 'Contact logged',
   'tie.added': 'Link added', 'tie.removed': 'Link removed',
+  'skills.tracked': 'Role tracked', 'skills.read': 'Vacancy read', 'skills.matched': 'Role checked', 'skills.side': 'Your side updated',
+  'gap.step': 'Plan step', 'gap.task': 'Step to To-do', 'gap.options': 'Options asked', 'gap.closed': 'Gap closed', 'gap.reopened': 'Gap reopened',
   'feed.drop': 'Ticket drop', 'feed.job': 'Job ran', 'feed.workout': 'Workout', 'feed.note': 'Note',
 };
 export function label(type) {

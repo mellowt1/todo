@@ -29,6 +29,7 @@ import { safeEqual, bearer, cleanText, cleanLink, cleanOp } from './todo.js';
 import { putEvent } from './events.js';
 import { kitchenTarget } from './dinner.js';
 import { mailTarget } from './mail.js';
+import { skillsTarget } from './skills.js';
 
 const SOURCE = /^[a-z0-9-]{2,24}$/;
 const TYPE = /^[a-z0-9-]{2,24}(\.[a-z0-9-]{2,24}){1,2}$/;
@@ -176,6 +177,10 @@ const TARGETS = {
 
   /* Email in: a forwarded mail becomes a task, a read-later line or a Waiting on item (src/mail.js). */
   mail: (env, msg, now) => mailTarget(env, msg, now),
+
+  /* Skills gap: read a tracked vacancy, check it against Paul's side (src/skills.js). Put on the queue
+   * by the skills routes themselves, not by a rule, so Track answers at once. */
+  skills: (env, msg, now) => skillsTarget(env, msg, now),
 };
 
 /* One message: skip if handled, react, then mark handled. Throws to have it retried. */
