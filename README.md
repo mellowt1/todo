@@ -182,6 +182,9 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `POST /api/archive/:code/(later\|archive\|restore)` | the code | `{ task, note?, source }`; archive takes the task off the list into D1 `archive`, restore puts it in Soon |
 | `GET /api/oracle/:code[/list]` | the code | the Oracle: `{ current }` (this week's open question) or every past week with its answer |
 | `POST /api/oracle/:code/(answer\|aside)` | the code | `{ week, answer?, source }`; answers stay in D1 `oracle` |
+| `GET /api/network/:code` | the code | the Network map: `{ today, fadeMonths, sectors, people, ties }`; a ticked "Reach out to ..." task moves Last contact on every read and every cron run |
+| `POST /api/network/:code/person[/:id[/delete\|talked\|reach\|sent]]` | the code | add or change a person (null clears), Talked today, Reach out (a To-do task linking back to the card), Sent a message (a Waiting on item whose answer moves Last contact) |
+| `POST /api/network/:code/(tie\|import)` | the code | `{ a, b, kind: introduced \| works_with, remove? }`; LinkedIn's Connections.csv `{ csv, dry: true }` to check, then `{ csv, sectors }` (emails are never kept) |
 | `GET /api/sky/:code` | the code | the constellation Morning draws: ten stars (signs of life, quiet past a limit), lines between apps and the last 7 days of pulses, read from the hub's own log (types, sources, times and reactions only; nothing new is stored) |
 | `GET /api/mail/:code` | the code | Email in: `{ later, triage }`, read-later mails for Morning and the count waiting in Day |
 | `POST /api/mail/:code/:id` | the code | `{ action: "done" \| "drop" }` on a read-later mail |
