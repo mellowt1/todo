@@ -27,6 +27,8 @@
  *            Both behave like `link` too.
  *   waiting  optional, the id of the Waiting on item a chase task belongs to (src/waiting.js); the
  *            app asks "did they answer?" when it is ticked. Behaves like `link` too.
+ *   dread    optional 1 to 5: how much Paul dreaded it the last time he rated it (Dread meter,
+ *            src/dread.js, 2026-10-22). Behaves like `link` too.
  *
  * Every op carries its own updatedAt. For each task the newest updatedAt wins, so an
  * offline phone and a desktop never overwrite each other's work on other tasks.
@@ -39,7 +41,7 @@ export const SECTIONS = ['today', 'soon', 'someday', ...LANES];
 export const ENERGY = ['wired', 'normal', 'drained'];
 export const REPEATS = ['week', '2weeks', 'month', 'bins'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week', 'waiting']; // left out of an upsert: the stored value stays
+const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week', 'waiting', 'dread']; // left out of an upsert: the stored value stays
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
@@ -136,6 +138,11 @@ export function cleanOp(raw, now = Date.now()) {
   else if (it.waiting !== undefined) {
     if (typeof it.waiting !== 'string' || !ID.test(it.waiting)) return null;
     item.waiting = it.waiting;
+  }
+  if (it.dread === null) item.dread = null;
+  else if (it.dread !== undefined) {
+    if (![1, 2, 3, 4, 5].includes(it.dread)) return null;
+    item.dread = it.dread;
   }
   return { op: 'upsert', item };
 }

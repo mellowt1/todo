@@ -19,7 +19,8 @@
  * Give me one picks only open tasks whose level Paul confirmed (`energy` on the task, src/todo.js;
  * a guess never counts): Today first, then Soon, never Someday. Inside that: overdue and dated
  * tasks by date, then undated ones newest first; tasks for someone else ("Nick: ...") last.
- * Paul's answers, 2026-10-21. */
+ * Paul's answers, 2026-10-21. On a drained day, tasks last rated a dread of 4 or 5 (`dread` on the
+ * task, src/dread.js) go to the very end, still pickable (Paul, 2026-10-22). */
 
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
@@ -96,14 +97,17 @@ export function nameAndDue(text) {
   return { name: t.slice(0, m.index).trim(), due: m[1], time: m[2] ? m[2] + ':' + m[3] : null };
 }
 
+export const HEAVY = 4; // drained: a task last rated this dread or more goes last
+
 /* Pure: every task that fits the level, best first. */
 export function pickPool(items, level) {
   const rows = [];
   for (const it of Object.values(items || {})) {
     if (!it || it.done || it.energy !== level || !POOL.includes(it.section)) continue;
-    rows.push({ it, others: forSomeoneElse(it) ? 1 : 0, sec: POOL.indexOf(it.section), due: nameAndDue(it.text) });
+    const heavy = level === 'drained' && it.dread >= HEAVY ? 1 : 0;
+    rows.push({ it, heavy, others: forSomeoneElse(it) ? 1 : 0, sec: POOL.indexOf(it.section), due: nameAndDue(it.text) });
   }
-  rows.sort((a, b) => a.others - b.others || a.sec - b.sec
+  rows.sort((a, b) => a.heavy - b.heavy || a.others - b.others || a.sec - b.sec
     || (a.due.due ? 0 : 1) - (b.due.due ? 0 : 1)
     || (a.due.due && b.due.due ? (a.due.due + (a.due.time || '')).localeCompare(b.due.due + (b.due.time || '')) : 0)
     || (b.it.pos || 0) - (a.it.pos || 0));
@@ -127,8 +131,8 @@ export function pickTask(items, level, { skip = [], current = null, mode = 'next
   return { task, count: pool.length, left: left.length, position: pool.length - left.length + 1 };
 }
 
-const listStub = (env) => env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));
-async function readItems(env) {
+export const listStub = (env) => env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));
+export async function readItems(env) {
   const d = await (await listStub(env).fetch('https://list/export')).json();
   return d.items || {};
 }
