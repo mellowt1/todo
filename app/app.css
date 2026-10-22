@@ -543,7 +543,7 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 .apply-open[hidden] { display: none; }
 .apply-open small { display: block; font-size: var(--fs-meta); color: var(--secondary); }
 .apply-open:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
-.ap-wait, .ap-say { margin: 0; font-size: var(--fs-body); line-height: 1.4; color: var(--secondary); }
+.ap-wait, .ap-say, .sk-wait { margin: 0; font-size: var(--fs-body); line-height: 1.4; color: var(--secondary); }
 .ap-text { min-height: 140px; padding: 12px 14px; border: 0; border-radius: 12px; background: var(--field); color: var(--text); font: inherit; font-size: 16px; line-height: 1.4; resize: vertical; }
 .ap-text:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 0; }
 .ap-fit { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); }
@@ -553,6 +553,14 @@ textarea#editText:focus-visible { outline: 2px solid var(--accent-text); outline
 .ap-fit.fit-fair { background: var(--amber-bg); }
 .ap-fit.fit-fair b { color: var(--amber-ink); }
 .ap-fit.fit-weak { background: var(--late-bg); }
+/* Skills gap on the Apply card: have, partly and missing told apart by lightness too (paul-hub src/skills.js). */
+.ap-skills { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--sep); }
+.sk-sum { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--field); }
+.sk-sum b { font-size: 17px; font-weight: 650; }
+.sk-sum small { font-size: var(--fs-meta); color: var(--secondary); }
+.sk-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--sep); }
+.sk-bar i { display: block; }
+.sk-have { background: #3E8A5A; } .sk-partly { background: #D9A23A; } .sk-missing { background: #C9555B; }
 .ap-fit.fit-weak b { color: var(--danger); }
 .ap-gaps { margin: -6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.4; }
 .ap-letter { white-space: pre-wrap; font-size: 15px; }

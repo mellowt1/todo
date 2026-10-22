@@ -2563,10 +2563,53 @@
     if (!isApply(it)) return;
     apId = id;
     ap = { loading: true };
+    sk = { loading: true };
     renderApply();
     openSheet($('apply'), 0, null);
     $('apClose').focus({ preventScroll: true });
     loadApply(id);
+    loadSkills(id);
+  }
+
+  /* Skills gap (paul-hub src/skills.js): "Track this role" has Claude read the vacancy and check it
+   * against Paul's own side; the Skills page in Morning shows the rest. */
+  let sk = null; // { loading } | { role } | { error }
+  let skTimer = 0;
+  const SKILLS = 'https://mellowt1.github.io/morning/skills/?r=';
+  async function skFetch(id, post) {
+    const r = await fetch(API + '/api/skills/' + code + '/track' + (post ? '' : '/' + id), post ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: id }) } : { cache: 'no-store' });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d || !('role' in d)) throw new Error((d && d.error) || 'status ' + r.status);
+    return d;
+  }
+  async function loadSkills(id, post, polls = 0) {
+    clearTimeout(skTimer);
+    try {
+      const d = await skFetch(id, post);
+      if (apId !== id) return;
+      sk = d;
+      if (post) say('Claude is reading the vacancy');
+      // While it is being read, look again every 5 seconds, for at most 3 minutes.
+      if (d.role && d.role.state === 'reading' && polls < 36) skTimer = setTimeout(() => { if (apId === id) loadSkills(id, false, polls + 1); }, 5000);
+    } catch (e) {
+      if (apId === id) sk = { error: navigator.onLine ? 'Couldn’t reach the hub.' : 'Needs a connection.' };
+    }
+    if (apId === id) renderApply();
+  }
+  function skillsHtml() {
+    const top = '<div class="ap-skills"><span class="meta">Skills gap</span>';
+    if (!sk || sk.loading) return top + '<p class="ap-wait sk-wait">Loading…</p></div>';
+    if (sk.error) return top + '<p class="ap-say">' + esc(sk.error) + '</p><button class="card-done" data-act="skreload">Try again</button></div>';
+    const r = sk.role;
+    if (!r) return top + '<button class="card-done" data-act="track">Track this role</button><p class="card-note">Claude reads the vacancy once and lists what it asks for, then checks it against your side. About 3 cents.</p></div>';
+    const open = '<a class="card-portal sk-open" href="' + esc(hrefOf(SKILLS + r.id)) + '" target="_blank" rel="noopener"><span>Open in Skills</span><span class="card-open">›</span></a>';
+    if (r.state === 'reading') return top + '<p class="sk-wait">Claude is reading the vacancy…</p></div>';
+    if (r.state === 'needs_text') return top + '<p class="ap-say">The vacancy page could not be read. Paste its text in Skills.</p>' + open + '</div>';
+    if (r.state === 'failed') return top + '<p class="ap-say">' + esc(r.error || 'Claude could not read this one.') + '</p>' + open + '</div>';
+    const c = r.counts, n = c.have + c.partly + c.missing + c.unknown;
+    const bar = n ? '<div class="sk-bar" aria-hidden="true"><i class="sk-have" style="width:' + (100 * c.have / n) + '%"></i><i class="sk-partly" style="width:' + (100 * c.partly / n) + '%"></i><i class="sk-missing" style="width:' + (100 * c.missing / n) + '%"></i></div>' : '';
+    const line = c.unknown === n && n ? 'Add your side in Skills to check them' : c.have + ' have · ' + c.partly + ' partly · ' + c.missing + ' missing';
+    return top + '<div class="sk-sum"><b>Tracked · ' + n + ' requirement' + (n === 1 ? '' : 's') + '</b>' + bar + '<small>' + esc(line) + '</small></div>' + open + '</div>';
   }
   async function apFetch(id, post) {
     const r = await fetch(API + '/api/apply/' + code + '/' + id, post ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' } : { cache: 'no-store' });
@@ -2606,11 +2649,11 @@
     if (ap.state === 'none') {
       body.innerHTML = head + '<p class="ap-say">Your PC builds a folder for this vacancy: the CV version that fits, the letter in Word in your own voice, the vacancy text and a checklist with the fit and the gaps.</p>' +
         '<button class="card-done" data-act="queue">Prepare on the PC</button>' + link +
-        '<p class="card-note">It runs ' + WHEN + '. Nothing is sent.</p>';
+        '<p class="card-note">It runs ' + WHEN + '. Nothing is sent.</p>' + skillsHtml();
       return;
     }
     if (ap.state === 'queued') {
-      body.innerHTML = head + '<div class="ap-fit fit-queued"><b>Queued for your PC</b><span>Since ' + esc(clock(ap.queuedAt)) + '. The folder appears in Documents › Applications after the next run.</span><small>Runs ' + esc(WHEN) + '.</small></div>' + link;
+      body.innerHTML = head + '<div class="ap-fit fit-queued"><b>Queued for your PC</b><span>Since ' + esc(clock(ap.queuedAt)) + '. The folder appears in Documents › Applications after the next run.</span><small>Runs ' + esc(WHEN) + '.</small></div>' + link + skillsHtml();
       return;
     }
     const d = ap.draft;
@@ -2623,12 +2666,13 @@
       '<details class="ap-more"><summary>Letter · ' + (d.lang === 'nl' ? 'Dutch' : 'English') + '</summary><p class="hb-draft ap-letter">' + esc(d.letter) + '</p>' +
       '<div class="hb-btns"><button class="hb-copy" data-act="copy">Copy letter</button></div></details>' +
       link +
-      '<p class="hb-note">Nothing is sent. Check the folder, then apply on the site yourself. <button class="hb-again" data-act="queue">Prepare again</button></p>';
+      '<p class="hb-note">Nothing is sent. Check the folder, then apply on the site yourself. <button class="hb-again" data-act="queue">Prepare again</button></p>' + skillsHtml();
   }
   const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return ''; } };
   function closeApply() {
     if (apId === null) return;
     apId = null;
+    clearTimeout(skTimer);
     closeSheet($('apply'));
   }
   $('apBody').addEventListener('click', (e) => {
@@ -2636,6 +2680,8 @@
     if (!b || apId === null) return;
     const act = b.dataset.act;
     if (act === 'queue') queueApply(apId);
+    else if (act === 'track') { sk = { loading: true }; renderApply(); loadSkills(apId, true); }
+    else if (act === 'skreload') { sk = { loading: true }; renderApply(); loadSkills(apId); }
     else if (act === 'reload') { ap = { loading: true }; renderApply(); loadApply(apId); }
     else if (act === 'copy' && ap && ap.draft) {
       const done = (ok) => { b.textContent = ok ? 'Copied' : 'Select it and copy'; say(ok ? 'Copied' : 'Could not copy'); setTimeout(() => { b.textContent = 'Copy letter'; }, 1400); };

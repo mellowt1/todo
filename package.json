@@ -24,7 +24,8 @@
     "lanes-check": "node scripts/lanes-check.mjs",
     "dread-check": "node scripts/dread-check.mjs",
     "archive-check": "node scripts/archive-check.mjs",
-    "network-link-check": "node scripts/network-link-check.mjs"
+    "network-link-check": "node scripts/network-link-check.mjs",
+    "skills-track-check": "node scripts/skills-track-check.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

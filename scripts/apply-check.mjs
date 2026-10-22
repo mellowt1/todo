@@ -33,6 +33,7 @@ function world() {
       if (p === `/api/todo/${CODE}`) return { items: Object.values(items), rev: 1, updated: new Date().toISOString() };
       if (p === `/api/intake/${CODE}/cards`) return { tasks: [] };
       if (p === `/api/intake/${CODE}`) return { items: [] };
+      if (p === `/api/skills/${CODE}/track/applyplan001`) return { role: null };
       if (p === `/api/apply/${CODE}/applyplan001`) {
         if (req.method() === 'POST') { this.posts++; this.rec = { state: 'queued', queuedAt: '2026-10-17T09:15:00Z' }; }
         return this.rec;
