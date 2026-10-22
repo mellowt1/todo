@@ -27,6 +27,8 @@
  *            Both behave like `link` too.
  *   waiting  optional, the id of the Waiting on item a chase task belongs to (src/waiting.js); the
  *            app asks "did they answer?" when it is ticked. Behaves like `link` too.
+ *   created  ms, set by the hub when the task first arrives (2026-10-22, for the Archive ledger);
+ *            older tasks have none. cleanOp never takes it from an app.
  *   dread    optional 1 to 5: how much Paul dreaded it the last time he rated it (Dread meter,
  *            src/dread.js, 2026-10-22). Behaves like `link` too.
  *
@@ -184,6 +186,9 @@ export function applyOps(doc, ops) {
       if (tomb !== undefined && tomb >= item.updatedAt) continue;
       if (cur && cur.updatedAt >= item.updatedAt) continue;
       const next = { ...item };
+      // `created`: stamped once, by the hub, when a task first arrives (never sent by an app).
+      if (cur) { if (cur.created) next.created = cur.created; else delete next.created; }
+      else if (!Number.isFinite(next.created)) next.created = item.updatedAt;
       for (const f of KEEP) {
         if (next[f] === undefined && cur && cur[f]) next[f] = cur[f];
         if (next[f] === null) delete next[f];

@@ -46,6 +46,7 @@ import { grantWeek } from './hiscores.js';
 import { energyFor } from './energy.js';
 import { waitingWeek } from './waiting.js';
 import { dreadFor } from './dread.js';
+import { archiveWeek } from './archive.js';
 
 const DAY = 24 * 3600 * 1000;
 export const QUIET_DAYS = 14;
@@ -199,6 +200,7 @@ export async function weekBlock(env, now = Date.now()) {
   ]);
   const items = Object.values(doc.items);
   const dread = await dreadFor(env, monday, doc.items).catch(() => null);
+  const archive = await archiveWeek(env, monday).catch(() => null);
   const ids = new Map(await Promise.all(vac.map(async (r) => [r.id, await todoTaskId(r.id)])));
   const received = cal ? Date.parse(cal.received) : NaN;
   return {
@@ -222,6 +224,7 @@ export async function weekBlock(env, now = Date.now()) {
     energy, // the dial's week: level per day and part, src/energy.js energyWeek
     waiting, // Waiting on: everything open, oldest first, and this week's resolved and chased counts
     dread, // Dread meter: { lies, byLevel, rated, started, skipped }, src/dread.js dreadWeek
+    archive, // Archive: { archived: [{ name, skips, note }], handedOff: [{ name, who, nextChase }], restored }
   };
 }
 

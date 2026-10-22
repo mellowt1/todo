@@ -117,6 +117,10 @@
  *   GET /api/dread/:code     POST /api/dread/:code/(start | rate | stop | undo | skip)
  *   GET/POST /api/hub/dread/day[/start | /rate | /stop]
  *
+ * Archive (src/archive.js; the to-do's code): a task passed on 5 times gets a decision line in To-do and
+ * Morning (Do it now, Hand off, Archive, Later); archived tasks sit in D1 `archive` until restored.
+ *   GET /api/archive/:code[/list]     POST /api/archive/:code/(later | archive | restore)
+ *
  * Email in (src/mail.js; the `email` handler, EMAIL_ALLOW): mail forwarded to hub@ becomes a task
  * (todo:), a read-later line (later:), a Waiting on item (wait:) or waits in Day (no prefix).
  *   GET /api/mail/:code   POST /api/mail/:code/:id <- { action: done | drop }   GET/POST /api/hub/mail/day[/:id]
@@ -183,6 +187,7 @@ import { handleDoor, doorCron } from './door.js';
 import { handleDigest } from './digest.js';
 import { handleEnergy, handleEnergyDay } from './energy.js';
 import { handleDread, handleDreadDay, dreadCron } from './dread.js';
+import { handleArchive, archiveCron } from './archive.js';
 import { handleWaiting, handleWaitingDay, waitingCron, waitingForMorning } from './waiting.js';
 import { receiveMail, handleMail, handleMailDay, mailForMorning } from './mail.js';
 
@@ -405,6 +410,7 @@ const MODULES = {
   energy: (request, env, rest) => handleEnergy(request, env, rest, json),
   waiting: (request, env, rest) => handleWaiting(request, env, rest, json),
   dread: (request, env, rest) => handleDread(request, env, rest, json),
+  archive: (request, env, rest) => handleArchive(request, env, rest, json),
   mail: (request, env, rest) => handleMail(request, env, rest, json),
   admin: handleAdmin,
 };
@@ -428,7 +434,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env), waitingCron(env), dreadCron(env), repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env).then(() => laneMoves(env)), weekLessons(env)]; // the last three run once, then skip (lanes: src/lanes.js)
+    const jobs = [weekCron(env), waitingCron(env), dreadCron(env).then(() => archiveCron(env)), repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env).then(() => laneMoves(env)), weekLessons(env)]; // the last three run once, then skip (lanes: src/lanes.js)
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

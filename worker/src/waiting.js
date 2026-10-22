@@ -1,7 +1,8 @@
 /* Waiting on (Paul, 2026-10-21): things he sent and is waiting to hear back about.
  *
  *   GET  /api/waiting/:code              -> { items, due, open, names }   open items, oldest first
- *   POST /api/waiting/:code              <- { who, what, channel, chaseDays?, forWhom?, source, sourceItem? }
+ *   POST /api/waiting/:code              <- { who, what, channel, chaseDays?, forWhom?, source, sourceItem?, handoff? }
+ *                                        (handoff: true with a sourceItem also writes task.handed_off, src/archive.js)
  *                                        -> { item }
  *   POST /api/waiting/:code/:id          <- { action: "resolve" | "snooze" | "still", days? }  -> { item }
  *   GET  /api/hub/waiting/day            Bearer HUB_SECRET_DAY  -> { open, due, dueWho }
@@ -285,6 +286,13 @@ async function create(request, env, source, json, now) {
   if (f.error) return json({ error: f.error }, request, 400);
   const row = await createItem(env, f, src, now);
   if (!row) return json({ error: 'that task already has one' }, request, 409);
+  // Hand off (Archive's decision line, src/archive.js): the task goes to someone else; the app ticks it.
+  if (got.body.handoff === true && f.source_item) {
+    await acceptEvent(env, {
+      id: 'task-handed_off-' + now + '-' + rand(4), source: src, type: 'task.handed_off', summary: 'Handed a task off',
+      payload: { task: f.source_item, waiting: row.id }, caused_by: null, hops: 0, at: new Date(now).toISOString(),
+    }, { feed: false });
+  }
   return json({ item: view(row, today) }, request);
 }
 
