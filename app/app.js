@@ -13,12 +13,12 @@
   const SECTIONS = ['today', 'soon', 'someday'];
   // Lanes (2026-10-21): tasks kept apart from the three sections, all on one Lanes tab on the
   // phone (grouped), a line each in the PC sidebar. A lane is a task's section like any other.
-  const LANES = ['build'];
+  const LANES = ['build', 'fun'];
   const PLACES = SECTIONS.concat(LANES); // everywhere a task can be
-  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done', lanes: 'Lanes', build: 'Build' };
+  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done', lanes: 'Lanes', build: 'Build', fun: 'Fun' };
   // Where a new task lands: the section on screen, or the first lane on the Lanes tab.
   const addTo = () => (ui.section === 'lanes' ? LANES[0] : ui.section);
-  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.', lanes: 'Nothing in the lanes.', build: 'No app ideas waiting.' };
+  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.', lanes: 'Nothing in the lanes.', build: 'No app ideas waiting.', fun: 'Nothing fun lined up yet.' };
   const LEVELS = ['wired', 'normal', 'drained'];
   const LNAME = { wired: 'Wired', normal: 'Normal', drained: 'Drained' };
   const FILL = { wired: 12, normal: 7, drained: 2.5 };
@@ -240,9 +240,53 @@
     const id = newId();
     justAdded.add(id);
     upsert({ id, text, section: addTo(), done: false, doneAt: null, pos: now() });
-    tidyLater(id, text);
+    tidyLater(id, text).finally(() => wantsReturnDate(id));
     return id;
   }
+
+  /* Return (Paul, 2026-10-21): a new task that starts with "Return" and still has no date once
+   * Tidy is done (it may have found one: "return the lamp friday") asks for one, in a small sheet,
+   * after the add sheet has closed. "No date" leaves it as it is. */
+  const RETURN = /^(return|retour|terugbrengen|devolver)\b/i;
+  const returnAsks = [];
+  function wantsReturnDate(id) {
+    const it = items[id];
+    if (!it || it.done || !RETURN.test(it.text) || nameParts(it).due || returnAsks.includes(id)) return;
+    returnAsks.push(id);
+    askReturn();
+  }
+  function askReturn() {
+    if (!$('ret').hidden || document.querySelector('.sheet-wrap:not([hidden])')) return; // after the open sheet
+    let it = null;
+    while (returnAsks.length && !it) {
+      const c = items[returnAsks.shift()];
+      if (c && !c.done && !nameParts(c).due) it = c;
+    }
+    if (!it) return;
+    retId = it.id;
+    $('retName').textContent = nameParts(it).name;
+    $('retDate').min = ymd(new Date());
+    $('retDate').value = plusDays(ymd(new Date()), 7);
+    openSheet($('ret'), false);
+    $('retDate').focus({ preventScroll: true });
+  }
+  let retId = null;
+  function closeReturn(date) {
+    const it = retId && items[retId];
+    if (it && date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      upsert(Object.assign({}, it, { text: withDate(it.text, date) }));
+      say('Return by ' + shortDay(date) + '.');
+    }
+    retId = null;
+    closeSheet($('ret'), () => setTimeout(askReturn, 0));
+  }
+  $('retSave').addEventListener('click', () => closeReturn($('retDate').value));
+  $('retSkip').addEventListener('click', () => closeReturn(null));
+  $('ret').querySelector('.scrim').addEventListener('click', () => closeReturn(null));
+  $('retDate').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); closeReturn($('retDate').value); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeReturn(null); }
+  });
 
   /* Tidy (Paul, 2026-10-17): the task goes in as typed, then Claude cleans it up a second later
    * (typos, a short task, its day or date as the date label; POST /api/tidy/:code). The tidy
@@ -1928,6 +1972,7 @@
     closeSheet($('capture'), () => {
       capClosing = false;
       if (held && tidied[held.id]) toast('Tidied.', held.undo, held.id);
+      setTimeout(askReturn, 0); // a Return task waiting for its date asks now
     });
   }
   capInput.addEventListener('keydown', (e) => {

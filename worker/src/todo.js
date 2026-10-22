@@ -6,7 +6,7 @@
  *   { items: { [id]: Item }, tombs: { [id]: deletedAt }, rev, updated }
  *
  * Item: { id, text, section, done, doneAt, updatedAt, pos, link?, energy?, energyGuess? }
- *   section  "today" | "soon" | "someday", or a lane (LANES, 2026-10-21: "build"); a done task keeps it
+ *   section  "today" | "soon" | "someday", or a lane (LANES, 2026-10-21: "build", "fun"); a done task keeps it
  *   doneAt   ms since epoch, or null while open
  *   pos      ms since epoch, sort key inside a section (newest on top)
  *   link     optional http(s) URL (a vacancy's page, set by the hub). An upsert without
@@ -34,7 +34,7 @@
  */
 
 // Lanes (2026-10-21) are sections too: tasks kept apart from the three, on the app's Lanes tab.
-export const LANES = ['build'];
+export const LANES = ['build', 'fun'];
 export const SECTIONS = ['today', 'soon', 'someday', ...LANES];
 export const ENERGY = ['wired', 'normal', 'drained'];
 export const REPEATS = ['week', '2weeks', 'month', 'bins'];

@@ -30,7 +30,8 @@ Replace the iOS Notes to-do page with the simplest possible list: capture in one
 
 ## Sections and done history
 * Three sections: **Today**, **Soon**, **Someday**. The list starts empty; nothing is migrated from Notes.
-* Lanes (Paul, 2026-10-21): tasks kept apart from the three sections. **Build** holds app ideas and features so they stay out of Today. On the phone all lanes share a fourth tab, Lanes, grouped with a head and count each; on the PC each lane is a line in the sidebar (key 4). A lane is a task's section: the move menu and the edit sheet ("Or a lane") send a task there, a new task on the Lanes tab lands in the first lane, and a dated task in a lane still moves into Today on its day. Paul's picks moved in once (`worker/src/lanes.js`).
+* Lanes (Paul, 2026-10-21): tasks kept apart from the three sections. **Build** holds app ideas and features so they stay out of Today. **Fun** holds leisure, apart from the obligations. On the phone all lanes share a fourth tab, Lanes, grouped with a head and count each; on the PC each lane is a line in the sidebar (key 4). A lane is a task's section: the move menu and the edit sheet ("Or a lane") send a task there, a new task on the Lanes tab lands in the first lane, and a dated task in a lane still moves into Today on its day. Paul's picks moved in once (`worker/src/lanes.js`).
+* Return (Paul, 2026-10-21): a new task that starts with Return (or Retour, Terugbrengen, Devolver) and has no date once Tidy is done asks "When does it need to go back?" in a small sheet after the add sheet closes, filled with a week from today. No date leaves it as it is.
 * Done tasks are **kept forever** in a visible Done history, newest first, showing when each was done.
 * Delete is possible (from the task's edit view) but is not the normal path; done is.
 

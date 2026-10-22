@@ -14,7 +14,7 @@ const task = (id, text, section, extra = {}) => ({ id, text, section, done: fals
 const memKV = () => { const m = new Map(); return { m, async get(k) { return m.has(k) ? m.get(k) : null; }, async put(k, v) { m.set(k, v); } }; };
 
 test('a lane is a section: the list takes it, the old three stay first', () => {
-  assert.deepEqual(LANES, ['build']);
+  assert.deepEqual(LANES, ['build', 'fun']);
   assert.deepEqual(SECTIONS.slice(0, 3), ['today', 'soon', 'someday']);
   assert.equal(cleanOp({ op: 'upsert', item: { ...task('abcdefgh0001', 'An app idea', 'build'), updatedAt: NOW } }, NOW).item.section, 'build');
   assert.equal(cleanOp({ op: 'upsert', item: { ...task('abcdefgh0002', 'Nope', 'nowhere'), updatedAt: NOW } }, NOW), null);
@@ -46,9 +46,9 @@ test('laneMoves runs once', async () => {
     { op: 'upsert', item: task('ng3x9nsfkl36exdk', 'Ask Claude for the Desk friction readout · 2026-10-31', 'soon') },
     { op: 'upsert', item: task('h9b87rzey00logw2', 'To do needs to recognize jobs for skills high score', 'today') },
   ] }) });
-  assert.deepEqual(await laneMoves(e, NOW), { build: 2 });
+  assert.deepEqual(await laneMoves(e, NOW), { build: 2, fun: 0 });
   const items = (await (await stub.fetch('https://list/export')).json()).items;
   assert.equal(items.ng3x9nsfkl36exdk.section, 'build');
   assert.equal(items.h9b87rzey00logw2.done, true);
-  assert.deepEqual(await laneMoves(e, NOW + 60000), { build: 'done' });
+  assert.deepEqual(await laneMoves(e, NOW + 60000), { build: 'done', fun: 'done' });
 });

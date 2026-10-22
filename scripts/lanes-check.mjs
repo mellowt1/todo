@@ -21,6 +21,7 @@ function world() {
   const items = Object.fromEntries([
     t('build0000001', 'Add birthdays to Day', 'build'),
     t('build0000002', 'A sketch for the kitchen app', 'build'),
+    t('fun000000001', 'Play a flight game', 'fun'),
     t('soon00000001', 'Renew the passport', 'soon'),
     t('today0000001', 'Water the plants', 'today'),
   ].map((i) => [i.id, i]));
@@ -66,7 +67,7 @@ for (const [name, viewport, scheme] of [['lanes-phone', { width: 390, height: 84
   // The move menu sends a task to Build.
   await page.click('.row[data-id="today0000001"] .text', { button: 'right' });
   await page.waitForSelector('.menu:not([hidden]) [data-move="build"]');
-  check((await page.$$eval('.menu [data-move]', (b) => b.map((x) => x.textContent))).join() === 'Today,Soon,Someday,Build', name + ': the menu moves to Today, Soon, Someday or Build');
+  check((await page.$$eval('.menu [data-move]', (b) => b.map((x) => x.textContent))).join() === 'Today,Soon,Someday,Build,Fun', name + ': the menu moves to Today, Soon, Someday, Build or Fun');
   await page.click('.menu [data-move="build"]');
   await sync();
   check(w.items.today0000001.section === 'build', name + ': moved to Build');
@@ -78,9 +79,9 @@ for (const [name, viewport, scheme] of [['lanes-phone', { width: 390, height: 84
   await page.waitForTimeout(400);
   check(await page.textContent('#title') === (phone ? 'Lanes' : 'Build'), name + ': the title says ' + await page.textContent('#title'));
   const rows = await order(page);
-  check(JSON.stringify(rows) === JSON.stringify(phone ? ['label:Build', 'today0000001', 'build0000001', 'build0000002'] : ['today0000001', 'build0000001', 'build0000002']), name + ': the lane lists its tasks ' + JSON.stringify(rows));
+  check(JSON.stringify(rows) === JSON.stringify(phone ? ['label:Build', 'today0000001', 'build0000001', 'build0000002', 'label:Fun', 'fun000000001'] : ['today0000001', 'build0000001', 'build0000002']), name + ': the lane lists its tasks ' + JSON.stringify(rows));
   if (phone) check((await page.textContent('.sublabel-lane span')) === '3', name + ': the Build head counts 3');
-  if (phone) check((await page.textContent('#switcher [data-section="lanes"] .scount')) === '3', name + ': the switcher counts the lanes');
+  if (phone) check((await page.textContent('#switcher [data-section="lanes"] .scount')) === '4', name + ': the switcher counts the lanes');
   else check((await page.textContent('.nav-item[data-section="build"] .count')) === '3', name + ': the sidebar counts Build');
   await page.screenshot({ path: file(name) });
 
@@ -105,6 +106,35 @@ for (const [name, viewport, scheme] of [['lanes-phone', { width: 390, height: 84
   await sync();
   const added = Object.values(w.items).find((i) => i.text === 'Dark mode for the lift app');
   check(added && added.section === 'build', name + ': a new task lands in Build ' + (added && added.section));
+
+  await page.keyboard.press(phone ? 'Enter' : 'Escape'); // finished adding
+  await page.waitForTimeout(500);
+  // Return: a new task starting with Return and no date asks for one once the add is done.
+  await page.locator('[data-section="today"]:visible').first().click();
+  await page.waitForTimeout(5500);
+  if (phone) await page.click('#fab'); else await page.keyboard.press('n');
+  await page.waitForTimeout(400);
+  await page.fill(box, 'Return the drill to Sam');
+  await page.keyboard.press('Enter');
+  if (phone) { await page.waitForTimeout(300); await page.keyboard.press('Enter'); } // an empty Return closes the add sheet
+  await page.waitForSelector('#ret:not([hidden])', { timeout: 8000 }).catch(() => {});
+  check(await page.isVisible('#ret') && (await page.textContent('#retName')) === 'Return the drill to Sam', name + ': Return asks for a date');
+  await page.waitForTimeout(600); // the sheet has arrived
+  await page.screenshot({ path: file(name + '-return') });
+  const by = new Date(Date.now() + 9 * 864e5).toLocaleDateString('en-CA');
+  await page.fill('#retDate', by);
+  await page.click('#retSave');
+  await sync();
+  const ret = Object.values(w.items).find((i) => i.text.startsWith('Return the drill'));
+  check(ret && ret.text === 'Return the drill to Sam · ' + by, name + ': the date goes on the task ' + (ret && ret.text));
+  // A Return task that already has a date does not ask.
+  if (phone) await page.click('#fab'); else await page.keyboard.press('n');
+  await page.waitForTimeout(400);
+  await page.fill(box, 'Return the lamp · ' + by);
+  await page.keyboard.press('Enter');
+  if (phone) { await page.waitForTimeout(300); await page.keyboard.press('Enter'); }
+  await page.waitForTimeout(2500);
+  check(!(await page.isVisible('#ret')), name + ': a dated Return task does not ask');
 
   check(errors.length === 0, name + ': no page errors ' + errors.join(' | '));
   await ctx.close();

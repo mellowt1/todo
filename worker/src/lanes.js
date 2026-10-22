@@ -17,6 +17,12 @@ export const MOVES = {
     move: ['ng3x9nsfkl36exdk', 'xp0tizx9ovelgfdk'],
     tick: ['h9b87rzey00logw2', 'qllqzv1i0jkq3yct'],
   },
+  // Fun (Paul's picks): leisure, apart from the obligations.
+  fun: {
+    key: 'lanes:fun:v1',
+    from: ['soon'],
+    move: ['2marezd8bw9tz7mq', 'rpm4axl0ci35ztuq', 'q9gg1l8rum1yitur', '4kmoubnxtmi1xb3c'],
+  },
 };
 
 /* Pure: one lane's picks against the list -> the ops. */
