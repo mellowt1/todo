@@ -12,8 +12,10 @@
  *                          from), what = the subject, email, chase after 7 days
  *             no prefix    Day's "Mail to sort": Task, Read later, Waiting or Drop
  *            "FW:", "Fwd:", "Doorst:" are ignored before or after the prefix. Tags anywhere in the
- *            subject: #wired #normal #drained set the task's energy, #others puts it in the Others
- *            lane ("Others: ..."). Tags and prefix are taken out of the stored subject.
+ *            subject: #wired #normal #drained set the task's energy, #others puts a task in the Others
+ *            lane (under its "Name:" if it has one, else Someone else; Today when dated within 2
+ *            days) and makes a wait's chase "Someone else: Chase ..." in the Others lane. Tags and
+ *            prefix are taken out of the stored subject.
  *
  *   Kept per mail (D1 `mail`, migrations/0011_mail.sql): subject, the original sender, the original
  *   date, the first EXCERPT characters of the forwarded text, masked (src/mask.js). Never the body,
@@ -181,10 +183,9 @@ async function makeTask(env, row, now) {
       if (got.out) { text = toText(got.out, row.subject, today); guess = ENERGY.includes(got.out.energy) ? got.out.energy : null; }
     } catch (e) { /* the subject as it came */ }
   }
-  if (row.others && !/^\p{Lu}[\p{L}'-]{1,23}: /u.test(text)) text = 'Others: ' + text;
   text = cleanText(text.slice(0, MAX_TEXT)) || 'Mail';
   const due = (text.match(DUE_END) || [])[1];
-  const section = due && due <= addDays(today, 2) ? 'today' : 'soon';
+  const section = due && due <= addDays(today, 2) ? 'today' : row.others ? 'others' : 'soon';
   const item = { id, text, section, done: false, doneAt: null, updatedAt: now, pos: now };
   if (row.energy) item.energy = row.energy; else if (guess) item.energyGuess = guess;
   const op = cleanOp({ op: 'upsert', item }, now);
@@ -221,7 +222,7 @@ export async function mailTarget(env, msg, now = Date.now()) {
     const to = await env.HUB_KV.get('mail:to:' + id);
     const who = personOf(to) || personOf(row.sender) || 'someone';
     const since = local(now).date;
-    const w = await createItem(env, { who, what: row.subject.slice(0, 160), channel: 'email', chase_days: CHASE_DAYS, for_whom: null, source_item: null, since, next_chase: addDays(since, CHASE_DAYS) }, 'mail', now);
+    const w = await createItem(env, { who, what: row.subject.slice(0, 160), channel: 'email', chase_days: CHASE_DAYS, for_whom: row.others ? 'Someone else' : null, source_item: null, since, next_chase: addDays(since, CHASE_DAYS) }, 'mail', now);
     await set('waiting', w ? w.id : null);
     return { done: 'waiting' };
   }

@@ -109,7 +109,7 @@ test('someone else: "Name: Chase ..." in Soon', async () => {
   await waitingCron(e, NOW + 3 * DAY);
   const t = (await doc(e)).items[await chaseTaskId(item.id, 1)];
   assert.equal(t.text, 'Sam: Chase the accountant about the tax overview');
-  assert.equal(t.section, 'soon');
+  assert.equal(t.section, 'others');
 });
 
 test('resolving ticks the open chase task off everywhere; an event says so with ids only', async () => {

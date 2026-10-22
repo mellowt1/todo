@@ -13,7 +13,7 @@
  *
  * Every cron run:
  *   - an open item whose chase day has come, with no chase task out, gets one in To-do: "Chase
- *     <who> about <what>", energy drained, in Today; for someone else "<Name>: Chase ..." in Soon
+ *     <who> about <what>", energy drained, in Today; for someone else "<Name>: Chase ..." in the Others lane
  *     (the light Others lane groups it). The task carries `waiting` = the item's id.
  *   - an "Apply ..." or "Sollicit..." task ticked off since 1 October makes an item for that employer,
  *     email, first chase after APPLY_DAYS.
@@ -234,7 +234,7 @@ export async function waitingCron(env, now = Date.now()) {
     const taskId = await chaseTaskId(row.id, row.chases + 1);
     const t = now + chased; // distinct pos per task
     const op = cleanOp({ op: 'upsert', item: {
-      id: taskId, text: chaseText(row).slice(0, 500), section: row.for_whom ? 'soon' : 'today', done: false, doneAt: null,
+      id: taskId, text: chaseText(row).slice(0, 500), section: row.for_whom ? 'others' : 'today', done: false, doneAt: null,
       updatedAt: t, pos: t, energy: 'drained', waiting: row.id,
     } }, t);
     if (!op) continue;

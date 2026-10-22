@@ -245,12 +245,20 @@ test('no prefix: Mail to sort in Day; sorting it goes through the queue once', a
   assert.deepEqual(await (await day('/' + list[0].id, { as: 'drop' })).json(), { ok: true, already: 'task' }, 'sorting twice does nothing');
 });
 
+test('wait: with #others the wait is for someone else, so its chase lands in the Others lane', async () => {
+  const e = env();
+  await receiveMail(message(ME, hotmail('wait: The heater #others', SENT_BY_ME)), e, NOW);
+  await drain(e);
+  assert.equal(e.HUB_DB.db.prepare('SELECT for_whom FROM waiting').get().for_whom, 'Someone else');
+});
+
 test('#others puts the task in the Others lane by name', async () => {
   const e = env();
   await receiveMail(message(ME, hotmail('todo: Tax overview for the accountant #others', GEMEENTE)), e, NOW);
   await drain(e);
   const t = (await items(e))[await mailTaskId(rows(e)[0].id)];
-  assert.equal(t.text, 'Others: Tax overview for the accountant');
+  assert.equal(t.text, 'Tax overview for the accountant');
+  assert.equal(t.section, 'others');
 });
 
 test('the Worker\'s email() handler never throws and never sends', async () => {
