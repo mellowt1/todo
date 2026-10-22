@@ -134,6 +134,9 @@ export class TodoList {
       case '/export':
         out = await st.exportAll();
         break;
+      case '/meta':
+        out = await st.meta();
+        break;
       default:
         return new Response('not found', { status: 404 });
     }

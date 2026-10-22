@@ -125,6 +125,10 @@
  * Opus 5.5, in D1 `oracle`, on the Sunday reset and in Morning until answered or put aside.
  *   GET /api/oracle/:code[/list]     POST /api/oracle/:code/(answer | aside)
  *
+ * Constellation (src/sky.js; the to-do's code): the apps as stars, the events between them as lines and
+ * pulses, from the log the hub already keeps (types, sources, times and reactions only), drawn by Morning.
+ *   GET /api/sky/:code
+ *
  * Email in (src/mail.js; the `email` handler, EMAIL_ALLOW): mail forwarded to hub@ becomes a task
  * (todo:), a read-later line (later:), a Waiting on item (wait:) or waits in Day (no prefix).
  *   GET /api/mail/:code   POST /api/mail/:code/:id <- { action: done | drop }   GET/POST /api/hub/mail/day[/:id]
@@ -193,6 +197,7 @@ import { handleEnergy, handleEnergyDay } from './energy.js';
 import { handleDread, handleDreadDay, dreadCron } from './dread.js';
 import { handleArchive, archiveCron } from './archive.js';
 import { handleOracle, oracleCron } from './oracle.js';
+import { handleSky, markLife } from './sky.js';
 import { handleWaiting, handleWaitingDay, waitingCron, waitingForMorning } from './waiting.js';
 import { receiveMail, handleMail, handleMailDay, mailForMorning } from './mail.js';
 
@@ -387,7 +392,12 @@ async function handleAdmin(request, env, rest) {
 // Add a module here. Each handler gets the path segments after /api/<module>/.
 const MODULES = {
   todo: handleTodo,
-  morning: (request, env, rest) => handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning, waiting: waitingForMorning, mail: mailForMorning }, routes: { week: handleWeek, lesson: handleLesson } }),
+  morning: async (request, env, rest) => {
+    const res = await handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning, waiting: waitingForMorning, mail: mailForMorning }, routes: { week: handleWeek, lesson: handleLesson } });
+    // Morning was opened: a sign of life for its star in the constellation (src/sky.js).
+    if (request.method === 'GET' && rest.length === 1 && res.status === 200) await markLife(env, 'morning').catch(() => {});
+    return res;
+  },
   hiscores: (request, env, rest) => handleHiscores(request, env, rest, json),
   lift: (request, env, rest) => handleLift(request, env, rest, json),
   door: (request, env, rest) => handleDoor(request, env, rest, json),
@@ -417,6 +427,7 @@ const MODULES = {
   dread: (request, env, rest) => handleDread(request, env, rest, json),
   archive: (request, env, rest) => handleArchive(request, env, rest, json),
   oracle: (request, env, rest) => handleOracle(request, env, rest, json),
+  sky: (request, env, rest) => handleSky(request, env, rest, json),
   mail: (request, env, rest) => handleMail(request, env, rest, json),
   admin: handleAdmin,
 };
