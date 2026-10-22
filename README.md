@@ -180,6 +180,8 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `GET/POST /api/hub/dread/day[/start\|/rate\|/stop]` | `Bearer HUB_SECRET_DAY` | the same for Day |
 | `GET /api/archive/:code[/list]` | the code | Archive: `{ due, archived }` (tasks passed on 5 times since launch), or the ledger |
 | `POST /api/archive/:code/(later\|archive\|restore)` | the code | `{ task, note?, source }`; archive takes the task off the list into D1 `archive`, restore puts it in Soon |
+| `GET /api/oracle/:code[/list]` | the code | the Oracle: `{ current }` (this week's open question) or every past week with its answer |
+| `POST /api/oracle/:code/(answer\|aside)` | the code | `{ week, answer?, source }`; answers stay in D1 `oracle` |
 | `GET /api/mail/:code` | the code | Email in: `{ later, triage }`, read-later mails for Morning and the count waiting in Day |
 | `POST /api/mail/:code/:id` | the code | `{ action: "done" \| "drop" }` on a read-later mail |
 | `GET/POST /api/hub/mail/day[/:id]` | `Bearer HUB_SECRET_DAY` | Day's Mail to sort; `{ as: task \| later \| wait \| drop }` goes through the queue |
