@@ -167,6 +167,7 @@ test('Hand off: the Waiting on item, task.handed_off, and the Sunday card lists 
   const ev = events(e, 'task.handed_off');
   assert.equal(ev.length, 1);
   assert.deepEqual(JSON.parse(ev[0].payload), { task: T1, waiting: r.body.item.id });
+  assert.equal((await doc(e)).items[T1].done, true); // the hub ticked it (Morning cannot)
   for (let i = 1; i <= 5; i++) skip(e, T2, NOW - i * HOUR);
   await arch(e, 'archive', { task: T2, note: 'Not mine', source: 'todo' });
   const w = await weekBlock(e, NOW + HOUR);

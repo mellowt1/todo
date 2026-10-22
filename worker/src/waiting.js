@@ -286,12 +286,21 @@ async function create(request, env, source, json, now) {
   if (f.error) return json({ error: f.error }, request, 400);
   const row = await createItem(env, f, src, now);
   if (!row) return json({ error: 'that task already has one' }, request, 409);
-  // Hand off (Archive's decision line, src/archive.js): the task goes to someone else; the app ticks it.
+  // Hand off (Archive's decision line, src/archive.js): the task goes to someone else, so the hub ticks
+  // it off here (Morning cannot; To-do also ticks it itself, which lands on the same done).
   if (got.body.handoff === true && f.source_item) {
     await acceptEvent(env, {
       id: 'task-handed_off-' + now + '-' + rand(4), source: src, type: 'task.handed_off', summary: 'Handed a task off',
       payload: { task: f.source_item, waiting: row.id }, caused_by: null, hops: 0, at: new Date(now).toISOString(),
     }, { feed: false });
+    if (env.TODO_CODE) {
+      const it = ((await listItems(env)).items || {})[f.source_item];
+      if (it && !it.done) {
+        const at = Math.max(now, (it.updatedAt || 0) + 1);
+        const op = cleanOp({ op: 'upsert', item: { ...it, done: true, doneAt: at, updatedAt: at } }, at);
+        if (op) await applyOps(env, [op]);
+      }
+    }
   }
   return json({ item: view(row, today) }, request);
 }
