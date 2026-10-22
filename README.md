@@ -178,6 +178,8 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `GET /api/dread/:code` | the code | Dread meter: `{ running, stopped }`, the one timer, settled against the list on every read |
 | `POST /api/dread/:code/(start\|rate\|stop\|undo\|skip)` | the code | `{ task, dread?, source }`; stop takes `done: true` from To-do; skip only `why: "moved"` |
 | `GET/POST /api/hub/dread/day[/start\|/rate\|/stop]` | `Bearer HUB_SECRET_DAY` | the same for Day |
+| `GET /api/archive/:code[/list]` | the code | Archive: `{ due, archived }` (tasks passed on 5 times since launch), or the ledger |
+| `POST /api/archive/:code/(later\|archive\|restore)` | the code | `{ task, note?, source }`; archive takes the task off the list into D1 `archive`, restore puts it in Soon |
 | `GET /api/mail/:code` | the code | Email in: `{ later, triage }`, read-later mails for Morning and the count waiting in Day |
 | `POST /api/mail/:code/:id` | the code | `{ action: "done" \| "drop" }` on a read-later mail |
 | `GET/POST /api/hub/mail/day[/:id]` | `Bearer HUB_SECRET_DAY` | Day's Mail to sort; `{ as: task \| later \| wait \| drop }` goes through the queue |

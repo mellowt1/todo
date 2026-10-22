@@ -150,6 +150,8 @@
   // The Dread meter's timer (see Dread): { task, name, startedAt, dread, source } or null. Up here
   // because a row draws it.
   let run = store.get('todo.dread') || null;
+  // Archive's decision line (see Archive): { due: [{ task, name, section, skips }], archived }.
+  let fate = Object.assign({ due: [], archived: 0 }, store.get('todo.fate') || {});
   const justAdded = new Set();
 
   /* ---------- Model ---------- */
@@ -493,6 +495,7 @@
       loadEnergy(); // the dial may have been set in Morning or Day
       if (++pollCount % 6 === 1) loadWaiting(); // Waiting on, about once a minute
       if (pollCount % 3 === 1) loadDread(); // the timer, about every half minute: a start in Morning or Day
+      if (pollCount % 6 === 1) loadFate(); // Archive's line, about once a minute
       if (!st.queue.length) settle();
     } catch (e) {
       if (!loaded) { loaded = true; render(); }
@@ -880,6 +883,7 @@
     renderProgress();
     renderEnergy();
     renderRun();
+    renderFate();
     renderWaitLine();
     if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[addTo()];
     $('install').hidden = !(view === 'list' && showInstall());
@@ -3058,6 +3062,7 @@
     store.set('todo.dread', run);
     if (JSON.stringify(run) !== was) { computeView(); render(); } // the row's minutes come or go
     renderRun();
+    renderFate(); // a line whose task is running steps aside
   }
   async function loadDread() {
     if (!navigator.onLine) return;
@@ -3207,6 +3212,135 @@
   $('runStop').addEventListener('click', stopRun);
   $('runRate').addEventListener('click', rateFor);
 
+  /* ---------- Archive ----------
+   * Archive (Paul, 2026-10-22; Phase 5, plain on purpose): a task passed on 5 times (Not this one, or
+   * moved out of Today) gets a line at the top of Today: Do it now (the Dread meter's start), Hand off
+   * (the Waiting sheet, handoff), Archive (in place, with an optional note) or Later (back after the
+   * next skip). The hub counts and keeps the archive (worker/src/archive.js); the ledger opens from
+   * Done, with Restore (back in Soon). Every write needs a connection. */
+  let fateBusy = false;
+  async function fatePost(sub, body) {
+    const r = await fetch(API + '/api/archive/' + code + '/' + sub, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ source: 'todo' }, body)) });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d) throw new Error((d && d.error) || 'status ' + r.status);
+    return d;
+  }
+  async function loadFate() {
+    if (!navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/archive/' + code, { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      fate = { due: Array.isArray(d.due) ? d.due : [], archived: d.archived || 0 };
+      store.set('todo.fate', fate);
+      renderFate();
+    } catch (e) { /* the last known line stays */ }
+  }
+  // The first due task that is still open here and not running on the Dread meter.
+  const fateNow = () => fate.due.find((f) => items[f.task] && !items[f.task].done && !(run && run.task === f.task)) || null;
+  function renderFate() {
+    const f = fateNow();
+    const on = !!f && view === 'list' && ui.section === 'today' && loaded;
+    $('fate').hidden = !on;
+    $('archivedBtn').hidden = !fate.archived;
+    $('archivedBtn').textContent = 'Archived (' + fate.archived + ')';
+    if (!on) { $('fateNote').hidden = true; $('fateAsk').hidden = false; return; }
+    const name = nameParts(items[f.task]).name;
+    if ($('fate').dataset.task !== f.task) { $('fateNote').hidden = true; $('fateAsk').hidden = false; $('fateNoteIn').value = ''; }
+    $('fate').dataset.task = f.task;
+    $('fateWhy').textContent = 'Passed on ' + f.skips + ' times';
+    $('fateName').textContent = name;
+    $('fateNoteHead').textContent = 'Archive “' + name + '”';
+  }
+  const fateTask = () => $('fate').dataset.task;
+  $('fateDo').addEventListener('click', () => { const id = fateTask(); if (items[id]) startFor(id, $('fateDo')); });
+  $('fateHand').addEventListener('click', () => { const id = fateTask(); if (items[id]) openWait(id, true); });
+  $('fateArch').addEventListener('click', () => {
+    $('fateAsk').hidden = true;
+    $('fateNote').hidden = false;
+    $('fateErr').hidden = true;
+    $('fateNoteIn').focus();
+  });
+  $('fateArchNo').addEventListener('click', () => { $('fateNote').hidden = true; $('fateAsk').hidden = false; $('fateArch').focus(); });
+  $('fateNoteIn').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('fateArchGo').click(); }
+    if (e.key === 'Escape') { e.preventDefault(); $('fateArchNo').click(); }
+  });
+  $('fateLater').addEventListener('click', async () => {
+    const id = fateTask();
+    if (!navigator.onLine) { toast('Needs a connection.'); return; }
+    fate.due = fate.due.filter((f) => f.task !== id);
+    renderFate();
+    try { await fatePost('later', { task: id }); say('Later'); } catch (e) { loadFate(); }
+  });
+  $('fateArchGo').addEventListener('click', async () => {
+    const id = fateTask();
+    if (fateBusy || !items[id]) return;
+    const err = (t) => { $('fateErr').textContent = t; $('fateErr').hidden = false; };
+    if (!navigator.onLine) return err('Needs a connection. Nothing was lost.');
+    fateBusy = true;
+    try {
+      await flush(); // the latest edit of it reaches the hub first
+      await fatePost('archive', { task: id, note: cleanText($('fateNoteIn').value || '') || '' });
+      fate.due = fate.due.filter((f) => f.task !== id);
+      fate.archived++;
+      $('fateNoteIn').value = '';
+      await poll();
+      renderFate();
+      toast('Archived. It is under Done, Archived.', () => restoreTask(id), id);
+    } catch (e) {
+      err('Could not archive it. Try again.');
+    } finally {
+      fateBusy = false;
+    }
+  });
+
+  // The ledger, newest first.
+  const dayOfMs = (ms) => { const d = new Date(ms); return d.getDate() + ' ' + MONTHS[d.getMonth()]; };
+  async function renderArchived() {
+    $('archivedRows').innerHTML = '<li class="ledger-empty">Loading…</li>';
+    try {
+      const r = await fetch(API + '/api/archive/' + code + '/list', { cache: 'no-store' });
+      const d = await r.json();
+      const rows = Array.isArray(d.items) ? d.items : [];
+      if (!rows.length) { $('archivedRows').innerHTML = '<li class="ledger-empty">Nothing archived.</li>'; return; }
+      $('archivedRows').innerHTML = rows.map((a) =>
+        '<li data-task="' + esc(a.task) + '"><div class="ledger-top"><span>' + esc(a.name) + '</span><span>' + (a.added ? dayOfMs(a.added) : '–') + '</span>' +
+        '<span>' + dayOfMs(Date.parse(a.archived)) + '</span><span>' + a.skips + '</span></div>' +
+        '<div class="ledger-foot"><span>' + esc(a.note || '') + '</span><button data-act="restore" aria-label="Restore ' + esc(a.name) + '">Restore</button></div></li>').join('');
+    } catch (e) {
+      $('archivedRows').innerHTML = '<li class="ledger-empty">Needs a connection.</li>';
+    }
+  }
+  async function restoreTask(id) {
+    if (!navigator.onLine) { toast('Needs a connection.'); return false; }
+    try {
+      await fatePost('restore', { task: id });
+      await poll();
+      loadFate();
+      toast('Back in Soon.');
+      return true;
+    } catch (e) {
+      toast('Could not restore it. Try again.');
+      return false;
+    }
+  }
+  function openArchived() {
+    renderArchived();
+    openSheet($('archived'), 0, $('archivedBtn'));
+    $('archivedClose').focus({ preventScroll: true });
+  }
+  $('archivedBtn').addEventListener('click', openArchived);
+  $('archivedClose').addEventListener('click', () => closeSheet($('archived')));
+  $('archived').querySelector('.scrim').addEventListener('click', () => closeSheet($('archived')));
+  $('archivedRows').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-act="restore"]');
+    const li = b && b.closest('[data-task]');
+    if (!li) return;
+    b.disabled = true;
+    if (await restoreTask(li.dataset.task)) renderArchived(); else b.disabled = false;
+  });
+
   /* ---------- Waiting ----------
    * Waiting on (Paul, 2026-10-21): something sent, waiting to hear back. The hub holds the list
    * (worker/src/waiting.js) and puts a "Chase ..." task in Today on its day. Here: "Sent, now waiting"
@@ -3242,14 +3376,18 @@
 
   // The form: from a task (edit sheet) or on its own (the list's Add).
   let waitTask = null; // the task it came from, or null
+  let waitHandoff = false; // opened from the Archive line: the task goes to someone else
   let waitBusy = false;
   function pickIn(group, v) {
     for (const b of $(group).querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.v === v));
   }
   const picked = (group) => { const b = $(group).querySelector('[aria-checked="true"]'); return b ? b.dataset.v : null; };
-  function openWait(taskId) {
+  function openWait(taskId, handoff = false) {
     const it = taskId ? items[taskId] : null;
     waitTask = it ? it.id : null;
+    waitHandoff = !!(it && handoff);
+    $('waitHead').textContent = waitHandoff ? 'Hand it off' : 'Sent, now waiting';
+    $('waitHowHead').textContent = waitHandoff ? 'How I told them' : 'How I sent it';
     $('waitFrom').hidden = !it;
     if (it) $('waitFrom').textContent = 'From the task: ' + nameParts(it).name;
     $('waitWho').value = '';
@@ -3261,7 +3399,7 @@
     $('waitForName').value = '';
     $('waitErr').hidden = true;
     $('waitNames').innerHTML = waiting.names.map((n) => '<button type="button" data-name="' + esc(n) + '">' + esc(n) + '</button>').join('');
-    $('waitSave').textContent = it ? 'Done, now waiting' : 'Add';
+    $('waitSave').textContent = waitHandoff ? 'Hand it off' : it ? 'Done, now waiting' : 'Add';
     openSheet($('wait'), undefined, null);
     if (desk.matches) $('waitWho').focus();
     else $('waitCancel').focus({ preventScroll: true });
@@ -3294,9 +3432,10 @@
     $('waitSave').disabled = true;
     const task = waitTask;
     try {
-      await waitPost('', { who, what, channel: picked('waitHow'), chaseDays: Number(picked('waitAfter')), ...(forWhom ? { forWhom } : {}), ...(task ? { sourceItem: task } : {}) });
+      await waitPost('', { who, what, channel: picked('waitHow'), chaseDays: Number(picked('waitAfter')), ...(forWhom ? { forWhom } : {}), ...(task ? { sourceItem: task } : {}), ...(waitHandoff ? { handoff: true } : {}) });
       closeWait(() => { if (task && items[task] && !items[task].done) markDone(task); else toast('Waiting on ' + who + '.'); });
       loadWaiting();
+      if (waitHandoff) loadFate();
     } catch (e) {
       err(String(e.message) === 'that task already has one' ? 'This task is already waiting.' : 'Could not save: ' + e.message);
     } finally {

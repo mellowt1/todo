@@ -746,3 +746,31 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .dread-err { margin: 10px 0 0; color: var(--danger); font-size: 15px; }
 .menu button.sec-start { display: flex; align-items: center; gap: 10px; color: var(--accent-text); font-weight: 600; }
 .head-btns { display: flex; gap: 18px; }
+
+/* ---------- Archive (app.js, Archive) ---------- */
+.fate { margin-top: 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--ring); display: flex; flex-direction: column; }
+.fate[hidden], .fate [hidden] { display: none; }
+.fate > div { display: flex; flex-direction: column; gap: 8px; }
+.fate-name { font-size: 17px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.fate-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.fate-btns button { min-height: 44px; padding: 0 14px; border-radius: 9px; background: var(--surface); color: var(--text); font-size: 15px; }
+.fate-btns button.fate-main { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.fate-top { display: flex; justify-content: space-between; align-items: center; margin: -10px -8px -6px 0; }
+.fate-later { min-height: 44px; padding: 0 8px; color: var(--secondary); font-size: 15px; }
+.fate-btns button:active { opacity: 0.55; }
+.fate input { height: 44px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--ring); background: var(--bg); color: var(--text); font: inherit; font-size: 16px; }
+.fate input:focus { border-color: var(--accent-text); outline: none; }
+.archived-btn { display: block; min-height: 44px; margin: 4px var(--gut-r) 8px var(--gut-l); color: var(--accent-text); font-size: 15px; font-weight: 600; text-align: left; }
+.archived-btn[hidden] { display: none; }
+.ledger-head, .ledger-top { display: grid; grid-template-columns: minmax(0, 1fr) 52px 52px 40px; gap: 8px; }
+.ledger-head { font-size: 12px; color: var(--secondary); padding-bottom: 6px; border-bottom: 1px solid var(--ring); }
+.ledger-head span:last-child, .ledger-top span:last-child { text-align: right; }
+.ledger { margin: 0; padding: 0; list-style: none; }
+.ledger li { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-bottom: 0.5px solid var(--sep); }
+.ledger-top { align-items: baseline; font-variant-numeric: tabular-nums; }
+.ledger-top span:first-child { font-size: 16px; overflow-wrap: anywhere; }
+.ledger-top span:not(:first-child) { font-size: 13px; color: var(--secondary); }
+.ledger-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.ledger-foot span { font-size: 14px; color: var(--text); }
+.ledger-foot button { flex-shrink: 0; min-height: 40px; padding: 0 12px; border-radius: 9px; background: var(--surface); color: var(--accent-text); font-size: 14px; font-weight: 600; }
+.ledger-empty { color: var(--secondary); font-size: 15px; }

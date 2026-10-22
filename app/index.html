@@ -85,6 +85,28 @@
         <button id="runRate" class="run-btn" hidden>Rate</button>
         <button id="runStop" class="run-btn">Stop</button>
       </div>
+      <!-- Archive (app.js, Archive): a task passed on 5 times, decided in place. Today only. -->
+      <div id="fate" class="fate list-only" role="region" aria-labelledby="fateName" hidden>
+        <div id="fateAsk">
+          <div class="fate-top"><span id="fateWhy" class="meta"></span><button id="fateLater" class="fate-later">Later</button></div>
+          <span id="fateName" class="fate-name"></span>
+          <div class="fate-btns">
+            <button id="fateDo" class="fate-main">Do it now</button>
+            <button id="fateHand">Hand off</button>
+            <button id="fateArch">Archive</button>
+          </div>
+        </div>
+        <div id="fateNote" hidden>
+          <span id="fateNoteHead" class="fate-name"></span>
+          <label for="fateNoteIn" class="meta">Note (optional)</label>
+          <input id="fateNoteIn" type="text" maxlength="80" autocomplete="off" placeholder="Why it is off the list">
+          <p id="fateErr" class="wait-err" role="alert" hidden></p>
+          <div class="fate-btns">
+            <button id="fateArchGo" class="fate-main">Archive</button>
+            <button id="fateArchNo">Cancel</button>
+          </div>
+        </div>
+      </div>
       <!-- Waiting on (app.js, Waiting): Soon only. -->
       <button id="waitLine" class="wait-line list-only" hidden></button>
       <div id="pillSlot" class="slot"><div class="slot-clip">
@@ -112,6 +134,7 @@
     </div></div>
 
     <section id="week" class="week done-only" hidden></section>
+    <button id="archivedBtn" class="archived-btn done-only" hidden></button>
 
     <ul id="list" class="list" aria-labelledby="title"></ul>
 
@@ -332,6 +355,20 @@
     <input id="waitForName" type="text" maxlength="40" autocomplete="off" autocapitalize="words" placeholder="Their name" aria-label="Who it is for" hidden>
     <p id="waitErr" class="wait-err" role="alert" hidden></p>
     <button id="waitSave" class="pick-do">Done, now waiting</button>
+  </div>
+</div>
+
+<!-- The Archived ledger (app.js, Archive): tasks taken off the list on purpose, with Restore. -->
+<div id="archived" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet archived-sheet" role="dialog" aria-labelledby="archivedHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="archivedHead" class="meta">Archived</span>
+      <button id="archivedClose" class="text-btn">Close</button>
+    </div>
+    <div class="ledger-head" aria-hidden="true"><span>Task</span><span>Added</span><span>Off</span><span>Skips</span></div>
+    <ul id="archivedRows" class="ledger" aria-live="polite"></ul>
   </div>
 </div>
 

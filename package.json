@@ -22,7 +22,8 @@
     "week-check": "node scripts/week-check.mjs",
     "waiting-check": "node scripts/waiting-check.mjs",
     "lanes-check": "node scripts/lanes-check.mjs",
-    "dread-check": "node scripts/dread-check.mjs"
+    "dread-check": "node scripts/dread-check.mjs",
+    "archive-check": "node scripts/archive-check.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
