@@ -78,6 +78,13 @@
         </div>
         <button id="energySort" class="energy-sort meta" hidden></button>
       </div>
+      <!-- The Dread meter (app.js, Dread): the one timer that runs, from any app. Today only. -->
+      <div id="running" class="running list-only" role="status" hidden>
+        <span class="run-dot" aria-hidden="true"></span>
+        <span class="run-words"><span id="runName" class="run-name"></span><span id="runMeta" class="run-meta"></span></span>
+        <button id="runRate" class="run-btn" hidden>Rate</button>
+        <button id="runStop" class="run-btn">Stop</button>
+      </div>
       <!-- Waiting on (app.js, Waiting): Soon only. -->
       <button id="waitLine" class="wait-line list-only" hidden></button>
       <div id="pillSlot" class="slot"><div class="slot-clip">
@@ -163,7 +170,7 @@
     <div class="grabber"></div>
     <div class="sheet-head">
       <label for="editText" class="meta">Task</label>
-      <button id="editClose" class="text-btn">Close</button>
+      <span class="head-btns"><button id="editStart" class="text-btn">Start timer</button><button id="editClose" class="text-btn">Close</button></span>
     </div>
     <textarea id="editText" rows="3" maxlength="500" autocapitalize="sentences"></textarea>
     <div class="meta">Section</div>

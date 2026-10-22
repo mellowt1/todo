@@ -1,5 +1,5 @@
 // The Energy dial, against a mocked Worker (no wrangler needed): the dial sets and clears the level,
-// Give me one walks the hub's order, Not this one tells the hub, Surprise me never repeats, Do this
+// Give me one walks the hub's order, Not this one tells the hub, Surprise me never repeats, Start this
 // one moves a Soon task to Today, the edit sheet and Sort confirm guesses, a level set in Morning
 // shows here, and Tidy's guess lands outlined. Every value is made up.
 //   PORT=8097 npm run serve, then: APP_URL=http://localhost:8097/ npm run energy-check
@@ -71,6 +71,9 @@ function world() {
       if (p === `/api/intake/${CODE}/cards`) return { tasks: [] };
       if (p === `/api/intake/${CODE}`) return { items: [] };
       if (p.startsWith('/api/hiscores/')) return { skills: [] };
+      if (p === `/api/dread/${CODE}`) return { running: null, stopped: null };
+      if (p === `/api/dread/${CODE}/start`) return { running: { task: body.task, name: '', startedAt: new Date().toISOString(), dread: body.dread, source: 'todo', mins: 0 } };
+      if (p === `/api/dread/${CODE}/skip`) return { ok: true };
       return null;
     },
   };
@@ -143,10 +146,14 @@ for (const [name, viewport, scheme] of [['energy-phone', { width: 390, height: 8
   for (let i = 0; i < 3; i++) { await tap('#pickBody [data-act="skip"]'); await page.waitForTimeout(100); }
   check((await pickName()) === 'Order bulbs', name + ': at Order bulbs');
   check((await page.textContent('#pickBody .pick-do')).includes('moves it to Today'), name + ': a Soon pick says it moves');
-  await tap('#pickBody [data-act="do"]');
+  await tap('#pickBody [data-act="start"]');
+  await page.waitForSelector('#pickBody .dread-chips');
+  await tap('#pickBody [data-act="nodread"]');
   await page.waitForTimeout(2000); // the op goes out after the 1.2 s debounce
-  check(w.items.soonplain001.section === 'today', name + ': Do this one moved it to Today');
+  check(w.items.soonplain001.section === 'today', name + ': Start this one moved it to Today');
   check(w.items.soonplain001.energy === 'drained', name + ': the move kept its level');
+  await tap('#pickBody [data-act="close"]');
+  await page.waitForTimeout(500);
 
   // The edit sheet: a guess is outlined, a tap confirms it.
   await tap('[data-section="soon"]:visible');

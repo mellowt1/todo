@@ -147,6 +147,9 @@
 
   let view = 'list'; // 'list' | 'done'
   let items = {};
+  // The Dread meter's timer (see Dread): { task, name, startedAt, dread, source } or null. Up here
+  // because a row draws it.
+  let run = store.get('todo.dread') || null;
   const justAdded = new Set();
 
   /* ---------- Model ---------- */
@@ -344,11 +347,14 @@
     const row = byId(id);
     if (row && view === 'list') xpDrop(row, pays(it, at));
     upsert(Object.assign({}, it, { done: true, doneAt: at }, it.week ? { week: null } : {})); // done takes the flag off; Undo puts it back
+    // The task with the timer: the hub hears it is done, and Undo lets the timer run on.
+    const timed = runDone(id, at);
+    const said = timed ? doneWords(timed) : 'Done.';
     // A repeating task: the next one on the schedule comes in now; Undo takes both back.
     const next = nextOf(it, ymd(new Date(at)), at);
     if (next && !items[next.id]) upsert(next);
-    else if (next) { toast('Done.', () => upsert(prev), id); return; }
-    toast(next ? 'Done. Next: ' + longDay(nameParts(next).due) + '.' : 'Done.', () => { upsert(prev); if (next) remove(next.id); }, id);
+    else if (next) { toast(said, () => { upsert(prev); runUndo(timed); }, id); return; }
+    toast(next ? said + ' Next: ' + longDay(nameParts(next).due) + '.' : said, () => { upsert(prev); if (next) remove(next.id); runUndo(timed); }, id);
     if (it.waiting) askAnswered(it); // a chase task: did they answer?
   }
 
@@ -358,6 +364,7 @@
     const prev = Object.assign({}, it);
     upsert(Object.assign({}, it, { section, pos: now() }));
     if (withToast) toast('Moved to ' + LABEL[section] + '.', () => upsert(prev), id);
+    if (withToast && prev.section === 'today' && !prev.done) tellMoved(id); // the edit sheet tells it on close
   }
 
   // "This week" on or off (2026-10-21). In Soon the task joins or leaves the group on top.
@@ -485,6 +492,7 @@
       if (!loaded) { loaded = true; render(); }
       loadEnergy(); // the dial may have been set in Morning or Day
       if (++pollCount % 6 === 1) loadWaiting(); // Waiting on, about once a minute
+      if (pollCount % 3 === 1) loadDread(); // the timer, about every half minute: a start in Morning or Day
       if (!st.queue.length) settle();
     } catch (e) {
       if (!loaded) { loaded = true; render(); }
@@ -700,6 +708,7 @@
     let meta = '';
     if (it.week === true && !it.done && it.section !== 'soon') meta += WEEK_ICON; // Soon has its group
     if (it.repeat && !it.done) meta += REPEAT_ICON;
+    if (run && run.task === it.id && !it.done) meta += '<span class="trun" title="Timer running">' + runMins() + ' min</span>'; // the Dread meter's timer
     if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + (p.time ? ' ' + p.time : '') + '">' + d.words + (p.time ? ' ' + p.time : '') + '</span>'; }
     // The confirmed energy level, a small battery (a guess shows only in the edit sheet).
     if (withSkill && !it.done && LEVELS.includes(it.energy)) meta += '<span class="tbatt" title="' + LNAME[it.energy] + ' energy">' + battSvg(it.energy, LNAME[it.energy] + ' energy') + '</span>';
@@ -870,6 +879,7 @@
     }
     renderProgress();
     renderEnergy();
+    renderRun();
     renderWaitLine();
     if ($('capture').hidden) $('capLabel').textContent = 'Adds to ' + LABEL[addTo()];
     $('install').hidden = !(view === 'list' && showInstall());
@@ -1658,7 +1668,8 @@
     menu.innerHTML = '<div class="meta menu-title">Move to</div>' + PLACES.map((s) =>
       '<button class="sec" role="menuitem" data-move="' + s + '"' + (s === it.section ? ' aria-current="true" aria-disabled="true"' : '') + '>' + LABEL[s] + '</button>').join('') +
       '<div class="menu-sep"></div><button class="sec sec-week" role="menuitemcheckbox" data-week aria-checked="' + (it.week === true) + '">' +
-      WEEK_ICON.replace('role="img" aria-label="This week"', 'aria-hidden="true"') + (it.week === true ? 'Not this week' : 'This week') + '</button>';
+      WEEK_ICON.replace('role="img" aria-label="This week"', 'aria-hidden="true"') + (it.week === true ? 'Not this week' : 'This week') + '</button>' +
+      '<button class="sec sec-start" role="menuitem" data-start>' + (run && run.task === it.id ? 'Stop the timer' : 'Start this one') + '</button>';
     rest(menu); // a menu still leaving comes back
     menu.classList.remove('leaving');
     menu.hidden = false;
@@ -1714,6 +1725,12 @@
     if (!b || !menuOn) return;
     const row = menuRow;
     if (b.hasAttribute('data-week')) { if (row) setWeek(row.dataset.id, !(items[row.dataset.id] && items[row.dataset.id].week === true)); closeMenu(); return; }
+    if (b.hasAttribute('data-start')) {
+      const id = row && row.dataset.id;
+      closeMenu(false);
+      if (id && run && run.task === id) stopRun(); else if (id) startFor(id, row);
+      return;
+    }
     // The leaving lock goes on before closeMenu lets go, so the slide plays on the row on screen.
     if (row && !b.hasAttribute('aria-current') && slideOut(row, -1)) moveTo(row.dataset.id, b.dataset.move);
     closeMenu();
@@ -2062,6 +2079,7 @@
     $('editApply').hidden = !isApply(it);
     paintEditEnergy(it);
     $('editWait').hidden = !!it.waiting; // a chase task is already part of one
+    paintEditStart(it);
     const seg = $('editSeg');
     seg.classList.add('instant');
     paintEditSeg(it.section);
@@ -2214,6 +2232,7 @@
       if (typeof after === 'function') { after(); return; }
       const it = from && items[from.id];
       if (!it || it.done || it.section === from.section) return;
+      if (from.section === 'today') tellMoved(it.id);
       toast('Moved to ' + LABEL[it.section] + '.', () => {
         const cur = items[from.id];
         if (cur) upsert(Object.assign({}, cur, { section: from.section, pos: from.pos }));
@@ -2827,7 +2846,8 @@
     bs[(i + step + bs.length) % bs.length].focus(); // moving does not set a level; Space or Enter does
   });
 
-  // Copied from worker/src/energy.js (forSomeoneElse, pickPool).
+  // Copied from worker/src/energy.js (forSomeoneElse, pickPool). On a drained day a task last rated
+  // a dread of 4 or 5 goes last (the Dread meter, 2026-10-22).
   const PERSON = /^\p{Lu}[\p{L}'-]{1,23}: /u;
   const NOT_A_PERSON = new Set(['Apply', 'Choose', 'Pay', 'Note', 'Read', 'Call', 'Sollicitatie']);
   function forSomeoneElse(it) {
@@ -2837,8 +2857,8 @@
   }
   function pickPool(level) {
     const rows = Object.values(items).filter((it) => !it.done && it.energy === level && (it.section === 'today' || it.section === 'soon'))
-      .map((it) => ({ it, others: forSomeoneElse(it) ? 1 : 0, sec: it.section === 'today' ? 0 : 1, key: dueKey(it) }));
-    rows.sort((a, b) => a.others - b.others || a.sec - b.sec || (a.key ? 0 : 1) - (b.key ? 0 : 1)
+      .map((it) => ({ it, heavy: level === 'drained' && it.dread >= 4 ? 1 : 0, others: forSomeoneElse(it) ? 1 : 0, sec: it.section === 'today' ? 0 : 1, key: dueKey(it) }));
+    rows.sort((a, b) => a.heavy - b.heavy || a.others - b.others || a.sec - b.sec || (a.key ? 0 : 1) - (b.key ? 0 : 1)
       || (a.key && b.key ? a.key.localeCompare(b.key) : 0) || b.it.pos - a.it.pos);
     return rows.map((r) => r.it);
   }
@@ -2858,17 +2878,21 @@
     return { it, count: pool.length, position: pool.length - left.length + 1, level };
   }
   let pickShown = null;
+  let pickStep = 'pick'; // pick | ask | started: the Dread meter's start runs in this sheet too
+  let pickErr = null;
   function renderPick(p) {
     pickShown = p;
     const L = p.level ? LNAME[p.level] : '';
-    $('pickHead').innerHTML = p.level ? battSvg(p.level) + ' ' + esc(L) + (p.it ? ' · ' + p.position + ' of ' + p.count + ' that fit' : '') : '';
+    $('pickHead').innerHTML = p.only ? (p.rate ? 'Rate the dread' : 'Start a timer')
+      : p.level ? battSvg(p.level) + ' ' + esc(L) + (p.it ? ' · ' + p.position + ' of ' + p.count + ' that fit' : '') : '';
     let html;
-    if (p.it) {
+    if (p.it && pickStep !== 'pick') html = dreadHtml(p);
+    else if (p.it) {
       const n = nameParts(p.it);
       const due = n.due ? 'due ' + dueLabel(n.due).words.toLowerCase().replace(/^(\d+ )(\w)/, (m, a, b) => a + b.toUpperCase()) + (n.time ? ' ' + n.time : '') : '';
       html = '<p class="pick-name">' + esc(n.name) + '</p>' +
         '<div class="pick-meta">' + skillSlot(p.it) + '<span>' + LABEL[p.it.section] + '</span>' + (due ? '<span>· ' + esc(due) + '</span>' : '') + '</div>' +
-        '<button class="pick-do" data-act="do">' + (p.it.section === 'today' ? 'Do this one' : 'Do this one (moves it to Today)') + '</button>' +
+        '<button class="pick-do" data-act="start">' + (p.it.section === 'today' ? 'Start this one' : 'Start this one (moves it to Today)') + '</button>' +
         '<div class="pick-two"><button data-act="skip">Not this one</button><button data-act="surprise">Surprise me</button></div>';
     } else if (p.count) {
       html = '<p class="pick-name">That was every task that fits ' + L.toLowerCase() + '.</p>' +
@@ -2884,6 +2908,8 @@
   function openPick() {
     if (!levelOn()) return;
     pickSkip = [];
+    pickStep = 'pick';
+    pickErr = null;
     renderPick(pickNext('next'));
     openSheet($('pick'), 0, $('giveOne'));
     $('pickClose').focus({ preventScroll: true });
@@ -2902,14 +2928,16 @@
     if (!b || !pickShown) return;
     const act = b.dataset.act;
     const it = pickShown.it;
+    if (b.dataset.dread && it) { if (pickShown.rate) rateRun(Number(b.dataset.dread)); else beginRun(it.id, Number(b.dataset.dread)); return; }
+    if (act === 'start' && it) { pickStep = 'ask'; pickErr = null; renderPick(pickShown); focusChips(); return; }
+    if (act === 'nodread' && it) { if (pickShown.rate) closePick(); else beginRun(it.id, null); return; }
     if (act === 'skip' && it) { tellSkip(it.id); pickSkip.push(it.id); renderPick(pickNext('next')); }
     else if (act === 'surprise' && it) renderPick(pickNext('surprise'));
     else if (act === 'again') { pickSkip = []; renderPick(pickNext('next')); }
     else if (act === 'sort') closePick(openSort);
-    else if (act === 'do' && it) {
+    else if (act === 'close' && it) {
       const id = it.id;
       closePick(() => {
-        if (items[id] && items[id].section !== 'today') moveTo(id, 'today');
         const row = byId(id);
         if (row) { row.scrollIntoView({ block: 'nearest', behavior: M.reduced ? 'auto' : 'smooth' }); if (keyed) focusRow(row); }
       });
@@ -3003,6 +3031,181 @@
     const level = it.energy === b.dataset.level ? null : b.dataset.level;
     upsert(Object.assign({}, it, { energy: level, energyGuess: level ? null : it.energyGuess }));
   });
+
+  /* ---------- Dread ----------
+   * The Dread meter (Paul, 2026-10-22): start a task, say how much you dread it (1 to 5) or skip
+   * that, and the hub times it (worker/src/dread.js). One timer for every app, so a start in
+   * Morning or Day shows here too, as the pill on Today. Start from Give me one, the edit sheet or
+   * the move menu. Ticking the task off tells the hub it is done (the toast says how long it took;
+   * Undo lets the timer run on); the hub also settles a tick from elsewhere and stops counting
+   * after 4 hours. A task moved out of Today is told to the hub as a skip; stopping is not one.
+   * Starting, rating and stopping need a connection. */
+  const RUN_FROM = { morning: 'Morning', day: 'Day' };
+  const runMins = () => (run ? Math.max(0, Math.floor((now() - Date.parse(run.startedAt)) / 60000)) : 0);
+  const minWords = (n) => n + (n === 1 ? ' minute' : ' minutes');
+  function doneWords(t) { return 'Done. ' + (t.dread ? 'Dreaded ' + t.dread + ', took ' : 'Took ') + minWords(t.mins) + '.'; }
+
+  async function dreadPost(sub, body) {
+    const r = await fetch(API + '/api/dread/' + code + '/' + sub, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ source: 'todo' }, body)) });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d) throw new Error('status ' + r.status);
+    return d;
+  }
+  function takeRun(r) {
+    const next = r && r.task ? { task: r.task, name: r.name || '', startedAt: r.startedAt, dread: r.dread || null, source: r.source || null } : null;
+    const was = JSON.stringify(run);
+    run = next;
+    store.set('todo.dread', run);
+    if (JSON.stringify(run) !== was) { computeView(); render(); } // the row's minutes come or go
+    renderRun();
+  }
+  async function loadDread() {
+    if (!navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/dread/' + code, { cache: 'no-store' });
+      if (r.ok) takeRun((await r.json()).running);
+    } catch (e) { /* the last known timer stays */ }
+  }
+
+  function renderRun() {
+    const on = !!run && view === 'list' && ui.section === 'today' && loaded;
+    $('running').hidden = !on;
+    if (!on) return;
+    const it = items[run.task];
+    const name = it ? nameParts(it).name : run.name;
+    $('runName').textContent = name;
+    $('runMeta').textContent = 'Running ' + runMins() + ' min' + (run.dread ? ' · dread ' + run.dread : '') +
+      (RUN_FROM[run.source] ? ' · started in ' + RUN_FROM[run.source] : '');
+    $('runRate').hidden = !!run.dread;
+    $('runRate').setAttribute('aria-label', 'Rate the dread of ' + name);
+    $('runStop').setAttribute('aria-label', 'Stop the timer on ' + name);
+  }
+  // The minutes move on their own; only the words change, the list is not drawn again.
+  setInterval(() => {
+    if (!run || document.hidden) return;
+    renderRun();
+    for (const el of document.querySelectorAll('.row[data-id="' + run.task + '"] .trun')) el.textContent = runMins() + ' min';
+  }, 20000);
+
+  // The chips, in the pick sheet: ask, then "started".
+  function dreadHtml(p) {
+    const n = nameParts(p.it).name;
+    if (pickStep === 'started') {
+      return '<p class="pick-name">' + esc(n) + '</p>' +
+        '<p class="dread-said">Started at ' + hm(run ? run.startedAt : new Date(now()).toISOString()) + (run && run.dread ? ', dread ' + run.dread : '') + '. The timer runs on Today.</p>' +
+        '<button class="pick-again" data-act="close">Back to the list</button>';
+    }
+    const cur = p.rate && run ? run.dread : null;
+    return '<p class="pick-name">' + esc(n) + '</p>' +
+      '<p class="dread-q" id="dreadQ">How much do you dread it?</p>' +
+      '<div class="dread-chips" role="radiogroup" aria-labelledby="dreadQ" aria-describedby="dreadEnds">' +
+      [1, 2, 3, 4, 5].map((d) => '<button role="radio" aria-checked="' + (d === cur) + '" data-dread="' + d + '"' +
+        ' aria-label="' + d + (d === 1 ? ', not at all' : d === 5 ? ', a lot' : '') + '"' + (d === (cur || 1) ? '' : ' tabindex="-1"') + '>' + d + '</button>').join('') +
+      '</div><div class="dread-ends" id="dreadEnds"><span>Not at all</span><span>A lot</span></div>' +
+      '<button class="dread-skip" data-act="nodread">' + (p.rate ? 'Not now' : 'Skip, just start') + '</button>' +
+      (pickErr ? '<p class="dread-err" role="alert">' + esc(pickErr) + '</p>' : '');
+  }
+  function focusChips() {
+    const b = $('pickBody').querySelector('.dread-chips [tabindex]:not([tabindex="-1"])') || $('pickBody').querySelector('.dread-chips button');
+    if (b) b.focus({ preventScroll: true });
+  }
+  $('pickBody').addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    const bs = Array.from($('pickBody').querySelectorAll('.dread-chips button'));
+    if (!step || !bs.includes(document.activeElement)) return;
+    e.preventDefault();
+    const b = bs[(bs.indexOf(document.activeElement) + step + bs.length) % bs.length];
+    for (const x of bs) x.tabIndex = x === b ? 0 : -1;
+    b.focus(); // moving does not rate; Space or Enter does
+  });
+
+  // Start a timer on one task, from the edit sheet or the move menu: the same sheet, at the question.
+  function startFor(id, opener) {
+    const it = items[id];
+    if (!it || it.done) return;
+    pickStep = 'ask';
+    pickErr = null;
+    renderPick({ it, level: null, only: true });
+    openSheet($('pick'), 0, opener || null);
+    focusChips();
+  }
+  async function beginRun(id, dread) {
+    if (!navigator.onLine) { pickErr = 'Starting needs a connection.'; renderPick(pickShown); focusChips(); return; }
+    if (items[id] && items[id].section !== 'today') moveTo(id, 'today', false);
+    try {
+      await flush(); // a task made offline reaches the hub first
+      const d = await dreadPost('start', { task: id, dread });
+      takeRun(d.running);
+      pickStep = 'started';
+      pickErr = null;
+      say('Timer started');
+    } catch (e) {
+      pickErr = 'Could not start. Try again.';
+    }
+    if (pickShown) { renderPick(pickShown); if (pickStep === 'started') $('pickBody').querySelector('[data-act="close"]').focus({ preventScroll: true }); else focusChips(); }
+  }
+  function rateFor() {
+    if (!run) return;
+    pickStep = 'ask';
+    pickErr = null;
+    renderPick({ it: items[run.task] || { id: run.task, text: run.name, section: 'today' }, level: null, only: true, rate: true });
+    openSheet($('pick'), 0, $('runRate'));
+    focusChips();
+  }
+  async function rateRun(dread) {
+    if (!run) return closePick();
+    try {
+      const d = await dreadPost('rate', { task: run.task, dread });
+      takeRun(d.running);
+      closePick();
+      say('Dread ' + dread);
+    } catch (e) {
+      pickErr = navigator.onLine ? 'Could not save it. Try again.' : 'Rating needs a connection.';
+      if (pickShown) { renderPick(pickShown); focusChips(); }
+    }
+  }
+  async function stopRun() {
+    if (!run) return;
+    if (!navigator.onLine) { toast('Stopping needs a connection.'); return; }
+    try {
+      const d = await dreadPost('stop', {});
+      takeRun(null);
+      toast(d.stopped ? 'Stopped after ' + minWords(d.stopped.mins) + '.' : 'Stopped.');
+    } catch (e) {
+      toast('Could not stop the timer. Try again.');
+    }
+  }
+  // Ticked off: the hub hears it now (it would also find the tick itself). Returns what the toast says.
+  function runDone(id, at) {
+    if (!run || run.task !== id) return null;
+    const t = { task: id, dread: run.dread, mins: Math.max(1, Math.round((at - Date.parse(run.startedAt)) / 60000)), was: run };
+    takeRun(null);
+    if (navigator.onLine) flush().then(() => dreadPost('stop', { done: true })).catch(() => {});
+    return t;
+  }
+  // Undo after a timed Done: the task is open again first, then the timer runs on from its start.
+  function runUndo(t) {
+    if (!t) return;
+    takeRun(t.was);
+    flush().then(() => dreadPost('undo', { task: t.task })).then((d) => takeRun(d.running)).catch(() => loadDread());
+  }
+  function tellMoved(id) {
+    if (!navigator.onLine) return;
+    dreadPost('skip', { task: id, why: 'moved' }).catch(() => {});
+  }
+  function paintEditStart(it) {
+    const on = !!run && run.task === it.id;
+    $('editStart').textContent = on ? 'Stop timer' : 'Start timer';
+    $('editStart').setAttribute('aria-label', on ? 'Stop the timer, running ' + runMins() + ' minutes' : 'Start a timer on this task');
+  }
+  $('editStart').addEventListener('click', () => {
+    const id = editId;
+    if (!id || !items[id]) return;
+    if (run && run.task === id) { closeEdit(stopRun); return; }
+    closeEdit(() => startFor(id, byId(id)));
+  });
+  $('runStop').addEventListener('click', stopRun);
+  $('runRate').addEventListener('click', rateFor);
 
   /* ---------- Waiting ----------
    * Waiting on (Paul, 2026-10-21): something sent, waiting to hear back. The hub holds the list
