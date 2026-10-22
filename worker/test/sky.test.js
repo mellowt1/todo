@@ -203,7 +203,7 @@ test('lines join both ways, stars count sent and received with who', async () =>
   assert.deepEqual(dk.ba, []);
   assert.ok(body.lines.find((l) => l.a === 'todo' && l.b === 'hub'), 'the hub is a star like the others');
   const todo = star(body, 'todo');
-  assert.deepEqual(todo.sent, [{ type: 'energy.set', label: 'Energy set', n: 6, to: ['morning', 'day'] }]);
+  assert.deepEqual(todo.sent, [{ type: 'energy.set', label: 'Energy set', n: 3, to: ['morning', 'day'] }], 'one event, however many it reached');
   assert.deepEqual(todo.received.map((r) => [r.type, r.n, r.from]), [['waiting.chase_due', 1, ['hub']], ['energy.set', 1, ['morning']]]);
   assert.equal(todo.events, 3 + 2);                      // 3 sent, 1 from Morning, 1 chase from the hub
   assert.equal(star(body, 'kitchen').events, 1);

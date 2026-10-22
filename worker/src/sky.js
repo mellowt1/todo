@@ -211,13 +211,16 @@ export function buildSky(events, life, now, pulseIds) {
   const lines = new Map();
   const add = (map, type, who) => {
     const row = map.get(type) || { type, label: label(type), n: 0, who: new Set() };
-    row.n++; if (who) row.who.add(who); map.set(type, row);
+    row.n++;
+    for (const w of [].concat(who)) row.who.add(w);
+    map.set(type, row);
   };
   for (const p of pulses) {
     const from = star.get(p.from);
     if (from) from.events++;
+    // Sent counts the event once, with everyone it reached; received counts it once per star.
+    if (from) add(from.sent, p.type, p.to);
     for (const t of p.to) {
-      if (from) add(from.sent, p.type, t);
       const to = star.get(t);
       if (to) { add(to.received, p.type, p.from); to.events++; }
       const [a, b] = ORDER.get(p.from) <= ORDER.get(t) ? [p.from, t] : [t, p.from];
@@ -229,7 +232,6 @@ export function buildSky(events, life, now, pulseIds) {
       row.n++; dir.set(p.type, row);
       lines.set(k, line);
     }
-    if (from && !p.to.length) add(from.sent, p.type, null);
   }
   const order = (ids) => [...ids].sort((a, b) => ORDER.get(a) - ORDER.get(b));
   return {
