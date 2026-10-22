@@ -129,6 +129,10 @@
  * pulses, from the log the hub already keeps (types, sources, times and reactions only), drawn by Morning.
  *   GET /api/sky/:code
  *
+ * Network map (src/network.js; the to-do's code): the people Paul knows, by sector, with who introduced
+ * whom; Reach out makes a To-do task, Sent a message a Waiting on item; LinkedIn's Connections.csv imports.
+ *   GET /api/network/:code     POST /api/network/:code/(person[/:id[/delete|talked|reach|sent]] | tie | import)
+ *
  * Email in (src/mail.js; the `email` handler, EMAIL_ALLOW): mail forwarded to hub@ becomes a task
  * (todo:), a read-later line (later:), a Waiting on item (wait:) or waits in Day (no prefix).
  *   GET /api/mail/:code   POST /api/mail/:code/:id <- { action: done | drop }   GET/POST /api/hub/mail/day[/:id]
@@ -198,6 +202,7 @@ import { handleDread, handleDreadDay, dreadCron } from './dread.js';
 import { handleArchive, archiveCron } from './archive.js';
 import { handleOracle, oracleCron } from './oracle.js';
 import { handleSky, markLife } from './sky.js';
+import { handleNetwork, networkCron } from './network.js';
 import { handleWaiting, handleWaitingDay, waitingCron, waitingForMorning } from './waiting.js';
 import { receiveMail, handleMail, handleMailDay, mailForMorning } from './mail.js';
 
@@ -428,6 +433,7 @@ const MODULES = {
   archive: (request, env, rest) => handleArchive(request, env, rest, json),
   oracle: (request, env, rest) => handleOracle(request, env, rest, json),
   sky: (request, env, rest) => handleSky(request, env, rest, json),
+  network: (request, env, rest) => handleNetwork(request, env, rest, json),
   mail: (request, env, rest) => handleMail(request, env, rest, json),
   admin: handleAdmin,
 };
@@ -452,6 +458,7 @@ export default {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
     const jobs = [weekCron(env).then((w) => oracleCron(env).catch((e) => ({ error: String(e && e.name) })).then((o) => ({ ...w, oracle: o }))), waitingCron(env), dreadCron(env).then(() => archiveCron(env)), repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env).then(() => laneMoves(env)), weekLessons(env)]; // the last three run once, then skip (lanes: src/lanes.js)
+    jobs.push(networkCron(env));
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));
   },

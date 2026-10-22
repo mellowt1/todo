@@ -71,6 +71,10 @@ export const REACTS = {
   'dinner.away': ['kitchen', 'morning'], 'dinner.back': ['kitchen', 'morning'],
   'vacancy.found': ['todo'],
   'email.received': ['hub'], 'email.sorted': ['hub'],
+  // The Network map is a Morning page: its changes stay in the hub, a Reach out lands in To-do, a
+  // contact logged from To-do or the hub shows on Morning's map.
+  'person.added': ['hub'], 'person.updated': ['hub'], 'person.deleted': ['hub'], 'person.imported': ['hub'],
+  'person.reach': ['todo'], 'person.contacted': ['morning'], 'tie.added': ['hub'], 'tie.removed': ['hub'],
 };
 // The rule targets that are stars. The mail target is the hub's own work; REACTS says where mail goes.
 const TARGET_STAR = { todo: 'todo', kitchen: 'kitchen' };
@@ -86,6 +90,9 @@ export const LABELS = {
   'oracle.asked': 'Weekly question', 'oracle.answered': 'Question answered',
   'dinner.away': 'Out for dinner', 'dinner.back': 'Back for dinner',
   'vacancy.found': 'Vacancy found', 'email.received': 'Mail in', 'email.sorted': 'Mail sorted',
+  'person.added': 'Person added', 'person.updated': 'Person changed', 'person.deleted': 'Person removed',
+  'person.imported': 'LinkedIn import', 'person.reach': 'Reach out task', 'person.contacted': 'Contact logged',
+  'tie.added': 'Link added', 'tie.removed': 'Link removed',
   'feed.drop': 'Ticket drop', 'feed.job': 'Job ran', 'feed.workout': 'Workout', 'feed.note': 'Note',
 };
 export function label(type) {
