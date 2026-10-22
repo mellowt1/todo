@@ -736,11 +736,18 @@
 
   // A task the hub made can carry a link (a vacancy's page): a small icon that opens it.
   const SAFE_LINK = /^https?:\/\//i;
+  // A link into Morning (the Network map's "Reach out to ..." card) gets the code on the way out,
+  // never in the stored task: the home-screen app and Safari do not share storage on the iPhone.
+  const MORNING = 'https://mellowt1.github.io/morning/';
+  function hrefOf(link) {
+    if (!link.startsWith(MORNING)) return link;
+    try { const u = new URL(link); u.searchParams.set('c', code); return u.href; } catch (e) { return link; }
+  }
   function linkHtml(it) {
     if (typeof it.link !== 'string' || !SAFE_LINK.test(it.link)) return '';
     let host = '';
     try { host = new URL(it.link).hostname.replace(/^www\./, ''); } catch (e) { return ''; }
-    return '<a class="link" href="' + esc(it.link) + '" target="_blank" rel="noopener noreferrer" aria-label="Open link, ' + esc(host) + '" title="' + esc(host) + '">' +
+    return '<a class="link" href="' + esc(hrefOf(it.link)) + '" target="_blank" rel="noopener noreferrer" aria-label="Open link, ' + esc(host) + '" title="' + esc(host) + '">' +
       '<svg class="ic" width="20" height="20"><use href="#i-link"/></svg></a>';
   }
 
