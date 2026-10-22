@@ -22,6 +22,9 @@ function world() {
     t('build0000001', 'Add birthdays to Day', 'build'),
     t('build0000002', 'A sketch for the kitchen app', 'build'),
     t('fun000000001', 'Play a flight game', 'fun'),
+    t('other0000001', 'Sam: Fix the router', 'others'),
+    t('other0000002', 'Ana: Read her essay', 'others'),
+    t('other0000003', 'Sam: Lend the ladder', 'others'),
     t('soon00000001', 'Renew the passport', 'soon'),
     t('today0000001', 'Water the plants', 'today'),
   ].map((i) => [i.id, i]));
@@ -67,7 +70,7 @@ for (const [name, viewport, scheme] of [['lanes-phone', { width: 390, height: 84
   // The move menu sends a task to Build.
   await page.click('.row[data-id="today0000001"] .text', { button: 'right' });
   await page.waitForSelector('.menu:not([hidden]) [data-move="build"]');
-  check((await page.$$eval('.menu [data-move]', (b) => b.map((x) => x.textContent))).join() === 'Today,Soon,Someday,Build,Fun', name + ': the menu moves to Today, Soon, Someday, Build or Fun');
+  check((await page.$$eval('.menu [data-move]', (b) => b.map((x) => x.textContent))).join() === 'Today,Soon,Someday,Build,Fun,Others', name + ': the menu moves to Today, Soon, Someday, Build, Fun or Others');
   await page.click('.menu [data-move="build"]');
   await sync();
   check(w.items.today0000001.section === 'build', name + ': moved to Build');
@@ -79,11 +82,12 @@ for (const [name, viewport, scheme] of [['lanes-phone', { width: 390, height: 84
   await page.waitForTimeout(400);
   check(await page.textContent('#title') === (phone ? 'Lanes' : 'Build'), name + ': the title says ' + await page.textContent('#title'));
   const rows = await order(page);
-  check(JSON.stringify(rows) === JSON.stringify(phone ? ['label:Build', 'today0000001', 'build0000001', 'build0000002', 'label:Fun', 'fun000000001'] : ['today0000001', 'build0000001', 'build0000002']), name + ': the lane lists its tasks ' + JSON.stringify(rows));
+  check(JSON.stringify(rows) === JSON.stringify(phone ? ['label:Build', 'today0000001', 'build0000001', 'build0000002', 'label:Fun', 'fun000000001', 'label:Others', 'label:Ana', 'other0000002', 'label:Sam', 'other0000001', 'other0000003'] : ['today0000001', 'build0000001', 'build0000002']), name + ': the lane lists its tasks ' + JSON.stringify(rows));
   if (phone) check((await page.textContent('.sublabel-lane span')) === '3', name + ': the Build head counts 3');
-  if (phone) check((await page.textContent('#switcher [data-section="lanes"] .scount')) === '4', name + ': the switcher counts the lanes');
+  if (phone) check((await page.textContent('#switcher [data-section="lanes"] .scount')) === '7', name + ': the switcher counts the lanes');
   else check((await page.textContent('.nav-item[data-section="build"] .count')) === '3', name + ': the sidebar counts Build');
-  await page.screenshot({ path: file(name) });
+  if (phone) check((await page.textContent('.row[data-id="other0000001"] .tname')) === 'Fix the router', name + ': an Others row leaves the name to its head');
+  await page.screenshot({ path: file(name + '-tab'), fullPage: true });
 
   // The edit sheet: the lane group shows the lane; Soon takes it back out.
   await page.click('.row[data-id="build0000002"] .text');

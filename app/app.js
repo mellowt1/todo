@@ -13,12 +13,17 @@
   const SECTIONS = ['today', 'soon', 'someday'];
   // Lanes (2026-10-21): tasks kept apart from the three sections, all on one Lanes tab on the
   // phone (grouped), a line each in the PC sidebar. A lane is a task's section like any other.
-  const LANES = ['build', 'fun'];
+  const LANES = ['build', 'fun', 'others'];
+  // Others (2026-10-22): tasks done for other people. The person is the name in front of the
+  // text ("Nick: taxes overview"); the lane shows a head per person and the task without it.
+  // The same rule as the Energy section's PERSON (worker/src/energy.js), with the name captured.
+  const FOR_WHOM = /^(\p{Lu}[\p{L}'-]{1,23}): /u;
+  const personOf = (it) => { const m = it.text.match(FOR_WHOM); return m && !NOT_A_PERSON.has(m[1]) ? m[1] : ''; };
   const PLACES = SECTIONS.concat(LANES); // everywhere a task can be
-  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done', lanes: 'Lanes', build: 'Build', fun: 'Fun' };
+  const LABEL = { today: 'Today', soon: 'Soon', someday: 'Someday', done: 'Done', lanes: 'Lanes', build: 'Build', fun: 'Fun', others: 'Others' };
   // Where a new task lands: the section on screen, or the first lane on the Lanes tab.
   const addTo = () => (ui.section === 'lanes' ? LANES[0] : ui.section);
-  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.', lanes: 'Nothing in the lanes.', build: 'No app ideas waiting.', fun: 'Nothing fun lined up yet.' };
+  const EMPTY = { today: 'Nothing for today.', soon: 'Nothing coming up.', someday: 'Nothing for someday.', lanes: 'Nothing in the lanes.', build: 'No app ideas waiting.', fun: 'Nothing fun lined up yet.', others: 'Nothing for other people.' };
   const LEVELS = ['wired', 'normal', 'drained'];
   const LNAME = { wired: 'Wired', normal: 'Normal', drained: 'Drained' };
   const FILL = { wired: 12, normal: 7, drained: 2.5 };
@@ -224,7 +229,10 @@
     }));
     // Soon: "this week" tasks first (2026-10-21), sorted the same way among themselves.
     const wk = (it) => (section === 'soon' && it.week === true ? 0 : 1);
+    // Others: person by person (A to Z, no name last), each person's tasks sorted as usual.
+    const who = (it) => (section === 'others' ? personOf(it).toLowerCase() || '￿' : '');
     return rows.sort((a, b) => {
+      if (who(a) !== who(b)) return who(a) < who(b) ? -1 : 1;
       if (wk(a) !== wk(b)) return wk(a) - wk(b);
       const ka = key.get(a.id), kb = key.get(b.id);
       if (ka && kb) return ka < kb ? -1 : ka > kb ? 1 : b.pos - a.pos;
@@ -697,7 +705,9 @@
     if (withSkill && !it.done && LEVELS.includes(it.energy)) meta += '<span class="tbatt" title="' + LNAME[it.energy] + ' energy">' + battSvg(it.energy, LNAME[it.energy] + ' energy') + '</span>';
     // One slot at the right: the skill the task pays most into (a letter's Defence, an Apply's Slayer).
     if (withSkill) meta += skillSlot(it);
-    return '<span class="tname">' + esc(p.name) + '</span>' + (meta ? '<span class="tmeta">' + meta + '</span>' : '');
+    // In Others the person's name is the head above, so the row leaves it out (the text keeps it).
+    const shown = it.section === 'others' && !it.done && personOf(it) ? p.name.replace(FOR_WHOM, '') : p.name;
+    return '<span class="tname">' + esc(shown) + '</span>' + (meta ? '<span class="tmeta">' + meta + '</span>' : '');
   }
 
   function dayLabel(t) {
@@ -913,7 +923,10 @@
       const lanesTab = ui.section === 'lanes';
       const laneHead = (it, i) => (i === 0 || rows[i - 1].section !== it.section
         ? '<li class="sublabel sublabel-lane">' + LABEL[it.section] + '<span>' + rows.filter((r) => r.section === it.section).length + '</span></li>' : '');
-      html = rows.map((it, i) => (lanesTab ? laneHead(it, i) : label(i)) + rowHtml(it, justAdded.has(it.id))).join('');
+      // Others: a quiet head for each person.
+      const personHead = (it, i) => (it.section === 'others' && (i === 0 || rows[i - 1].section !== 'others' || personOf(rows[i - 1]) !== personOf(it))
+        ? '<li class="sublabel sublabel-person">' + esc(personOf(it) || 'Someone else') + '</li>' : '');
+      html = rows.map((it, i) => (lanesTab ? laneHead(it, i) : label(i)) + personHead(it, i) + rowHtml(it, justAdded.has(it.id))).join('');
       if (!rows.length) {
         emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
           : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];

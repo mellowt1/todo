@@ -48,7 +48,7 @@ afterEach(() => _setDesker(null));
 
 test('toActions: at most three, an unknown section is soon, drafts lose their dashes', () => {
   const acts = toActions({ actions: [
-    { kind: 'todo', text: ' Fix  the bike ', section: 'others' },
+    { kind: 'todo', text: ' Fix  the bike ', section: 'elsewhere' },
     { kind: 'todo', text: 'Dad: print the form', section: 'someday' },
     { kind: 'draft', text: 'Hi — see you soon', to: 'Kim', lang: 'xx' },
     { kind: 'todo', text: 'A fourth one', section: 'today' },

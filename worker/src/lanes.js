@@ -23,6 +23,13 @@ export const MOVES = {
     from: ['soon'],
     move: ['2marezd8bw9tz7mq', 'rpm4axl0ci35ztuq', 'q9gg1l8rum1yitur', '4kmoubnxtmi1xb3c'],
   },
+  // Others (Paul confirmed the five "Name:" tasks, 2026-10-22): tasks done for other people, grouped by
+  // the name in front. The text stays "Nick: ..."; the app shows the name as a head.
+  others: {
+    key: 'lanes:others:v1',
+    from: ['soon', 'someday'],
+    move: ['1lpspa7ianucoa4a', 'ckeobxr0ztzyd2fn', 'j8xyiktlamz87ra1', '4tny5i7xqa9ivvcl', 'kk15a8bz1irgkin4'],
+  },
 };
 
 /* Pure: one lane's picks against the list -> the ops. */

@@ -367,6 +367,7 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 .seg:not(:has(> [aria-checked="true"], > [aria-current="page"], > [aria-selected="true"]))::before { opacity: 0; }
 .sublabel-lane { display: flex; justify-content: space-between; }
 .sublabel-lane span { font-weight: 400; }
+.sublabel-person { padding-top: 8px; font-weight: 400; font-style: italic; }
 .nav-head { padding: 14px 12px 4px; }
 /* Return (2026-10-21): the small sheet that asks for a date. */
 .ret-sheet { gap: 12px; }

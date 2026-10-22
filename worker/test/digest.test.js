@@ -79,7 +79,7 @@ test('newestMirror: the newest written card, pending ones skipped', () => {
 test('deskCounts, todoCounts, liftPart, parkedPart', () => {
   assert.deepEqual(deskCounts([{ kinds: 'todo,draft', outcome: '["approved","skipped"]' }, { kinds: 'answer', outcome: 'not json' }]),
     { days: 14, lines: 2, kinds: { todo: 1, draft: 1, answer: 1 }, outcomes: { approved: 1, skipped: 1 } });
-  assert.deepEqual(todoCounts([{ section: 'today' }, { section: 'soon' }, { section: 'soon', done: true }, { section: 'someday' }]), { open: 3, today: 1, soon: 1, someday: 1, build: 0, fun: 0 });
+  assert.deepEqual(todoCounts([{ section: 'today' }, { section: 'soon' }, { section: 'soon', done: true }, { section: 'someday' }]), { open: 3, today: 1, soon: 1, someday: 1, build: 0, fun: 0, others: 0 });
   const lift = liftPart({ at: 'x', summary: { next: { name: 'Legs' }, nextDay: null, days: [false, false, false, false, false, false, false], workouts: [
     { name: 'Push', start: NOW - DAY }, { name: 'Pull', start: NOW - 3 * DAY }, { name: 'Legs', start: NOW - 5 * DAY }, { name: 'Old', start: NOW - 9 * DAY },
   ] } }, NOW);
@@ -154,7 +154,7 @@ test('buildDigest: every part from a filled hub, masked', async () => {
   assert.deepEqual(d.lift.last, [{ name: 'Legs', date: '2026-10-18' }]);
   assert.equal(d.lift.next, 'Arms');
   assert.deepEqual(d.intake, { week: 1 });
-  assert.deepEqual(d.todos, { open: 2, today: 1, soon: 1, someday: 0, build: 0, fun: 0 });
+  assert.deepEqual(d.todos, { open: 2, today: 1, soon: 1, someday: 0, build: 0, fun: 0, others: 0 });
   assert.deepEqual(d.parked, [{ text: 'Bluetooth unlock page', from: 'memory', since: '2026-10-05', days: 14 }]);
 });
 
