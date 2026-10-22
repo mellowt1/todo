@@ -256,7 +256,7 @@ test('a page that cannot be read asks for the text; a failure from Claude is kep
     await drain(e);
     role = (await get(e)).body.roles[0];
     assert.equal(role.state, 'failed');
-    assert.match(role.error, /overloaded/);
+    assert.equal(role.error, 'Claude could not read this one just now. Try again later.', 'plain words, never the technical reason');
     _setClaude({ read: async () => ({ requirements: READS['Policy Officer, Defence Industry'] }) });
     await post(e, '/role/' + r.body.role.id + '/recheck', {});
     await drain(e);
@@ -359,4 +359,22 @@ test('gapsFrom: past and unread roles do not count', () => {
   ];
   const g = gapsFrom(roles, [], []);
   assert.deepEqual(g.map((x) => [x.key, x.roles, x.active]), [['x', ['a'], 1]]);
+});
+
+test('a new side lets go of every check made against the old one before checking again; closed gaps stay', async () => {
+  const e = env();
+  await post(e, '/role', { title: 'Beleidsmedewerker internationale samenwerking', text: JOB });
+  await drain(e);
+  await post(e, '/side', { text: 'Made-up line one\nMade-up MA degree line' });
+  await drain(e);
+  await post(e, '/gap/french-b2/close', { note: 'Passed a made-up exam' });
+  await post(e, '/side', { text: 'Only one made-up line now' });
+  const before = (await get(e)).body.roles[0].reqs;
+  assert.deepEqual(before.map((q) => q.status).sort(), ['have', 'unknown', 'unknown', 'unknown', 'unknown']);
+  assert.equal(before.find((q) => q.key === 'french-b2').status, 'have');
+  assert.ok(before.every((q) => q.status !== 'have' || (q.line && q.line.source === 'closed')), 'never a Have pointing at a line that is gone');
+  await drain(e);
+  const after = (await get(e)).body.roles[0].reqs;
+  assert.ok(after.every((q) => q.status !== 'unknown'));
+  assert.equal(after.find((q) => q.key === 'french-b2').status, 'have');
 });

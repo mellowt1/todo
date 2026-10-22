@@ -362,8 +362,9 @@ export async function skillsTarget(env, msg, now = Date.now()) {
   } catch (e) {
     const why = String((e && e.message) || 'failed').slice(0, 120);
     if (/D1|SQLITE/i.test(why)) throw e;
+    console.log('skills failed', role.id, (e && e.name) || 'Error');
     await env.HUB_DB.prepare("UPDATE skill_roles SET state = CASE WHEN state = 'past' THEN 'past' ELSE 'failed' END, error = ?, updated_at = ? WHERE id = ?")
-      .bind('Claude could not read this one: ' + why, iso(now), role.id).run();
+      .bind('Claude could not read this one just now. Try again later.', iso(now), role.id).run();
     return { failed: role.id };
   }
 }
@@ -437,6 +438,7 @@ async function setSide(env, b, now) {
   const at = iso(now);
   await runAll(env, [
     env.HUB_DB.prepare("DELETE FROM skill_lines WHERE source = 'cv'"),
+    env.HUB_DB.prepare("UPDATE skill_reqs SET status = 'unknown', line_id = NULL, why = NULL WHERE line_id IS NULL OR line_id NOT LIKE 'c%'"),
     ...got.lines.map((t, i) => env.HUB_DB.prepare("INSERT INTO skill_lines (id, text, source, pos, created_at) VALUES (?, ?, 'cv', ?, ?)").bind('l' + (i + 1), t, i, at)),
   ]);
   await env.HUB_KV.put('skills:side', JSON.stringify({ at, lines: got.lines.length }));
@@ -524,7 +526,7 @@ async function gapAct(env, key, sub, b, now) {
   } else if (act === 'options' && sub.length === 1) {
     const roles = await rolesAsking(env, key);
     let got;
-    try { got = await claude.options(env, g.label, roles.map((r) => r.title + (r.org ? ' (' + r.org + ')' : ''))); } catch (e) { return bad(502, 'Claude could not answer just now'); }
+    try { got = await claude.options(env, g.label, roles.map((r) => r.title + (r.org ? ' (' + r.org + ')' : ''))); } catch (e) { return bad(503, 'Claude could not answer just now'); }
     const options = (got.options || []).slice(0, 3).map((o) => ({ title: line(o.title, 80), text: line(o.text, 240) })).filter((o) => o.title);
     await env.HUB_DB.prepare('UPDATE skill_gaps SET options = ?, options_at = ?, updated_at = ? WHERE key = ?').bind(JSON.stringify(options), at, at, key).run();
     await emit(env, 'gap.options', {}, now, 'Options asked');
