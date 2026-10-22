@@ -67,7 +67,7 @@ test('cleanNew: who, what and a channel; 7 days by default; bounded', () => {
   assert.equal(CHASE_DAYS, 7);
   assert.equal(APPLY_DAYS, 14);
   const f = cleanNew({ who: ' Gemeente ', what: 'the parking permit', channel: 'letter' }, '2026-10-21');
-  assert.deepEqual(f, { who: 'Gemeente', what: 'the parking permit', channel: 'letter', chase_days: 7, for_whom: null, source_item: null, since: '2026-10-21', next_chase: '2026-10-28' });
+  assert.deepEqual(f, { who: 'Gemeente', what: 'the parking permit', channel: 'letter', chase_days: 7, for_whom: null, source_item: null, since: '2026-10-21', next_chase: '2026-10-28', person: null });
   assert.equal(cleanNew({ who: 'A', what: 'B', channel: 'email', chaseDays: 3 }, '2026-10-21').next_chase, '2026-10-24');
   assert.match(cleanNew({ what: 'B', channel: 'email' }, '2026-10-21').error, /who/);
   assert.match(cleanNew({ who: 'A', what: 'B', channel: 'fax' }, '2026-10-21').error, /channel/);

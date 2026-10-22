@@ -31,6 +31,7 @@ import { CODE, ID, safeEqual, bearer, cleanOp } from './todo.js';
 import { acceptEvent } from './hub.js';
 import { local, addDays, zoned } from './morning.js';
 import { DUE_END } from './tidy.js';
+import { touchPerson } from './people.js';
 
 export const CHASE_DAYS = 7;
 export const APPLY_DAYS = 14;
@@ -71,7 +72,9 @@ export function cleanNew(body, today) {
   if (!Number.isInteger(days) || days < 1 || days > 90) return { error: 'chaseDays: 1 to 90' };
   const forWhom = body.forWhom == null || body.forWhom === '' ? null : clean(body.forWhom, 40) || null;
   const sourceItem = typeof body.sourceItem === 'string' && ID.test(body.sourceItem) ? body.sourceItem : null;
-  return { who, what, channel: body.channel, chase_days: days, for_whom: forWhom, source_item: sourceItem, since: today, next_chase: addDays(today, days) };
+  // A wait made from a person's card on the Network map (src/network.js): its answer moves Last contact.
+  const person = typeof body.person === 'string' && /^[a-z0-9]{12}$/.test(body.person) ? body.person : null;
+  return { who, what, channel: body.channel, chase_days: days, for_whom: forWhom, source_item: sourceItem, since: today, next_chase: addDays(today, days), person };
 }
 
 /* The chase task for an item. */
@@ -97,7 +100,7 @@ export function view(r, today) {
   return {
     id: r.id, who: r.who, what: r.what, since: r.since, channel: r.channel, chaseDays: r.chase_days,
     nextChase: r.next_chase, forWhom: r.for_whom, source: r.source, state: r.state, chases: r.chases,
-    chaseDue: r.state === 'open' && r.next_chase <= today, chaseTask: r.chase_task, resolvedAt: r.resolved_at,
+    chaseDue: r.state === 'open' && r.next_chase <= today, chaseTask: r.chase_task, resolvedAt: r.resolved_at, person: r.person || null,
   };
 }
 
@@ -128,9 +131,9 @@ export async function createItem(env, fields, source, now = Date.now()) {
   const at = new Date(now).toISOString();
   const id = rand();
   const ins = await env.HUB_DB.prepare(
-    `INSERT INTO waiting (id, who, what, since, chase_days, next_chase, channel, for_whom, source, source_item, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`
-  ).bind(id, fields.who, fields.what, fields.since, fields.chase_days, fields.next_chase, fields.channel, fields.for_whom, source, fields.source_item, at, at).run();
+    `INSERT INTO waiting (id, who, what, since, chase_days, next_chase, channel, for_whom, source, source_item, person, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`
+  ).bind(id, fields.who, fields.what, fields.since, fields.chase_days, fields.next_chase, fields.channel, fields.for_whom, source, fields.source_item, fields.person || null, at, at).run();
   if (!ins.meta || ins.meta.changes === 0) return null; // that task already made an item
   await emit(env, 'waiting.created', id, source === 'apply' ? 'todo' : source, now, source === 'apply' ? { auto: 'apply' } : {});
   return getRow(env, id);
@@ -166,6 +169,7 @@ export async function actOn(env, id, body, source, now = Date.now()) {
     await tickChase(env, row, now);
     await env.HUB_DB.prepare("UPDATE waiting SET state = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?").bind(at, at, id).run();
     await emit(env, 'waiting.resolved', id, source, now);
+    if (row.person) await touchPerson(env, row.person, today, 'answer', source, now);
     return getRow(env, id);
   }
   if (row.state !== 'open') return { status: 409, error: 'already resolved' };
