@@ -325,7 +325,7 @@ test('the day after its closing date a role is past and leaves the gaps; it can 
   await post(e, '/side', { text: 'Made-up line one\nMade-up MA degree line' });
   await drain(e);
   assert.ok((await get(e)).body.gaps.length > 0);
-  assert.deepEqual(await skillsCron(e, NOW), { past: 1, retried: 0 });
+  assert.deepEqual(await skillsCron(e, NOW), { past: 1, retried: 0, rechecked: 0 });
   let all = (await get(e)).body;
   assert.equal(all.roles[0].state, 'past');
   assert.deepEqual(all.gaps, []);
@@ -413,4 +413,22 @@ test('a page that could not be read is tried once more by the cron, then waits f
     assert.equal((await get(e)).body.roles[0].state, 'needs_text');
     assert.equal((await skillsCron(e, NOW)).retried, 0, 'only once');
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('his side changed after a role was checked (also outside the page): the cron checks it again', async () => {
+  const e = env();
+  await post(e, '/role', { title: 'Beleidsmedewerker internationale samenwerking', text: JOB });
+  await drain(e);
+  await post(e, '/side', { text: 'Made-up line one\nMade-up MA degree line' });
+  await drain(e);
+  assert.equal((await skillsCron(e, NOW)).rechecked, 0, 'checked after the side: nothing to do');
+  const later = NOW + 3600000;
+  e.HUB_DB.db.prepare("INSERT INTO skill_lines (id, text, source, pos, created_at) VALUES ('l3', 'Made-up nationality line', 'cv', 2, ?)").run(new Date(later).toISOString());
+  await e.HUB_KV.put('skills:side', JSON.stringify({ at: new Date(later).toISOString(), lines: 3 }));
+  const before = calls.match.length;
+  assert.equal((await skillsCron(e, later + 60000)).rechecked, 1);
+  await drain(e, later + 60000);
+  assert.equal(calls.match.length, before + 1);
+  assert.ok(calls.match.at(-1).lines.some((l) => l.text === 'Made-up nationality line'));
+  assert.equal((await skillsCron(e, later + 120000)).rechecked, 0, 'once');
 });

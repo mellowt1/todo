@@ -388,7 +388,17 @@ export async function skillsCron(env, now = Date.now()) {
     await env.HUB_DB.prepare("UPDATE skill_roles SET state = 'reading', updated_at = ? WHERE id = ?").bind(iso(now), role.id).run();
     await enqueue(env, 'read', role, now);
   }
-  return { past: r.meta ? r.meta.changes : 0, retried: (results || []).length };
+  // A role last checked before his side changed is checked again (a side written outside the page, too).
+  const side = await env.HUB_KV.get('skills:side', 'json').catch(() => null);
+  let stale = [];
+  if (side && side.at) {
+    ({ results: stale } = await env.HUB_DB.prepare("SELECT * FROM skill_roles WHERE state = 'ready' AND matched_at IS NOT NULL AND matched_at < ? ORDER BY deadline IS NULL, deadline LIMIT ?").bind(side.at, MAX_RECHECK).all());
+    for (const role of stale || []) {
+      await env.HUB_DB.prepare("UPDATE skill_roles SET state = 'reading', updated_at = ? WHERE id = ?").bind(iso(now), role.id).run();
+      await enqueue(env, 'match', role, now);
+    }
+  }
+  return { past: r.meta ? r.meta.changes : 0, retried: (results || []).length, rechecked: (stale || []).length };
 }
 
 /* ---------- Routes ---------- */
