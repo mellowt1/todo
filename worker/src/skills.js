@@ -290,7 +290,15 @@ export async function everything(env, now = Date.now()) {
 async function fetchPosting(link) {
   const r = await fetch(link, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (paul-hub skills)', Accept: 'text/html' }, signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error('page ' + r.status);
-  return postingFromHtml(await r.text());
+  return bestPosting(await r.text());
+}
+
+/* The longer of the page's JobPosting data and its own text: werkenvoornederland.nl puts only one line
+ * in its JobPosting and the vacancy in the page; werkenbijdefensie.nl the other way round (2026-10-23). */
+export function bestPosting(html) {
+  const data = postingFromHtml(html);
+  const page = postingFromHtml(String(html).replace(/<script[^>]*application\/ld\+json[^>]*>[\s\S]*?<\/script>/gi, ''));
+  return (page.text || '').length > (data.text || '').length ? { ...page, title: data.title || page.title, organisation: data.organisation || page.organisation } : data;
 }
 
 async function readRole(env, role, now) {
@@ -374,7 +382,13 @@ export async function skillsCron(env, now = Date.now()) {
   if (!env.HUB_DB) return { skip: 'not configured' };
   const today = local(now).date;
   const r = await env.HUB_DB.prepare("UPDATE skill_roles SET state = 'past', updated_at = ? WHERE deadline IS NOT NULL AND deadline < ? AND state != 'past'").bind(iso(now), today).run();
-  return { past: r.meta ? r.meta.changes : 0 };
+  // A page that could not be read is tried once more by itself (it may have been down), then waits for text.
+  const { results } = await env.HUB_DB.prepare("SELECT * FROM skill_roles WHERE state = 'needs_text' AND link IS NOT NULL AND runs < 2").all();
+  for (const role of results || []) {
+    await env.HUB_DB.prepare("UPDATE skill_roles SET state = 'reading', updated_at = ? WHERE id = ?").bind(iso(now), role.id).run();
+    await enqueue(env, 'read', role, now);
+  }
+  return { past: r.meta ? r.meta.changes : 0, retried: (results || []).length };
 }
 
 /* ---------- Routes ---------- */

@@ -325,7 +325,7 @@ test('the day after its closing date a role is past and leaves the gaps; it can 
   await post(e, '/side', { text: 'Made-up line one\nMade-up MA degree line' });
   await drain(e);
   assert.ok((await get(e)).body.gaps.length > 0);
-  assert.deepEqual(await skillsCron(e, NOW), { past: 1 });
+  assert.deepEqual(await skillsCron(e, NOW), { past: 1, retried: 0 });
   let all = (await get(e)).body;
   assert.equal(all.roles[0].state, 'past');
   assert.deepEqual(all.gaps, []);
@@ -377,4 +377,40 @@ test('a new side lets go of every check made against the old one before checking
   const after = (await get(e)).body.roles[0].reqs;
   assert.ok(after.every((q) => q.status !== 'unknown'));
   assert.equal(after.find((q) => q.key === 'french-b2').status, 'have');
+});
+
+test('a vacancy page: the longer of its JobPosting data and its own text', async () => {
+  const { bestPosting } = await import('../src/skills.js');
+  const long = 'Wat vraag je? ' + 'Een masteropleiding en ervaring met verandertrajecten. '.repeat(12);
+  // werkenvoornederland.nl: one line in the JobPosting, the vacancy in the page
+  const wvn = '<html><head><title>Vacature X</title><script type="application/ld+json">{"@type":"JobPosting","title":"Senior Adviseur","description":"Senior Adviseur in Den Haag","hiringOrganization":{"name":"Ministerie van Defensie"}}</script></head><body><main><h1>Senior Adviseur</h1><p>' + long + '</p></main></body></html>';
+  const a = bestPosting(wvn);
+  assert.ok(a.text.length > 400 && a.text.includes('verandertrajecten'), 'the page text wins');
+  assert.equal(a.title, 'Senior Adviseur');
+  assert.equal(a.organisation, 'Ministerie van Defensie');
+  // werkenbijdefensie.nl: the vacancy in the JobPosting, an empty page that builds itself
+  const wbd = '<html><script type="application/ld+json">{"@type":"JobPosting","title":"Adviseur","description":"<p>' + long + '</p>"}</script><body><div id="app"></div></body></html>';
+  const b = bestPosting(wbd);
+  assert.ok(b.text.includes('verandertrajecten') && b.title === 'Adviseur', 'the JobPosting wins');
+});
+
+test('a page that could not be read is tried once more by the cron, then waits for text', async () => {
+  const e = env();
+  const now = Date.now();
+  const item = { id: 'applytask0009', text: 'Apply: Senior Adviseur (Defensie)', section: 'soon', done: false, doneAt: null, updatedAt: now, pos: now, link: 'https://example.org/jobs/9' };
+  await stub(e).fetch('https://list/apply', { method: 'POST', body: JSON.stringify({ ops: [{ op: 'upsert', item }] }) });
+  const realFetch = globalThis.fetch;
+  let pages = 0;
+  globalThis.fetch = async () => { pages++; return new Response('<html><body><div id="app"></div></body></html>', { status: 200 }); };
+  try {
+    await post(e, '/track', { taskId: 'applytask0009' });
+    await drain(e);
+    assert.equal((await get(e)).body.roles[0].state, 'needs_text');
+    assert.equal((await skillsCron(e, NOW)).retried, 1);
+    assert.equal((await get(e)).body.roles[0].state, 'reading');
+    await drain(e);
+    assert.equal(pages, 2);
+    assert.equal((await get(e)).body.roles[0].state, 'needs_text');
+    assert.equal((await skillsCron(e, NOW)).retried, 0, 'only once');
+  } finally { globalThis.fetch = realFetch; }
 });
