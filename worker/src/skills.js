@@ -62,7 +62,7 @@ export const MATCH_PROMPT = "Compare these job requirements with Paul's own line
 export const OPTIONS_PROMPT = "Paul wants to close one gap for the jobs he tracks. Give three concrete options he can start himself (a course, an exam, a project, a conversation): a short title and one sentence each. No invented prices, dates or providers; write 'check' where a detail must be looked up.";
 
 const Read = z.object({ requirements: z.array(z.object({ kind: z.enum(KINDS), label: z.string().max(100), must: z.boolean() })).max(40) });
-const Match = z.object({ matches: z.array(z.object({ label: z.string().max(100), status: z.enum(STATUS), line: z.string().max(20).nullable(), why: z.string().max(160).nullable() })) });
+const Match = z.object({ matches: z.array(z.object({ n: z.number().int().describe('the number of the requirement'), label: z.string().max(100), status: z.enum(STATUS), line: z.string().max(20).nullable(), why: z.string().max(160).nullable() })) });
 const Options = z.object({ options: z.array(z.object({ title: z.string().max(80), text: z.string().max(240) })).max(3) });
 
 const line = (v, max) => typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
@@ -140,12 +140,14 @@ export function fromApplyTask(text) {
   return title ? { title, org: o ? line(o[2], 120) : null, deadline } : null;
 }
 
-/* Claude's matches -> rows; a Have or Partly that names no line of his side becomes Missing. */
+/* Claude's matches -> rows, by the requirement's number (its label when there is none: Claude may
+ * reword a label, 2026-10-23); a Have or Partly that names no line of his side becomes Missing. */
 export function settleMatches(reqs, matches, lineIds, closedByKey = {}) {
   const byKey = new Map(matches.map((m) => [keyOf(m.label), m]));
-  return reqs.map((r) => {
+  const byN = new Map(matches.filter((m) => Number.isInteger(m.n)).map((m) => [m.n, m]));
+  return reqs.map((r, i) => {
     if (closedByKey[r.key]) return { ...r, status: 'have', line_id: closedByKey[r.key], why: 'You closed this gap' };
-    const m = byKey.get(r.key);
+    const m = byN.get(i + 1) || byKey.get(r.key);
     if (!m) return { ...r, status: 'missing', line_id: null, why: null };
     const id = typeof m.line === 'string' ? m.line.trim() : '';
     if ((m.status === 'have' || m.status === 'partly') && lineIds.has(id)) return { ...r, status: m.status, line_id: id, why: m.why ? line(m.why, 160) : null };
@@ -208,7 +210,7 @@ const real = {
   read: (env, text, labels) => call(env, READ_PROMPT,
     'Existing labels:\n' + (labels.length ? labels.map((l) => '- ' + l).join('\n') : '(none yet)') + '\n\n<vacancy>\n' + text + '\n</vacancy>', Read, 'medium'),
   match: (env, reqs, lines) => call(env, MATCH_PROMPT,
-    "Paul's lines:\n" + lines.map((l) => l.id + ': ' + l.text).join('\n') + '\n\nRequirements:\n' + reqs.map((r) => '- ' + r.label + ' (' + r.kind + (r.must ? '' : ', nice to have') + ')').join('\n'), Match, 'medium'),
+    "Paul's lines:\n" + lines.map((l) => l.id + ': ' + l.text).join('\n') + '\n\nRequirements (answer each once, with its number):\n' + reqs.map((r, i) => (i + 1) + '. ' + r.label + ' (' + r.kind + (r.must ? '' : ', nice to have') + ')').join('\n'), Match, 'medium'),
   options: (env, label, roles) => call(env, OPTIONS_PROMPT,
     'The gap: ' + label + '\nThe roles that ask for it: ' + roles.join('; '), Options, 'low'),
 };

@@ -432,3 +432,12 @@ test('his side changed after a role was checked (also outside the page): the cro
   assert.ok(calls.match.at(-1).lines.some((l) => l.text === 'Made-up nationality line'));
   assert.equal((await skillsCron(e, later + 120000)).rechecked, 0, 'once');
 });
+
+test('matches are taken by number when Claude rewords a label', () => {
+  const reqs = [{ key: 'dutch-nationality', label: 'Dutch nationality' }, { key: 'english-c1', label: 'English C1' }];
+  const out = settleMatches(reqs, [
+    { n: 1, label: 'Dutch nationality or a work permit', status: 'have', line: 'l78', why: 'Nederlands' },
+    { n: 2, label: 'English at C1', status: 'partly', line: 'l5', why: 'fluent' },
+  ], new Set(['l78', 'l5']));
+  assert.deepEqual(out.map((q) => [q.key, q.status, q.line_id]), [['dutch-nationality', 'have', 'l78'], ['english-c1', 'partly', 'l5']]);
+});
