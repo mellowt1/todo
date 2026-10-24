@@ -122,6 +122,11 @@
  *   GET /api/soundtrack/:code     POST /api/soundtrack/:code/(peek | add | remove | played | notnow)
  *   POST /api/hub/soundtrack/day/(played | notnow)
  *
+ * Spotify (src/spotify.js; the to-do's code, Day with Bearer <HUB_SECRET_DAY>): Paul's own developer app;
+ * Play also asks here, and the hub starts the playlist on the Spotify of the device he tapped on.
+ *   GET /api/spotify/:code[/login | /playlists]   GET /api/spotify/callback   POST /api/spotify/:code/(play | disconnect)
+ *   POST /api/hub/spotify/day/play
+ *
  * Archive (src/archive.js; the to-do's code): a task passed on 5 times gets a decision line in To-do and
  * Morning (Do it now, Hand off, Archive, Later); archived tasks sit in D1 `archive` until restored.
  *   GET /api/archive/:code[/list]     POST /api/archive/:code/(later | archive | restore)
@@ -209,6 +214,7 @@ import { handleDigest } from './digest.js';
 import { handleEnergy, handleEnergyDay } from './energy.js';
 import { handleDread, handleDreadDay, dreadCron } from './dread.js';
 import { handleSoundtrack, handleSoundtrackDay } from './soundtrack.js';
+import { handleSpotify, handleSpotifyDay } from './spotify.js';
 import { handleArchive, archiveCron } from './archive.js';
 import { handleOracle, oracleCron } from './oracle.js';
 import { handleSky, markLife } from './sky.js';
@@ -422,7 +428,7 @@ const MODULES = {
   health: (request, env, rest) => handleHealth(request, env, rest, json),
   intake: (request, env, rest, url) => handleIntake(request, env, rest, url, { json, list, code: CODE }),
   event: (request, env, rest, url) => handleEvent(request, env, rest, url, json),
-  hub: (request, env, rest, url) => {
+  hub: (request, env, rest, url, ctx) => {
     const path = rest.join('/');
     if (path === 'lift/day') return handleLiftDay(request, env, json);
     if (path === 'digest') return handleDigest(request, env, json);
@@ -431,6 +437,7 @@ const MODULES = {
     if (path === 'waiting/day') return handleWaitingDay(request, env, json);
     if (rest[0] === 'dread' && rest[1] === 'day') return handleDreadDay(request, env, rest.slice(2), json);
     if (rest[0] === 'soundtrack' && rest[1] === 'day') return handleSoundtrackDay(request, env, rest.slice(2), json);
+    if (rest[0] === 'spotify' && rest[1] === 'day') return handleSpotifyDay(request, env, rest.slice(2), json, ctx);
     if (rest[0] === 'mail' && rest[1] === 'day') return handleMailDay(request, env, rest.slice(2), json);
     return handleHub(request, env, rest, url, json);
   },
@@ -443,6 +450,7 @@ const MODULES = {
   waiting: (request, env, rest) => handleWaiting(request, env, rest, json),
   dread: (request, env, rest) => handleDread(request, env, rest, json),
   soundtrack: (request, env, rest) => handleSoundtrack(request, env, rest, json),
+  spotify: (request, env, rest, url, ctx) => handleSpotify(request, env, rest, url, json, ctx),
   archive: (request, env, rest) => handleArchive(request, env, rest, json),
   oracle: (request, env, rest) => handleOracle(request, env, rest, json),
   sky: (request, env, rest) => handleSky(request, env, rest, json),
@@ -453,13 +461,13 @@ const MODULES = {
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(request) });
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] !== 'api' || !MODULES[parts[1]]) return json({ error: 'not found' }, request, 404);
     try {
-      return await MODULES[parts[1]](request, env, parts.slice(2), url);
+      return await MODULES[parts[1]](request, env, parts.slice(2), url, ctx);
     } catch (e) {
       console.error(parts[1], e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)); // wrangler tail shows it
       return json({ error: 'server' }, request, 500);

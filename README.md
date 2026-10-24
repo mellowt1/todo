@@ -182,6 +182,10 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `POST /api/soundtrack/:code/(peek\|add\|remove)` | the code | `{ url }` reads a pasted playlist link and its name (Spotify oEmbed, no login); `{ level, url, title? }` adds (3 a level at most); `{ level, id }` removes. Set up in To-do only |
 | `POST /api/soundtrack/:code/(played\|notnow)` | the code | `{ level, startedAt?, from: dial \| offer, source }` / `{ startedAt, source }`: events `soundtrack.played` / `soundtrack.declined`, levels and times only; they end the offer |
 | `POST /api/hub/soundtrack/day/(played\|notnow)` | `Bearer HUB_SECRET_DAY` | the same for Day |
+| `GET /api/spotify/:code[/login\|/playlists]` | the code | Spotify, for real (Paul's own developer app; secrets `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_KEY`): `{ configured, connected }`; `login` goes to Spotify's consent page (scopes `playlist-read-private user-read-playback-state user-modify-playback-state`); his playlists for the sheet |
+| `GET /api/spotify/callback` | Spotify (state) | keeps the login in KV `spotify:login`, sealed with AES-GCM under `SPOTIFY_KEY` |
+| `POST /api/spotify/:code/(play\|disconnect)` | the code | `{ uri, kind: phone \| computer }`: plays the playlist on that kind of Spotify device, retrying about 20 s in the background while the app the tap opened comes up |
+| `POST /api/hub/spotify/day/play` | `Bearer HUB_SECRET_DAY` | the same for Day, always the phone |
 | `GET /api/archive/:code[/list]` | the code | Archive: `{ due, archived }` (tasks passed on 5 times since launch), or the ledger |
 | `POST /api/archive/:code/(later\|archive\|restore)` | the code | `{ task, note?, source }`; archive takes the task off the list into D1 `archive`, restore puts it in Soon |
 | `GET /api/oracle/:code[/list]` | the code | the Oracle: `{ current }` (this week's open question) or every past week with its answer |
