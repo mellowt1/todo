@@ -782,3 +782,45 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .ledger-foot span { font-size: 14px; color: var(--text); }
 .ledger-foot button { flex-shrink: 0; min-height: 40px; padding: 0 12px; border-radius: 9px; background: var(--surface); color: var(--accent-text); font-size: 14px; font-weight: 600; }
 .ledger-empty { color: var(--secondary); font-size: 15px; }
+
+/* ---------- Energy soundtrack ----------
+ * Play under the dial, "Music for this?" under the timer, and the sheet with each level's playlists. */
+.play-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; padding: 4px 4px 4px 6px; border-radius: 12px; background: var(--surface); }
+.play-row[hidden], .run-offer[hidden] { display: none; }
+.play-link, .offer-link { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; border-radius: 10px; }
+.play-disc { flex-shrink: 0; width: 34px; height: 34px; border-radius: 17px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; }
+.play-words { min-width: 0; display: flex; flex-direction: column; }
+.play-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.play-meta { font-size: var(--fs-meta); color: var(--secondary); }
+.play-edit { flex-shrink: 0; padding: 0 8px; font-size: 15px; font-weight: 500; }
+.play-link:active, .offer-link:active { opacity: 0.55; }
+#playSetup { margin-top: 0; }
+.running.has-offer { border-radius: 12px 12px 0 0; }
+.run-offer { display: flex; align-items: center; gap: 8px; padding: 2px 8px 4px 8px; border-radius: 0 0 12px 12px; background: var(--accent-soft); box-shadow: inset 0 1px 0 var(--accent-soft); }
+.offer-link { gap: 10px; }
+.offer-link .play-disc { width: 30px; height: 30px; }
+.offer-words { min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.offer-words b { font-weight: 600; }
+.run-btn.offer-not { background: transparent; color: var(--accent-text); padding: 0 10px; }
+.sound-body { display: flex; flex-direction: column; gap: 2px; }
+.sound-level { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: 15px; font-weight: 600; }
+.sound-list { list-style: none; margin: 0; padding: 0; }
+.sound-list li { display: flex; align-items: center; gap: 10px; min-height: 52px; border-bottom: 0.5px solid var(--sep); }
+.sound-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sound-name { font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sound-sub { font-size: var(--fs-meta); color: var(--secondary); }
+.text-btn.sound-remove { flex-shrink: 0; color: var(--danger); font-size: 15px; font-weight: 500; }
+.text-btn.sound-add { align-self: flex-start; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+.sound-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 12px; border-radius: 12px; background: var(--surface); }
+.sound-form input { height: 46px; min-width: 0; padding: 0 12px; border-radius: 10px; background: var(--bg); color: var(--text); font-size: var(--fs-body); border: 1.5px solid var(--sep); }
+.sound-form input:focus { border-color: var(--accent-text); outline: none; }
+.sound-form input.sound-link { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 15px; }
+.sound-hint { margin: 0; font-size: var(--fs-meta); color: var(--secondary); }
+.sound-err { margin: 0; font-size: 15px; color: var(--danger); }
+.sound-btns { display: flex; gap: 10px; margin-top: 4px; }
+.sound-btns button { flex: 1; height: 46px; border-radius: 10px; font-size: var(--fs-body); }
+.sound-cancel { background: var(--sep); color: var(--text); }
+.sound-save { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.sound-save:disabled { opacity: 0.45; }
+.sound-btns button:active { opacity: 0.55; }
+.sound-foot { margin: 10px 0 0; font-size: var(--fs-meta); color: var(--secondary); }

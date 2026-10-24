@@ -178,6 +178,10 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `GET /api/dread/:code` | the code | Dread meter: `{ running, stopped }`, the one timer, settled against the list on every read |
 | `POST /api/dread/:code/(start\|rate\|stop\|undo\|skip)` | the code | `{ task, dread?, source }`; stop takes `done: true` from To-do; skip only `why: "moved"` |
 | `GET/POST /api/hub/dread/day[/start\|/rate\|/stop]` | `Bearer HUB_SECRET_DAY` | the same for Day |
+| `GET /api/soundtrack/:code` | the code | the Energy soundtrack: `{ lists: { wired, normal, drained }, max: 3 }`, Spotify playlists `{ id, title, url, uri }`; the first of a level is what Play opens. Every energy answer carries `play` for the level, every Dread meter answer `offer` ("Music for this?") |
+| `POST /api/soundtrack/:code/(peek\|add\|remove)` | the code | `{ url }` reads a pasted playlist link and its name (Spotify oEmbed, no login); `{ level, url, title? }` adds (3 a level at most); `{ level, id }` removes. Set up in To-do only |
+| `POST /api/soundtrack/:code/(played\|notnow)` | the code | `{ level, startedAt?, from: dial \| offer, source }` / `{ startedAt, source }`: events `soundtrack.played` / `soundtrack.declined`, levels and times only; they end the offer |
+| `POST /api/hub/soundtrack/day/(played\|notnow)` | `Bearer HUB_SECRET_DAY` | the same for Day |
 | `GET /api/archive/:code[/list]` | the code | Archive: `{ due, archived }` (tasks passed on 5 times since launch), or the ledger |
 | `POST /api/archive/:code/(later\|archive\|restore)` | the code | `{ task, note?, source }`; archive takes the task off the list into D1 `archive`, restore puts it in Soon |
 | `GET /api/oracle/:code[/list]` | the code | the Oracle: `{ current }` (this week's open question) or every past week with its answer |

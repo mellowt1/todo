@@ -2856,6 +2856,7 @@
     const n = unsorted().length;
     $('energySort').hidden = !n;
     $('energySort').textContent = n === 1 ? '1 task has no level yet. Sort it' : n + ' tasks have no level yet. Sort them';
+    renderPlay(level);
   }
 
   function takeEnergy(d) {
@@ -2864,6 +2865,7 @@
     energy = { level: d.level, until: d.until, source: d.source };
     store.set('todo.energy', energy);
     if (was !== levelOn()) { pickSkip = []; renderChrome(); if (!$('pick').hidden) closePick(); }
+    checkPlay(d);
   }
   async function loadEnergy() {
     if (energyPending) return sendEnergy();
@@ -3121,11 +3123,12 @@
     if (!navigator.onLine) return;
     try {
       const r = await fetch(API + '/api/dread/' + code, { cache: 'no-store' });
-      if (r.ok) takeRun((await r.json()).running);
+      if (r.ok) { const d = await r.json(); takeRun(d.running); takeOffer(d.offer); }
     } catch (e) { /* the last known timer stays */ }
   }
 
   function renderRun() {
+    renderOffer();
     const on = !!run && view === 'list' && ui.section === 'today' && loaded;
     $('running').hidden = !on;
     if (!on) return;
@@ -3194,6 +3197,7 @@
       await flush(); // a task made offline reaches the hub first
       const d = await dreadPost('start', { task: id, dread });
       takeRun(d.running);
+      takeOffer(d.offer);
       pickStep = 'started';
       pickErr = null;
       say('Timer started');
@@ -3215,6 +3219,7 @@
     try {
       const d = await dreadPost('rate', { task: run.task, dread });
       takeRun(d.running);
+      takeOffer(d.offer);
       closePick();
       say('Dread ' + dread);
     } catch (e) {
@@ -3228,6 +3233,7 @@
     try {
       const d = await dreadPost('stop', {});
       takeRun(null);
+      takeOffer(null);
       toast(d.stopped ? 'Stopped after ' + minWords(d.stopped.mins) + '.' : 'Stopped.');
     } catch (e) {
       toast('Could not stop the timer. Try again.');
@@ -3245,7 +3251,7 @@
   function runUndo(t) {
     if (!t) return;
     takeRun(t.was);
-    flush().then(() => dreadPost('undo', { task: t.task })).then((d) => takeRun(d.running)).catch(() => loadDread());
+    flush().then(() => dreadPost('undo', { task: t.task })).then((d) => { takeRun(d.running); takeOffer(d.offer); }).catch(() => loadDread());
   }
   function tellMoved(id) {
     if (!navigator.onLine) return;
@@ -3264,6 +3270,229 @@
   });
   $('runStop').addEventListener('click', stopRun);
   $('runRate').addEventListener('click', rateFor);
+
+  /* ---------- Soundtrack ----------
+   * The Energy soundtrack (Paul, 2026-10-24): up to 3 Spotify playlists for each level, set up here
+   * only; the hub holds them (worker/src/soundtrack.js) and the copy here is for offline. With a level
+   * on, Play under the dial opens the level's first one in the Spotify app (spotify: links, so the
+   * app opens, on the phone and the PC). Nothing plays by itself. When a timer starts, the hub's
+   * `offer` puts "Music for this?" under the pill; Play or Not now, here or in Morning or Day, ends it.
+   * Play and Not now are told to the hub without holding up the link. Editing needs a connection. */
+  const SOUND_MAX = 3;
+  let sound = Object.assign({ wired: [], normal: [], drained: [] }, store.get('todo.sound') || {});
+  let offer = null;     // the hub's "Music for this?" for the timer that runs
+  let soundAdd = null;  // the paste form: { level, url, title, named, hint, err, busy }
+  let soundBusy = false;
+  let peekFor = '';     // the link last sent to be read
+
+  async function soundPost(sub, body) {
+    const quiet = sub === 'played' || sub === 'notnow';
+    const r = await fetch(API + '/api/soundtrack/' + code + '/' + sub, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: quiet });
+    const d = await r.json().catch(() => null);
+    if (!r.ok || !d) throw new Error((d && d.error) || 'status ' + r.status);
+    return d;
+  }
+  function takeLists(lists) {
+    if (!lists) return;
+    sound = { wired: lists.wired || [], normal: lists.normal || [], drained: lists.drained || [] };
+    store.set('todo.sound', sound);
+    renderEnergy();
+    if (!$('sound').hidden) renderSoundKeep();
+  }
+  async function loadSound() {
+    if (!navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/soundtrack/' + code, { cache: 'no-store' });
+      if (r.ok) takeLists((await r.json()).lists);
+    } catch (e) { /* the copy here stays */ }
+  }
+  // An energy answer names the level's first playlist: when the copy here says otherwise, fetch it.
+  function checkPlay(d) {
+    if (!d || !('play' in d) || !LEVELS.includes(d.level)) return;
+    const mine = sound[d.level][0];
+    if ((d.play && d.play.uri) !== (mine && mine.uri) || (d.play && mine && d.play.title !== mine.title)) loadSound();
+  }
+
+  function renderPlay(level) {
+    const p = level && sound[level] && sound[level][0];
+    $('playRow').hidden = !p;
+    $('playSetup').hidden = !level || !!p;
+    if (!level) return;
+    if (!p) { $('playSetup').textContent = 'Music for ' + LNAME[level] + '? Add a playlist'; return; }
+    $('playLink').href = p.uri;
+    $('playLink').setAttribute('aria-label', 'Play ' + p.title + ' in Spotify');
+    $('playTitle').textContent = 'Play ' + p.title;
+    $('playMeta').textContent = 'Your ' + LNAME[level] + ' playlist · opens Spotify';
+  }
+  function renderOffer() {
+    const on = !!offer && !!run && offer.startedAt === run.startedAt && view === 'list' && ui.section === 'today' && loaded;
+    $('runOffer').hidden = !on;
+    $('running').classList.toggle('has-offer', on);
+    if (!on) return;
+    $('offerLink').href = offer.uri;
+    $('offerLink').setAttribute('aria-label', 'Music for this: play ' + offer.title + ' in Spotify');
+    $('offerTitle').textContent = offer.title;
+  }
+  function takeOffer(o) {
+    offer = o && o.uri && o.startedAt ? o : null;
+    renderOffer();
+  }
+  // The link opens Spotify by itself; the hub hears of it on the side.
+  $('playLink').addEventListener('click', () => {
+    const level = levelOn();
+    if (!level) return;
+    soundPost('played', { level, from: 'dial', source: 'todo' }).catch(() => {});
+    setTimeout(() => takeOffer(null), 0); // the music is on: no offer on top of it
+  });
+  $('offerLink').addEventListener('click', () => {
+    const o = offer;
+    if (!o) return;
+    soundPost('played', { level: o.level, startedAt: o.startedAt, from: 'offer', source: 'todo' }).catch(() => {});
+    setTimeout(() => takeOffer(null), 0);
+  });
+  $('offerNot').addEventListener('click', () => {
+    const o = offer;
+    if (!o) return;
+    takeOffer(null);
+    say('Not now');
+    soundPost('notnow', { startedAt: o.startedAt, source: 'todo' }).catch(() => {});
+    $('runStop').focus({ preventScroll: true });
+  });
+
+  /* The sheet: each level with its playlists (the first is the one Play opens), Remove, and a paste
+   * form whose name the hub reads from Spotify (peek); Paul can change it. */
+  const plusSvg = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5v11M1.5 7h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  function renderSound() {
+    let h = '';
+    for (const level of LEVELS) {
+      const list = sound[level] || [];
+      h += '<h3 class="sound-level">' + battSvg(level) + '<span>' + LNAME[level] + '</span></h3>';
+      if (list.length) {
+        h += '<ul class="sound-list">' + list.map((p, i) => '<li><span class="sound-words"><span class="sound-name">' + esc(p.title) + '</span>' +
+          '<span class="sound-sub">Spotify' + (i === 0 ? ' · Play opens this one' : '') + '</span></span>' +
+          '<button class="text-btn sound-remove" data-act="remove" data-level="' + level + '" data-id="' + esc(p.id) + '" aria-label="Remove ' + esc(p.title) + ' from ' + LNAME[level] + '">Remove</button></li>').join('') + '</ul>';
+      }
+      if (soundAdd && soundAdd.level === level) {
+        const a = soundAdd;
+        h += '<div class="sound-form">' +
+          '<label class="meta" for="soundUrl">Link</label><input id="soundUrl" class="sound-link" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://open.spotify.com/playlist/…" value="' + esc(a.url) + '">' +
+          '<label class="meta" for="soundName">Name</label><input id="soundName" type="text" maxlength="60" autocomplete="off" placeholder="Read from Spotify" value="' + esc(a.title) + '">' +
+          (a.err ? '<p class="sound-err" role="alert">' + esc(a.err) + '</p>' : '<p class="sound-hint" aria-live="polite">' + esc(a.hint || 'The name is read from Spotify. Change it if you like.') + '</p>') +
+          '<div class="sound-btns"><button class="sound-cancel" data-act="cancel">Cancel</button><button class="sound-save" data-act="save"' + (a.busy ? ' disabled' : '') + '>Add to ' + LNAME[level] + '</button></div></div>';
+      } else if (list.length < SOUND_MAX) {
+        h += '<button class="text-btn sound-add" data-act="add" data-level="' + level + '">' + plusSvg + 'Paste a link</button>';
+      } else {
+        h += '<p class="sound-hint">' + SOUND_MAX + ' is the most. Remove one to add another.</p>';
+      }
+    }
+    h += '<p class="sound-foot">Kept in the hub, so To-do, Morning and Day all play the same one.</p>';
+    $('soundBody').innerHTML = h;
+  }
+  // Drawn again with the focus and caret where they were.
+  function renderSoundKeep() {
+    const id = document.activeElement && document.activeElement.id;
+    const el = id && $(id);
+    const pos = el && el.selectionStart;
+    renderSound();
+    const back = id && $(id);
+    if (back && $('soundBody').contains(back)) { back.focus({ preventScroll: true }); try { back.setSelectionRange(pos, pos); } catch (e) { /* url inputs have none */ } }
+  }
+  function newAdd(level) { peekFor = ''; return { level, url: '', title: '', named: false, hint: '', err: '', busy: false }; }
+  function openSound(level) {
+    soundAdd = level && sound[level].length < SOUND_MAX ? newAdd(level) : null;
+    renderSound();
+    openSheet($('sound'), undefined, document.activeElement);
+    loadSound();
+    if (soundAdd) $('soundUrl').focus({ preventScroll: true });
+  }
+  function closeSound() { if ($('sound').hidden) return; soundAdd = null; closeSheet($('sound')); }
+
+  // A link is read as soon as it is pasted or typed in full: the name comes back from Spotify.
+  async function peekLink() {
+    const a = soundAdd;
+    if (!a || !a.url.trim() || a.url === peekFor) return;
+    peekFor = a.url;
+    if (!navigator.onLine) { a.err = 'Adding needs a connection.'; return renderSoundKeep(); }
+    try {
+      const d = await soundPost('peek', { url: a.url });
+      if (soundAdd !== a || a.url !== peekFor) return;
+      a.err = '';
+      if (!a.named) a.title = d.title || '';
+      a.hint = d.title ? 'The name is read from Spotify. Change it if you like.' : 'Spotify did not say its name. Give it one.';
+    } catch (e) {
+      if (soundAdd !== a || a.url !== peekFor) return;
+      a.err = e.message && !/^status/.test(e.message) ? e.message : 'Could not read that link. Try again.';
+    }
+    renderSoundKeep();
+  }
+  async function saveSound() {
+    const a = soundAdd;
+    if (!a || a.busy) return;
+    if (!a.url.trim()) { a.err = 'Paste a Spotify playlist link (Share › Copy link).'; return renderSoundKeep(); }
+    if (!navigator.onLine) { a.err = 'Adding needs a connection.'; return renderSoundKeep(); }
+    a.busy = true;
+    a.err = '';
+    renderSoundKeep();
+    try {
+      const d = await soundPost('add', { level: a.level, url: a.url, title: a.title });
+      soundAdd = null;
+      takeLists(d.lists);
+      say('Added ' + d.added.title + ' to ' + LNAME[a.level]);
+      const add = $('soundBody').querySelector('[data-act="add"][data-level="' + a.level + '"]');
+      (add || $('soundClose')).focus({ preventScroll: true });
+    } catch (e) {
+      a.busy = false;
+      a.err = e.message && !/^status/.test(e.message) ? e.message : 'Could not add it. Try again.';
+      renderSoundKeep();
+    }
+  }
+  const FULL_LINK = /spotify(\.link\/\S+|\.com\/\S*playlist\/[A-Za-z0-9]{22}|:playlist:[A-Za-z0-9]{22})/;
+  $('soundBody').addEventListener('input', (e) => {
+    if (!soundAdd) return;
+    if (e.target.id === 'soundUrl') {
+      soundAdd.url = e.target.value;
+      if (FULL_LINK.test(soundAdd.url)) peekLink();
+    }
+    if (e.target.id === 'soundName') { soundAdd.title = e.target.value; soundAdd.named = !!e.target.value.trim(); }
+  });
+  $('soundBody').addEventListener('change', (e) => { if (e.target.id === 'soundUrl') peekLink(); });
+  $('soundBody').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.target.id === 'soundUrl' || e.target.id === 'soundName')) { e.preventDefault(); saveSound(); }
+  });
+  $('soundBody').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const act = b.dataset.act;
+    if (act === 'add') {
+      soundAdd = newAdd(b.dataset.level);
+      renderSound();
+      $('soundUrl').focus({ preventScroll: true });
+    } else if (act === 'cancel') {
+      const level = soundAdd && soundAdd.level;
+      soundAdd = null;
+      renderSound();
+      const add = $('soundBody').querySelector('[data-act="add"][data-level="' + level + '"]');
+      (add || $('soundClose')).focus({ preventScroll: true });
+    } else if (act === 'save') {
+      saveSound();
+    } else if (act === 'remove' && !soundBusy) {
+      if (!navigator.onLine) { toast('Removing needs a connection.'); return; }
+      soundBusy = true;
+      try {
+        const name = (sound[b.dataset.level].find((p) => p.id === b.dataset.id) || {}).title || '';
+        takeLists((await soundPost('remove', { level: b.dataset.level, id: b.dataset.id })).lists);
+        say('Removed ' + name);
+        $('soundClose').focus({ preventScroll: true });
+      } catch (err) {
+        toast('Could not remove it. Try again.');
+      }
+      soundBusy = false;
+    }
+  });
+  $('playEdit').addEventListener('click', () => openSound(null));
+  $('playSetup').addEventListener('click', () => openSound(levelOn()));
+  $('soundClose').addEventListener('click', closeSound);
+  $('sound').querySelector('.scrim').addEventListener('click', closeSound);
 
   /* ---------- Archive ----------
    * Archive (Paul, 2026-10-22; Phase 5, plain on purpose): a task passed on 5 times (Not this one, or
@@ -3597,6 +3826,7 @@
       if (!$('ask').hidden) { closeAsk(); return; }
       if (!$('pick').hidden) { closePick(); return; }
       if (!$('sort').hidden) { closeSort(); return; }
+      if (!$('sound').hidden) { closeSound(); return; }
       if (!$('answered').hidden) { closeAnswered(); return; }
       if (!$('wait').hidden) { closeWait(); return; }
       if (!$('waitList').hidden) { closeWaitList(); return; }
@@ -3605,7 +3835,7 @@
       return;
     }
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('ask')) || shown($('pick')) || shown($('sort')) || shown($('wait')) || shown($('waitList')) || shown($('answered')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
+    if (tag === 'input' || tag === 'textarea' || shown($('edit')) || shown($('card')) || shown($('apply')) || shown($('ask')) || shown($('pick')) || shown($('sort')) || shown($('sound')) || shown($('wait')) || shown($('waitList')) || shown($('answered')) || shown($('capture')) || (!confirmWrap.hidden && !confirmClosing)) return;
     if (menuOn) {
       const bs = Array.from(menu.querySelectorAll('button.sec'));
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -3853,6 +4083,7 @@
   setTimeout(loadRecs, 1500); // after the list, never before it
   setTimeout(loadCards, 1600);
   setTimeout(loadWaiting, 1700);
+  setTimeout(loadSound, 1800);
 
   if ('serviceWorker' in navigator && (!isLocal || params.has('sw'))) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

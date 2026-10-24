@@ -77,6 +77,12 @@
           <button id="giveOne" class="text-btn" hidden>Give me one</button>
         </div>
         <button id="energySort" class="energy-sort meta" hidden></button>
+        <!-- The Energy soundtrack (app.js, Soundtrack): Play opens the level's first Spotify playlist. -->
+        <div id="playRow" class="play-row" hidden>
+          <a id="playLink" class="play-link" href="#"><span class="play-disc" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 2.2v9.6l8-4.8z" fill="currentColor"/></svg></span><span class="play-words"><span id="playTitle" class="play-title"></span><span id="playMeta" class="play-meta"></span></span></a>
+          <button id="playEdit" class="text-btn play-edit" aria-label="Edit the music for each level">Edit</button>
+        </div>
+        <button id="playSetup" class="energy-sort meta" hidden></button>
       </div>
       <!-- The Dread meter (app.js, Dread): the one timer that runs, from any app. Today only. -->
       <div id="running" class="running list-only" role="status" hidden>
@@ -84,6 +90,11 @@
         <span class="run-words"><span id="runName" class="run-name"></span><span id="runMeta" class="run-meta"></span></span>
         <button id="runRate" class="run-btn" hidden>Rate</button>
         <button id="runStop" class="run-btn">Stop</button>
+      </div>
+      <!-- "Music for this?" under the timer (app.js, Soundtrack): the hub's offer, gone after Play or Not now. -->
+      <div id="runOffer" class="run-offer list-only" hidden>
+        <a id="offerLink" class="offer-link" href="#"><span class="play-disc" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 2.2v9.6l8-4.8z" fill="currentColor"/></svg></span><span class="offer-words">Music for this? <b id="offerTitle"></b></span></a>
+        <button id="offerNot" class="run-btn offer-not">Not now</button>
       </div>
       <!-- Archive (app.js, Archive): a task passed on 5 times, decided in place. Today only. -->
       <div id="fate" class="fate list-only" role="region" aria-labelledby="fateName" hidden>
@@ -316,6 +327,20 @@
     <p class="sort-intro">A guess is outlined. Tap it to confirm, or tap another. Nothing is saved until you tap.</p>
     <p id="sortCount" class="meta"></p>
     <ul id="sortList" class="sort-list"></ul>
+  </div>
+</div>
+
+<!-- The Energy soundtrack: up to 3 Spotify playlists for each level (app.js, Soundtrack). The hub holds them. -->
+<div id="sound" class="sheet-wrap" hidden>
+  <div class="scrim"></div>
+  <div class="sheet card-sheet sound-sheet" role="dialog" aria-labelledby="soundHead">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <span id="soundHead" class="meta">Music for each level</span>
+      <button id="soundClose" class="text-btn">Done</button>
+    </div>
+    <p class="sort-intro">Paste a playlist link from Spotify (Share › Copy link). Play opens it there. Nothing plays by itself and nothing in Spotify changes.</p>
+    <div id="soundBody" class="sound-body"></div>
   </div>
 </div>
 
