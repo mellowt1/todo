@@ -11,6 +11,7 @@
  *   GET/POST /api/hub/dread/day[/start|/rate|/stop]   the same for Day, Bearer HUB_SECRET_DAY, source "day"
  *
  *   running = { task, name, section, startedAt, dread, mins, level, source } or null
+ *   offer   = "Music for this?": the Spotify playlist for the level now, or null (src/soundtrack.js)
  *   stopped = { task, name, mins, dread, done }
  *
  * One timer at a time; starting another stops the one that runs. Everything is a hub event in D1
@@ -34,6 +35,7 @@ import { acceptEvent } from './hub.js';
 import { energyNow, readItems, listStub, nameAndDue } from './energy.js';
 import { maskSecrets } from './mask.js';
 import { zoned, addDays } from './morning.js';
+import { offerFor } from './soundtrack.js';
 
 export const MAX_HOURS = 4; // a forgotten timer stops counting after this (Paul, 2026-10-22)
 export const LIE_DREAD = 4; // dreaded at least this ...
@@ -242,7 +244,8 @@ async function dreadRoute(request, env, sub, source, json, now) {
   if (!env.HUB_DB || !env.TODO_CODE) return json({ error: 'not configured' }, request, 503);
   if (sub.length === 0 && request.method === 'GET') {
     const cur = await current(env, now);
-    return json({ running: runningView(cur.run, cur.items, now), stopped: cur.stopped }, request);
+    const running = runningView(cur.run, cur.items, now);
+    return json({ running, stopped: cur.stopped, offer: await offerFor(env, running, await energyNow(env, now)) }, request);
   }
   if (request.method !== 'POST' || sub.length !== 1) return json({ error: 'not found' }, request, 404);
   const got = await readJson(request);
@@ -251,7 +254,11 @@ async function dreadRoute(request, env, sub, source, json, now) {
   const src = source || (CODE_SOURCES.includes(b.source) ? b.source : null);
   if (!src) return json({ error: 'source: todo or morning' }, request, 400);
   const task = typeof b.task === 'string' && ID.test(b.task) ? b.task : null;
-  const send = (out) => json(out.error ? { error: out.error } : out, request, out.status || 200);
+  const send = async (out) => {
+    if (out.error) return json({ error: out.error }, request, out.status || 400);
+    if ('running' in out) out.offer = await offerFor(env, out.running, await energyNow(env, now));
+    return json(out, request);
+  };
 
   switch (sub[0]) {
     case 'start': {

@@ -117,6 +117,11 @@
  *   GET /api/dread/:code     POST /api/dread/:code/(start | rate | stop | undo | skip)
  *   GET/POST /api/hub/dread/day[/start | /rate | /stop]
  *
+ * Energy soundtrack (src/soundtrack.js; the to-do's code, Day with Bearer <HUB_SECRET_DAY>): up to 3 Spotify
+ * playlists per level, in KV; the energy answers carry `play`, the Dread meter's `offer` ("Music for this?").
+ *   GET /api/soundtrack/:code     POST /api/soundtrack/:code/(peek | add | remove | played | notnow)
+ *   POST /api/hub/soundtrack/day/(played | notnow)
+ *
  * Archive (src/archive.js; the to-do's code): a task passed on 5 times gets a decision line in To-do and
  * Morning (Do it now, Hand off, Archive, Later); archived tasks sit in D1 `archive` until restored.
  *   GET /api/archive/:code[/list]     POST /api/archive/:code/(later | archive | restore)
@@ -203,6 +208,7 @@ import { handleDoor, doorCron } from './door.js';
 import { handleDigest } from './digest.js';
 import { handleEnergy, handleEnergyDay } from './energy.js';
 import { handleDread, handleDreadDay, dreadCron } from './dread.js';
+import { handleSoundtrack, handleSoundtrackDay } from './soundtrack.js';
 import { handleArchive, archiveCron } from './archive.js';
 import { handleOracle, oracleCron } from './oracle.js';
 import { handleSky, markLife } from './sky.js';
@@ -424,6 +430,7 @@ const MODULES = {
     if (rest[0] === 'energy' && rest[1] === 'day') return handleEnergyDay(request, env, rest.slice(2), json);
     if (path === 'waiting/day') return handleWaitingDay(request, env, json);
     if (rest[0] === 'dread' && rest[1] === 'day') return handleDreadDay(request, env, rest.slice(2), json);
+    if (rest[0] === 'soundtrack' && rest[1] === 'day') return handleSoundtrackDay(request, env, rest.slice(2), json);
     if (rest[0] === 'mail' && rest[1] === 'day') return handleMailDay(request, env, rest.slice(2), json);
     return handleHub(request, env, rest, url, json);
   },
@@ -435,6 +442,7 @@ const MODULES = {
   energy: (request, env, rest) => handleEnergy(request, env, rest, json),
   waiting: (request, env, rest) => handleWaiting(request, env, rest, json),
   dread: (request, env, rest) => handleDread(request, env, rest, json),
+  soundtrack: (request, env, rest) => handleSoundtrack(request, env, rest, json),
   archive: (request, env, rest) => handleArchive(request, env, rest, json),
   oracle: (request, env, rest) => handleOracle(request, env, rest, json),
   sky: (request, env, rest) => handleSky(request, env, rest, json),

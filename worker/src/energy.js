@@ -9,6 +9,9 @@
  *   POST /api/energy/:code/suggest      -> { guessed }   the one-off guess for old tasks (Claude Haiku)
  *   GET/POST /api/hub/energy/day[/pick] the same for Day, Bearer HUB_SECRET_DAY, source "day"
  *
+ * Every answer that carries the level carries `play` too: the level's first Spotify playlist
+ * ({ level, title, url, uri }) or null (the Energy soundtrack, src/soundtrack.js).
+ *
  * `source` is "todo" or "morning" on the code routes. Setting the dial is a typed hub event,
  * `energy.set` (payload { level }) or `energy.cleared`, stored once in D1 `events` through
  * acceptEvent like every other event, but kept out of Morning's Lately feed. There is no other
@@ -30,6 +33,7 @@ import { DUE_END } from './tidy.js';
 import { maskSecrets } from './mask.js';
 import { local, zoned, addDays } from './morning.js';
 import { anthropic, bumpUsage, dayOf } from './intake.js';
+import { playFor } from './soundtrack.js';
 
 export const HOURS = 4; // a level stays on this long (Paul, 2026-10-21)
 export const POOL = ['today', 'soon']; // in this order; Someday is never picked
@@ -260,8 +264,9 @@ export async function energyFor(env, monday, now = Date.now()) {
 /* ---------- Routes ---------- */
 
 async function withPick(env, state, opts) {
-  if (!state.level || !env.TODO_CODE) return { ...state, pick: null };
-  return { ...state, pick: pickTask(await readItems(env), state.level, opts) };
+  const play = await playFor(env, state.level);
+  if (!state.level || !env.TODO_CODE) return { ...state, pick: null, play };
+  return { ...state, pick: pickTask(await readItems(env), state.level, opts), play };
 }
 
 async function readJson(request, max = 4000) {
@@ -276,7 +281,7 @@ async function energyRoute(request, env, sub, source, json, now) {
   if (sub.length === 0 && request.method === 'GET') {
     const state = await energyNow(env, now);
     const want = new URL(request.url).searchParams.get('pick') === '1';
-    return json(want ? await withPick(env, state, {}) : state, request);
+    return json(want ? await withPick(env, state, {}) : { ...state, play: await playFor(env, state.level) }, request);
   }
   if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
   const got = await readJson(request);

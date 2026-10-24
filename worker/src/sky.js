@@ -65,6 +65,7 @@ export const REACTS = {
   'energy.set': TRIO, 'energy.cleared': TRIO, 'energy.skipped': TRIO,
   'waiting.created': TRIO, 'waiting.snoozed': TRIO, 'waiting.resolved': TRIO, 'waiting.chase_due': TRIO,
   'dread.started': TRIO, 'dread.rated': TRIO, 'dread.done': TRIO, 'dread.stopped': TRIO, 'dread.undone': TRIO, 'dread.skipped': TRIO,
+  'soundtrack.played': TRIO, 'soundtrack.declined': TRIO, // the offer goes in every app
   'task.fate_due': TWO, 'task.fate_later': TWO, 'task.buried': TWO, 'task.resurrected': TWO, 'task.handed_off': TRIO,
   'task.created': ['todo'], 'readlater.created': ['morning'], 'readlater.closed': ['morning'],
   'oracle.asked': ['morning'], 'oracle.answered': ['morning'],
@@ -87,6 +88,7 @@ export const LABELS = {
   'waiting.created': 'Waiting on added', 'waiting.snoozed': 'Snoozed', 'waiting.resolved': 'Answered', 'waiting.chase_due': 'Chase due',
   'dread.started': 'Timer started', 'dread.rated': 'Dread rated', 'dread.done': 'Done after a timer', 'dread.stopped': 'Timer stopped',
   'dread.undone': 'Done undone', 'dread.skipped': 'Passed on',
+  'soundtrack.played': 'Music played', 'soundtrack.declined': 'Music: not now',
   'task.fate_due': 'Time to decide', 'task.fate_later': 'Decide later', 'task.buried': 'Archived', 'task.resurrected': 'Restored',
   'task.handed_off': 'Handed off', 'task.created': 'Task made',
   'readlater.created': 'Read later added', 'readlater.closed': 'Read later closed',
