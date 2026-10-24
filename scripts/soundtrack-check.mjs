@@ -1,7 +1,9 @@
 // The Energy soundtrack, against a mocked Worker (no wrangler needed): Play under the dial opens the
 // level's first playlist (a spotify: link) and tells the hub, a level without one offers to add one,
 // the sheet reads a pasted link's name, adds, refuses an album in plain words and removes, and a
-// running timer shows "Music for this?" until Not now or Play. Every playlist and task is made up.
+// running timer shows "Music for this?" until Not now or Play. With Spotify connected the same tap
+// asks the hub to start it on this device (phone or computer), and the paste form offers his own
+// playlists; Disconnect turns the row back into Connect. Every playlist and task is made up.
 //   PORT=8121 npm run serve, then: APP_URL=http://localhost:8121/ npm run soundtrack-check
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -28,7 +30,8 @@ function world() {
     t('todaylamp001', 'Return the lamp', 'today', { energy: 'normal' }),
   ].map((i) => [i.id, i]));
   const w = {
-    items, posts: [], running: null, offer: null,
+    items, posts: [], running: null, offer: null, spotify: { configured: true, connected: true },
+    mine: [{ pid: '5ABHKGoOzxkaa28ttQV9sE', title: 'Full send', count: 40, url: 'https://open.spotify.com/playlist/5ABHKGoOzxkaa28ttQV9sE', uri: 'spotify:playlist:5ABHKGoOzxkaa28ttQV9sE' }],
     lists: { wired: [], normal: [], drained: [entry('lowtide001', P.low), entry('rainwind01', P.rain)] },
     state: { level: 'drained', setAt: new Date().toISOString(), until: new Date(Date.now() + 3 * 3600e3).toISOString(), source: 'todo' },
     play() { const e = w.state.level && w.lists[w.state.level][0]; return e ? { level: w.state.level, title: e.title, url: e.url, uri: e.uri } : null; },
@@ -42,6 +45,10 @@ function world() {
         return { ...w.state, pick: null, play: w.play() };
       }
       if (p === `/api/dread/${CODE}`) return { running: w.running, stopped: null, offer: w.offer };
+      if (p === `/api/spotify/${CODE}`) return w.spotify;
+      if (p === `/api/spotify/${CODE}/playlists`) return { playlists: w.mine };
+      if (p === `/api/spotify/${CODE}/play`) { w.posts.push({ sub: 'spotify-play', ...body }); return { ok: true, device: 'iPhone' }; }
+      if (p === `/api/spotify/${CODE}/disconnect`) { w.posts.push({ sub: 'disconnect' }); w.spotify = { configured: true, connected: false }; return { connected: false }; }
       if (p.startsWith(`/api/soundtrack/${CODE}`)) {
         const sub = p.slice(`/api/soundtrack/${CODE}`.length).replace('/', '');
         if (!sub) return { lists: w.lists, max: 3 };
@@ -68,7 +75,8 @@ const browser = await chromium.launch();
 for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, height: 844 }, 'light'], ['soundtrack-desk', { width: 1280, height: 900 }, 'dark']]) {
   const w = world();
   const phone = viewport.width < 700;
-  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: phone, hasTouch: phone, colorScheme: scheme });
+  const ua = phone ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1' : undefined;
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: phone, hasTouch: phone, colorScheme: scheme, userAgent: ua });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -92,12 +100,15 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   check(await page.isVisible('#playRow'), name + ': Play shows under the dial');
   check((await page.textContent('#playTitle')) === 'Play Low tide', name + ': it plays the first Drained playlist');
   check((await page.getAttribute('#playLink', 'href')) === 'spotify:playlist:' + P.low, name + ': a spotify: link, so the app opens');
-  check((await page.textContent('#playMeta')) === 'Your Drained playlist · opens Spotify', name + ': says which level and where it opens');
+  check((await page.textContent('#playMeta')) === 'Your Drained playlist · plays in Spotify', name + ': says which level, and that Spotify plays it');
   await page.screenshot({ path: file(name + '-play') });
   await tap('#playLink');
   await page.waitForTimeout(300);
   const played = last('played');
   check(played && played.level === 'drained' && played.from === 'dial' && played.source === 'todo' && !played.startedAt, name + ': the hub heard Play from the dial ' + JSON.stringify(played));
+  const sp1 = last('spotify-play');
+  check(sp1 && sp1.uri === 'spotify:playlist:' + P.low && sp1.kind === (phone ? 'phone' : 'computer'), name + ': the hub is asked to start it on this ' + (phone ? 'phone' : 'computer') + ' ' + JSON.stringify(sp1));
+  check((await page.getAttribute('#playLink', 'href')) === 'spotify:playlist:' + P.low, name + ': the link still opens Spotify');
 
   // Normal has none yet: a quiet way in, and the sheet opens at the paste form.
   await tap('#energySeg [data-level="normal"]');
@@ -126,6 +137,23 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   await page.waitForTimeout(300);
   check(last('remove') && last('remove').id === 'rainwind01' && last('remove').level === 'drained', name + ': the hub heard remove');
   check(!(await page.locator('#soundBody .sound-name', { hasText: 'Rain on the window' }).count()), name + ': Rain on the window is gone');
+  check((await page.textContent('#soundBody .sp-row .sound-name')) === 'Spotify is connected', name + ': the sheet says Spotify is connected');
+  // His own playlists in the paste form: pick one, add it.
+  await tap('#soundBody [data-act="add"][data-level="wired"]');
+  await page.waitForSelector('#soundBody .sp-list button');
+  await tap('#soundBody .sp-list button');
+  check((await page.inputValue('#soundUrl')).includes('5ABHKGoOzxkaa28ttQV9sE') && (await page.inputValue('#soundName')) === 'Full send', name + ': picking one of his fills the link and name');
+  await tap('#soundBody [data-act="save"]');
+  await page.waitForFunction(() => !document.getElementById('soundUrl'));
+  check(last('add') && last('add').level === 'wired' && last('add').url.includes('5ABHKGoOzxkaa28ttQV9sE') && last('add').title === 'Full send', name + ': the picked one is added to Wired');
+  // Disconnect: the row turns into Connect, which goes to the hub's login.
+  await tap('#soundBody [data-act="disconnect"]');
+  await page.waitForSelector('#soundBody .sp-connect');
+  check((await page.getAttribute('#soundBody .sp-connect', 'href')).endsWith('/api/spotify/' + CODE + '/login'), name + ': Disconnect turns the row into Connect');
+  w.spotify = { configured: true, connected: true };
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); // back from connecting
+  await page.waitForSelector('#soundBody .sp-row [data-act="disconnect"]');
+  check(true, name + ': coming back to the app reads the connection again');
   await page.screenshot({ path: file(name + '-sheet') });
   if (phone) await tap('#soundClose'); else await page.keyboard.press('Escape');
   await page.waitForSelector('#sound', { state: 'hidden' });
@@ -153,6 +181,7 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   await page.waitForSelector('#runOffer:not([hidden])');
   await tap('#offerLink');
   await page.waitForTimeout(200);
+  check(last('spotify-play') && last('spotify-play').uri === 'spotify:playlist:' + P.desk, name + ': Play from the offer starts it too');
   const fromOffer = last('played');
   check(fromOffer && fromOffer.from === 'offer' && fromOffer.startedAt === s2 && fromOffer.level === 'normal', name + ': Play from the offer ' + JSON.stringify(fromOffer));
   check(!(await page.isVisible('#runOffer')), name + ': the offer goes after Play');

@@ -824,3 +824,13 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .sound-save:disabled { opacity: 0.45; }
 .sound-btns button:active { opacity: 0.55; }
 .sound-foot { margin: 10px 0 0; font-size: var(--fs-meta); color: var(--secondary); }
+/* Spotify connected (or not) at the top of the sheet, and his own playlists in the paste form. */
+.sp-row { display: flex; align-items: center; gap: 10px; min-height: 56px; border-bottom: 0.5px solid var(--sep); }
+.sp-connect { flex-shrink: 0; height: 40px; padding: 0 16px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 600; display: flex; align-items: center; text-decoration: none; }
+.sp-connect:active, .sp-list button:active { opacity: 0.55; }
+.sp-mine { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.sp-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; border-radius: 10px; background: var(--bg); }
+.sp-list li + li { border-top: 0.5px solid var(--sep); }
+.sp-list button { width: 100%; min-height: 44px; padding: 0 12px; display: flex; align-items: center; gap: 10px; text-align: left; color: var(--text); font-size: var(--fs-body); }
+.sp-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-list small { flex-shrink: 0; color: var(--secondary); font-size: var(--fs-meta); }

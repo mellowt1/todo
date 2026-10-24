@@ -3277,7 +3277,9 @@
    * on, Play under the dial opens the level's first one in the Spotify app (spotify: links, so the
    * app opens, on the phone and the PC). Nothing plays by itself. When a timer starts, the hub's
    * `offer` puts "Music for this?" under the pill; Play or Not now, here or in Morning or Day, ends it.
-   * Play and Not now are told to the hub without holding up the link. Editing needs a connection. */
+   * Play and Not now are told to the hub without holding up the link. Editing needs a connection.
+   * With Spotify connected (worker/src/spotify.js) the same tap also asks the hub to start the
+   * playlist on this device's Spotify: the link still opens the app, which is how the hub finds it. */
   const SOUND_MAX = 3;
   let sound = Object.assign({ wired: [], normal: [], drained: [] }, store.get('todo.sound') || {});
   let offer = null;     // the hub's "Music for this?" for the timer that runs
@@ -3287,7 +3289,8 @@
 
   async function soundPost(sub, body) {
     const quiet = sub === 'played' || sub === 'notnow';
-    const r = await fetch(API + '/api/soundtrack/' + code + '/' + sub, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: quiet });
+    // The quiet ones go as plain text, so the page may leave at once (no preflight); the hub reads JSON.
+    const r = await fetch(API + '/api/soundtrack/' + code + '/' + sub, { method: 'POST', headers: { 'Content-Type': quiet ? 'text/plain' : 'application/json' }, body: JSON.stringify(body), keepalive: quiet });
     const d = await r.json().catch(() => null);
     if (!r.ok || !d) throw new Error((d && d.error) || 'status ' + r.status);
     return d;
@@ -3322,7 +3325,7 @@
     $('playLink').href = p.uri;
     $('playLink').setAttribute('aria-label', 'Play ' + p.title + ' in Spotify');
     $('playTitle').textContent = 'Play ' + p.title;
-    $('playMeta').textContent = 'Your ' + LNAME[level] + ' playlist · opens Spotify';
+    $('playMeta').textContent = 'Your ' + LNAME[level] + ' playlist · ' + (spotify.connected ? 'plays in Spotify' : 'opens Spotify');
   }
   function renderOffer() {
     const on = !!offer && !!run && offer.startedAt === run.startedAt && view === 'list' && ui.section === 'today' && loaded;
@@ -3337,16 +3340,51 @@
     offer = o && o.uri && o.startedAt ? o : null;
     renderOffer();
   }
+
+  // Which Spotify to play on: the phone's on a phone (iPads say Macintosh but have touch), else the PC's.
+  const KIND = /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1) ? 'phone' : 'computer';
+  let spotify = Object.assign({ configured: false, connected: false }, store.get('todo.spotify') || {});
+  let mine = null; // his own Spotify playlists, read when the paste form opens
+  function startSpotify(uri) {
+    if (spotify.configured === false && spotify.known) return;
+    fetch(API + '/api/spotify/' + code + '/play', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ uri, kind: KIND }), keepalive: true }).catch(() => {});
+  }
+  async function loadSpotify() {
+    if (!navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/spotify/' + code, { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const was = spotify.connected;
+      spotify = { configured: !!d.configured, connected: !!d.connected, known: true };
+      store.set('todo.spotify', spotify);
+      if (!spotify.connected) mine = null;
+      renderEnergy();
+      if (!$('sound').hidden) { renderSoundKeep(); if (spotify.connected && !was && soundAdd) loadMine(); }
+    } catch (e) { /* as it was */ }
+  }
+  async function loadMine() {
+    if (!spotify.connected || !navigator.onLine) return;
+    try {
+      const r = await fetch(API + '/api/spotify/' + code + '/playlists', { cache: 'no-store' });
+      if (r.status === 409) return loadSpotify(); // the login is gone
+      if (!r.ok) return;
+      mine = (await r.json()).playlists || [];
+      if (!$('sound').hidden) renderSoundKeep();
+    } catch (e) { /* the paste field still works */ }
+  }
   // The link opens Spotify by itself; the hub hears of it on the side.
   $('playLink').addEventListener('click', () => {
     const level = levelOn();
     if (!level) return;
+    startSpotify($('playLink').getAttribute('href'));
     soundPost('played', { level, from: 'dial', source: 'todo' }).catch(() => {});
     setTimeout(() => takeOffer(null), 0); // the music is on: no offer on top of it
   });
   $('offerLink').addEventListener('click', () => {
     const o = offer;
     if (!o) return;
+    startSpotify(o.uri);
     soundPost('played', { level: o.level, startedAt: o.startedAt, from: 'offer', source: 'todo' }).catch(() => {});
     setTimeout(() => takeOffer(null), 0);
   });
@@ -3364,6 +3402,13 @@
   const plusSvg = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5v11M1.5 7h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   function renderSound() {
     let h = '';
+    if (spotify.configured) {
+      h += spotify.connected
+        ? '<div class="sp-row"><span class="sound-words"><span class="sound-name">Spotify is connected</span><span class="sound-sub">Play starts the music on the phone or PC you tap it on.</span></span>' +
+          '<button class="text-btn sound-remove" data-act="disconnect">Disconnect</button></div>'
+        : '<div class="sp-row"><span class="sound-words"><span class="sound-name">Connect Spotify</span><span class="sound-sub">So Play starts the music, not only opens it.</span></span>' +
+          '<a class="sp-connect" href="' + esc(API + '/api/spotify/' + code + '/login') + '">Connect</a></div>';
+    }
     for (const level of LEVELS) {
       const list = sound[level] || [];
       h += '<h3 class="sound-level">' + battSvg(level) + '<span>' + LNAME[level] + '</span></h3>';
@@ -3378,6 +3423,7 @@
           '<label class="meta" for="soundUrl">Link</label><input id="soundUrl" class="sound-link" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://open.spotify.com/playlist/…" value="' + esc(a.url) + '">' +
           '<label class="meta" for="soundName">Name</label><input id="soundName" type="text" maxlength="60" autocomplete="off" placeholder="Read from Spotify" value="' + esc(a.title) + '">' +
           (a.err ? '<p class="sound-err" role="alert">' + esc(a.err) + '</p>' : '<p class="sound-hint" aria-live="polite">' + esc(a.hint || 'The name is read from Spotify. Change it if you like.') + '</p>') +
+          mineHtml(level) +
           '<div class="sound-btns"><button class="sound-cancel" data-act="cancel">Cancel</button><button class="sound-save" data-act="save"' + (a.busy ? ' disabled' : '') + '>Add to ' + LNAME[level] + '</button></div></div>';
       } else if (list.length < SOUND_MAX) {
         h += '<button class="text-btn sound-add" data-act="add" data-level="' + level + '">' + plusSvg + 'Paste a link</button>';
@@ -3387,6 +3433,16 @@
     }
     h += '<p class="sound-foot">Kept in the hub, so To-do, Morning and Day all play the same one.</p>';
     $('soundBody').innerHTML = h;
+  }
+  // With Spotify connected: his own playlists to pick from, the ones already on this level left out.
+  function mineHtml(level) {
+    if (!spotify.connected || !mine) return '';
+    const have = new Set((sound[level] || []).map((p) => p.uri));
+    const rows = mine.filter((p) => !have.has(p.uri));
+    if (!rows.length) return '';
+    return '<div class="sp-mine"><span class="meta" id="spMineHead">Or pick one of yours</span><ul class="sp-list" aria-labelledby="spMineHead">' +
+      rows.map((p) => '<li><button data-act="pick" data-url="' + esc(p.url) + '" data-title="' + esc(p.title) + '"><span class="sp-t">' + esc(p.title) + '</span>' +
+        (p.count != null ? '<small>' + p.count + (p.count === 1 ? ' song' : ' songs') + '</small>' : '') + '</button></li>').join('') + '</ul></div>';
   }
   // Drawn again with the focus and caret where they were.
   function renderSoundKeep() {
@@ -3403,6 +3459,7 @@
     renderSound();
     openSheet($('sound'), undefined, document.activeElement);
     loadSound();
+    loadSpotify().then(() => { if (soundAdd && !mine) loadMine(); });
     if (soundAdd) $('soundUrl').focus({ preventScroll: true });
   }
   function closeSound() { if ($('sound').hidden) return; soundAdd = null; closeSheet($('sound')); }
@@ -3467,6 +3524,31 @@
       soundAdd = newAdd(b.dataset.level);
       renderSound();
       $('soundUrl').focus({ preventScroll: true });
+      if (!mine) loadMine();
+    } else if (act === 'pick' && soundAdd) {
+      soundAdd.url = b.dataset.url;
+      soundAdd.title = b.dataset.title;
+      soundAdd.named = false;
+      soundAdd.err = '';
+      soundAdd.hint = 'From your Spotify. Change the name if you like.';
+      peekFor = soundAdd.url; // nothing to read: Spotify gave the name
+      renderSound();
+      $('soundBody').querySelector('[data-act="save"]').focus({ preventScroll: true });
+    } else if (act === 'disconnect') {
+      if (!navigator.onLine) { toast('Disconnecting needs a connection.'); return; }
+      try {
+        const r = await fetch(API + '/api/spotify/' + code + '/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        if (!r.ok) throw new Error('status ' + r.status);
+        spotify = { configured: true, connected: false, known: true };
+        store.set('todo.spotify', spotify);
+        mine = null;
+        renderSound();
+        renderEnergy();
+        say('Spotify disconnected');
+        $('soundClose').focus({ preventScroll: true });
+      } catch (err) {
+        toast('Could not disconnect. Try again.');
+      }
     } else if (act === 'cancel') {
       const level = soundAdd && soundAdd.level;
       soundAdd = null;
@@ -4064,6 +4146,7 @@
       newDay();
       poll();
       loadWaiting();
+      loadSpotify(); // back from connecting Spotify, maybe
       startPolling();
     }
   });
@@ -4084,6 +4167,7 @@
   setTimeout(loadCards, 1600);
   setTimeout(loadWaiting, 1700);
   setTimeout(loadSound, 1800);
+  setTimeout(loadSpotify, 1900);
 
   if ('serviceWorker' in navigator && (!isLocal || params.has('sw'))) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
