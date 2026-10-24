@@ -113,12 +113,34 @@ async function startOn(token, device, uri) {
   return r.status;
 }
 
+/* A Spotify that is open but not the one playing (the PC's app while the phone played last) can
+ * answer Play with 404 until playback has been moved to it: move it, then play again. */
+async function moveTo(token, device) {
+  const r = await fetch(API + '/me/player', {
+    method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_ids: [device.id], play: false }), signal: AbortSignal.timeout(8000),
+  });
+  return r.status;
+}
+
+const PLAYED = [200, 202, 204];
+export const MOVE = { ms: 800 }; // how long Spotify gets to take the move
+
 async function tryOnce(token, kind, uri) {
   const list = await devices(token);
   const dev = list && pickDevice(list, kind);
-  if (!dev) return { ok: false, why: list ? 'no device' : 'spotify' };
-  const status = await startOn(token, dev, uri);
-  if (status === 200 || status === 202 || status === 204) return { ok: true, device: dev.name };
+  // Only kinds, codes and whether one is active: never a name (wrangler tail shows these lines).
+  const seen = (list || []).map((d) => d.type + (d.is_active ? '*' : '')).join(',') || '-';
+  if (!dev) { console.log('spotify play', kind, list ? 'no device' : 'devices failed', seen); return { ok: false, why: list ? 'no device' : 'spotify' }; }
+  let status = await startOn(token, dev, uri);
+  let moved = null;
+  if (status === 404 || status === 502) {
+    moved = await moveTo(token, dev);
+    await sleep(MOVE.ms);
+    status = await startOn(token, dev, uri);
+  }
+  console.log('spotify play', kind, status, moved ? 'moved ' + moved : '', seen);
+  if (PLAYED.includes(status)) return { ok: true, device: dev.name };
   return { ok: false, why: status === 403 ? 'premium' : status === 429 ? 'busy' : 'spotify' };
 }
 

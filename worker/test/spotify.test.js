@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
-import { pickDevice, play, seal, unseal, accessToken, SCOPES, REDIRECT, WAIT } from '../src/spotify.js';
+import { pickDevice, play, seal, unseal, accessToken, SCOPES, REDIRECT, WAIT, MOVE } from '../src/spotify.js';
 import { memNamespace } from './mem.js';
 
 const CODE = 'abcdefgh12345678';
@@ -12,6 +12,7 @@ const DAY_SECRET = 'day-secret-for-tests';
 const NOW = Date.parse('2026-10-24T09:00:00Z');
 const URI = 'spotify:playlist:37i9dQZF1DX4sWSpwq3LiO';
 WAIT.every = 5; // the background tries, quickly
+MOVE.ms = 5;
 
 function memKV() {
   const m = new Map();
@@ -30,7 +31,7 @@ const env = (over = {}) => ({
 });
 
 // Spotify, mocked. `sp.devices` is what the device list shows; `sp.calls` records every call.
-const sp = { devices: [], calls: [], playStatus: 204, refresh: 'refresh-1', rotate: null, refuse: false, playlists: [] };
+const sp = { devices: [], calls: [], playStatus: 204, needsMove: false, moved: [], refresh: 'refresh-1', rotate: null, refuse: false, playlists: [] };
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -51,7 +52,12 @@ globalThis.fetch = async (url, init = {}) => {
     }
   }
   if (u === 'https://api.spotify.com/v1/me/player/devices') return Response.json({ devices: sp.devices });
-  if (u.startsWith('https://api.spotify.com/v1/me/player/play?device_id=')) return new Response(null, { status: sp.playStatus });
+  if (u.startsWith('https://api.spotify.com/v1/me/player/play?device_id=')) {
+    const id = decodeURIComponent(u.split('device_id=')[1]);
+    if (sp.needsMove && !sp.moved.includes(id)) return Response.json({ error: { status: 404, message: 'Device not found' } }, { status: 404 });
+    return new Response(null, { status: sp.playStatus });
+  }
+  if (u === 'https://api.spotify.com/v1/me/player' && init.method === 'PUT') { sp.moved.push(JSON.parse(init.body).device_ids[0]); return new Response(null, { status: 204 }); }
   if (u.startsWith('https://api.spotify.com/v1/me/playlists')) {
     const second = u.includes('offset=50');
     return Response.json({ items: second ? sp.playlists.slice(50) : sp.playlists.slice(0, 50), next: !second && sp.playlists.length > 50 ? 'https://api.spotify.com/v1/me/playlists?offset=50&limit=50' : null });
@@ -214,4 +220,19 @@ test('Day: plays on the phone through its own secret', async () => {
   assert.deepEqual(r.body, { ok: true, device: 'iPhone' }); // Day is always the phone
   assert.equal((await call(e, 'hub/spotify/day/play', { uri: URI }, NOW, { Authorization: 'Bearer nope' })).status, 401);
   assert.equal((await call(e, 'hub/spotify/day/login', undefined, NOW, day)).status, 404);
+});
+
+test('play: Spotify is open on the PC but the phone played last; Play moves it there, then plays', async () => {
+  const e = env();
+  await at(NOW, () => connect(e));
+  sp.devices = [{ ...pc, is_active: false }, { ...phone, is_active: true }];
+  sp.needsMove = true;
+  sp.moved = [];
+  sp.calls.length = 0;
+  const r = await call(e, 'spotify/' + CODE + '/play', { uri: URI, kind: 'computer' }, NOW + 60000);
+  assert.deepEqual(r.body, { ok: true, device: 'PAUL-PC' });
+  const puts = sp.calls.filter((c) => c.method === 'PUT').map((c) => c.u.replace('https://api.spotify.com/v1', ''));
+  assert.deepEqual(puts, ['/me/player/play?device_id=dev-pc', '/me/player', '/me/player/play?device_id=dev-pc']);
+  assert.deepEqual(JSON.parse(sp.calls.find((c) => c.u.endsWith('/me/player')).body), { device_ids: ['dev-pc'], play: false });
+  sp.needsMove = false;
 });
