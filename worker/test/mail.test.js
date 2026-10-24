@@ -267,3 +267,16 @@ test('the Worker\'s email() handler never throws and never sends', async () => {
   await worker.email(m, e);
   assert.deepEqual(m.sent, []);
 });
+
+test('restless: straight onto the Restless list (src/restless.js): no mail row, nothing queued, never a reply', async () => {
+  const e = env();
+  assert.equal(readSubject('FW: restless: kayak 2h').kind, 'restless');
+  const m = message(ME, hotmail('restless: kayak on the Vliet 2h outside €', GEMEENTE));
+  const got = await receiveMail(m, e, NOW);
+  assert.ok(got.restless);
+  assert.deepEqual(m.sent, []);
+  assert.equal(rows(e).length, 0);
+  assert.equal(e.HUB_QUEUE.sent.length, 0);
+  const it = e.HUB_DB.db.prepare('SELECT * FROM restless_items').get();
+  assert.deepEqual([it.text, it.kind, it.mins, it.place, it.costs, it.source], ['Kayak on the Vliet', 'outside', 120, 'outside', 1, 'mail']);
+});

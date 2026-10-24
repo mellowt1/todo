@@ -127,6 +127,11 @@
  *   GET /api/spotify/:code[/login | /playlists]   GET /api/spotify/callback   POST /api/spotify/:code/(play | disconnect)
  *   POST /api/hub/spotify/day/play
  *
+ * Restless list (src/restless.js; the to-do's code, Day with Bearer <HUB_SECRET_DAY>): things to do with
+ * spare energy, in D1 restless_items; when the dial says wired, Morning and Day pick one that fits.
+ *   GET /api/restless/:code     POST /api/restless/:code/(add | pick | done | notforme | item/:id[/delete])
+ *   GET/POST /api/hub/restless/day[/pick | /done | /notforme | /add]
+ *
  * Archive (src/archive.js; the to-do's code): a task passed on 5 times gets a decision line in To-do and
  * Morning (Do it now, Hand off, Archive, Later); archived tasks sit in D1 `archive` until restored.
  *   GET /api/archive/:code[/list]     POST /api/archive/:code/(later | archive | restore)
@@ -215,6 +220,7 @@ import { handleEnergy, handleEnergyDay } from './energy.js';
 import { handleDread, handleDreadDay, dreadCron } from './dread.js';
 import { handleSoundtrack, handleSoundtrackDay } from './soundtrack.js';
 import { handleSpotify, handleSpotifyDay } from './spotify.js';
+import { handleRestless, handleRestlessDay } from './restless.js';
 import { handleArchive, archiveCron } from './archive.js';
 import { handleOracle, oracleCron } from './oracle.js';
 import { handleSky, markLife } from './sky.js';
@@ -438,6 +444,7 @@ const MODULES = {
     if (rest[0] === 'dread' && rest[1] === 'day') return handleDreadDay(request, env, rest.slice(2), json);
     if (rest[0] === 'soundtrack' && rest[1] === 'day') return handleSoundtrackDay(request, env, rest.slice(2), json);
     if (rest[0] === 'spotify' && rest[1] === 'day') return handleSpotifyDay(request, env, rest.slice(2), json, ctx);
+    if (rest[0] === 'restless' && rest[1] === 'day') return handleRestlessDay(request, env, rest.slice(2), json);
     if (rest[0] === 'mail' && rest[1] === 'day') return handleMailDay(request, env, rest.slice(2), json);
     return handleHub(request, env, rest, url, json);
   },
@@ -451,6 +458,7 @@ const MODULES = {
   dread: (request, env, rest) => handleDread(request, env, rest, json),
   soundtrack: (request, env, rest) => handleSoundtrack(request, env, rest, json),
   spotify: (request, env, rest, url, ctx) => handleSpotify(request, env, rest, url, json, ctx),
+  restless: (request, env, rest) => handleRestless(request, env, rest, json),
   archive: (request, env, rest) => handleArchive(request, env, rest, json),
   oracle: (request, env, rest) => handleOracle(request, env, rest, json),
   sky: (request, env, rest) => handleSky(request, env, rest, json),

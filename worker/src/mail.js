@@ -10,6 +10,8 @@
  *             "later: ..." a line in Morning's Read for you, with Done and Drop
  *             "wait: ..."  a Waiting on item: who = the person the forwarded mail went to (or came
  *                          from), what = the subject, email, chase after 7 days
+ *             "restless: ..." an item on the Restless list (src/restless.js), read like To-do's
+ *                          "restless:" line (time, inside/outside, money); no mail row is kept
  *             no prefix    Day's "Mail to sort": Task, Read later, Waiting or Drop
  *            "FW:", "Fwd:", "Doorst:" are ignored before or after the prefix. Tags anywhere in the
  *            subject: #wired #normal #drained set the task's energy, #others puts a task in the Others
@@ -38,11 +40,12 @@ import { maskSecrets, noDashes } from './mask.js';
 import { local, addDays } from './morning.js';
 import { tidyLine, toText, DUE_END } from './tidy.js';
 import { createItem, CHASE_DAYS } from './waiting.js';
+import { addItem } from './restless.js';
 import { bumpUsage, dayOf } from './intake.js';
 
 export const EXCERPT = 200; // characters kept from the forwarded text (Paul, 2026-10-21)
 export const MAX_RAW = 1024 * 1024; // a bigger mail is dropped
-const KINDS = { todo: 'todo', later: 'later', wait: 'wait' };
+const KINDS = { todo: 'todo', later: 'later', wait: 'wait', restless: 'restless' };
 const SORT_AS = ['task', 'later', 'wait', 'drop'];
 const ID16 = /^[a-z0-9]{16}$/;
 const clean = (v, max) => typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
@@ -68,7 +71,7 @@ export function readSubject(raw) {
   for (let i = 0; i < 4; i++) {
     const before = s;
     s = s.replace(FWD, '');
-    const m = !kind && s.match(/^(todo|later|wait)\s*:\s*/i);
+    const m = !kind && s.match(/^(todo|later|wait|restless)\s*:\s*/i);
     if (m) { kind = KINDS[m[1].toLowerCase()]; s = s.slice(m[0].length); }
     if (s === before) break;
   }
@@ -156,6 +159,10 @@ export async function receiveMail(message, env, now = Date.now()) {
   const parsed = await PostalMime.parse(await readRaw(message.raw));
   const at = new Date(now).toISOString();
   const row = toRow(parsed, at);
+  if (row.kind === 'restless') { // straight onto the list: the subject is all there is
+    const got = await addItem(env, row.subject, {}, 'mail', now);
+    return got.error ? { dropped: true } : { restless: got.item.id };
+  }
   const id = rand();
   await env.HUB_DB.prepare(
     'INSERT INTO mail (id, kind, subject, sender, sent_at, excerpt, energy, others, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'

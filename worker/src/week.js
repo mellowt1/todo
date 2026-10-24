@@ -46,6 +46,7 @@ import { grantWeek } from './hiscores.js';
 import { energyFor } from './energy.js';
 import { waitingWeek } from './waiting.js';
 import { dreadFor } from './dread.js';
+import { restlessFor } from './restless.js';
 import { archiveWeek } from './archive.js';
 import { oracleWeek } from './oracle.js';
 
@@ -203,6 +204,7 @@ export async function weekBlock(env, now = Date.now()) {
   const dread = await dreadFor(env, monday, doc.items).catch(() => null);
   const archive = await archiveWeek(env, monday).catch(() => null);
   const oracle = await oracleWeek(env, monday).catch(() => null);
+  const restless = await restlessFor(env, monday).catch(() => null);
   const ids = new Map(await Promise.all(vac.map(async (r) => [r.id, await todoTaskId(r.id)])));
   const received = cal ? Date.parse(cal.received) : NaN;
   return {
@@ -228,6 +230,7 @@ export async function weekBlock(env, now = Date.now()) {
     dread, // Dread meter: { lies, byLevel, rated, started, skipped }, src/dread.js dreadWeek
     oracle, // the Oracle: this week's question, its state and answer (src/oracle.js), or null
     archive, // Archive: { archived: [{ name, skips, note }], handedOff: [{ name, who, nextChase }], restored }
+    restless, // Restless list: { wired, done: [{ item, text, kind, at }], skipped, byKind }, src/restless.js restlessWeek
   };
 }
 

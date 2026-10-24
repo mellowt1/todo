@@ -66,6 +66,8 @@ export const REACTS = {
   'waiting.created': TRIO, 'waiting.snoozed': TRIO, 'waiting.resolved': TRIO, 'waiting.chase_due': TRIO,
   'dread.started': TRIO, 'dread.rated': TRIO, 'dread.done': TRIO, 'dread.stopped': TRIO, 'dread.undone': TRIO, 'dread.skipped': TRIO,
   'soundtrack.played': TRIO, 'soundtrack.declined': TRIO, // the offer goes in every app
+  // The Restless card is in Morning and Day; To-do and mail only add to the list.
+  'restless.added': ['morning', 'day'], 'restless.picked': ['morning', 'day'], 'restless.done': ['morning', 'day'], 'restless.skipped': ['morning', 'day'],
   'task.fate_due': TWO, 'task.fate_later': TWO, 'task.buried': TWO, 'task.resurrected': TWO, 'task.handed_off': TRIO,
   'task.created': ['todo'], 'readlater.created': ['morning'], 'readlater.closed': ['morning'],
   'oracle.asked': ['morning'], 'oracle.answered': ['morning'],
@@ -89,6 +91,7 @@ export const LABELS = {
   'dread.started': 'Timer started', 'dread.rated': 'Dread rated', 'dread.done': 'Done after a timer', 'dread.stopped': 'Timer stopped',
   'dread.undone': 'Done undone', 'dread.skipped': 'Passed on',
   'soundtrack.played': 'Music played', 'soundtrack.declined': 'Music: not now',
+  'restless.added': 'Restless item added', 'restless.picked': 'Restless pick', 'restless.done': 'Restless done', 'restless.skipped': 'Restless skipped',
   'task.fate_due': 'Time to decide', 'task.fate_later': 'Decide later', 'task.buried': 'Archived', 'task.resurrected': 'Restored',
   'task.handed_off': 'Handed off', 'task.created': 'Task made',
   'readlater.created': 'Read later added', 'readlater.closed': 'Read later closed',

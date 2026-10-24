@@ -184,6 +184,10 @@ The app polls `GET /api/todo/:code?since=<rev>` every ten seconds, only while it
 | `POST /api/hub/soundtrack/day/(played\|notnow)` | `Bearer HUB_SECRET_DAY` | the same for Day |
 | `GET /api/spotify/:code[/login\|/playlists]` | the code | Spotify, for real (Paul's own developer app; secrets `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_KEY`): `{ configured, connected }`; `login` goes to Spotify's consent page (scopes `playlist-read-private user-read-playback-state user-modify-playback-state`); his playlists for the sheet |
 | `GET /api/spotify/callback` | Spotify (state) | keeps the login in KV `spotify:login`, sealed with AES-GCM under `SPOTIFY_KEY` |
+| `GET /api/restless/:code` | the code | the Restless list (D1 `restless_items`): `{ items: [{ id, text, kind, mins, place, costs, weight, done, skipped, hiddenUntil, source }], kinds, counts }` |
+| `POST /api/restless/:code/(add\|pick\|done\|notforme)` | the code | `{ text, kind?, mins?, place?, costs?, source }` ("restless: ..." lines are read for time, place and money; a kind is guessed by fixed words, else To sort); `{ mins \| null, skip, another?, source }` picks by weight what fits the time, never outside in the dark; Done x1.25, Another x0.8, Not for me x0.5 and hidden until tomorrow |
+| `POST /api/restless/:code/item/:id[/delete]` | the code | edit or remove an item |
+| `GET/POST /api/hub/restless/day[/pick\|/done\|/notforme\|/add]` | `Bearer HUB_SECRET_DAY` | the same for Day (no editing) |
 | `POST /api/spotify/:code/(play\|disconnect)` | the code | `{ uri, kind: phone \| computer }`: plays the playlist on that kind of Spotify device, retrying about 20 s in the background while the app the tap opened comes up |
 | `POST /api/hub/spotify/day/play` | `Bearer HUB_SECRET_DAY` | the same for Day, always the phone |
 | `GET /api/archive/:code[/list]` | the code | Archive: `{ due, archived }` (tasks passed on 5 times since launch), or the ledger |
