@@ -46,7 +46,7 @@ const clean = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u00
 
 // Fixed words for a kind, checked in this order; the first that matches wins. No Claude.
 const KIND_WORDS = [
-  ['move', /\b(run|running|jog|gym|climb|climbing|boulder\w*|swim\w*|yoga|workout|train|training|football|padel|tennis|squash|stretch\w*|row|rowing|box|boxing|sport|fitness|hardlopen|zwemmen)\b/i],
+  ['move', /\b(push-?ups?|sit-?ups?|pull-?ups?|planks?|squats?|burpees?|opdrukken|dance|dancing|dansen|run|running|jog|gym|climb|climbing|boulder\w*|swim\w*|yoga|workout|train|training|football|padel|tennis|squash|stretch\w*|row|rowing|box|boxing|sport|fitness|hardlopen|zwemmen)\b/i],
   ['build', /\b(build|fix|make|solder|code|coding|repair|assemble|print|3d|project|tinker|wire|wiring|sand|varnish|bouw\w*|maak|maken|repareer)\b/i],
   ['social', /\b(call|text|meet|friend|friends|coffee with|drinks|dinner with|visit|bel|bellen|afspreken|vrienden)\b/i],
   ['learn', /\b(read|learn|study|course|german|deutsch|spanish|duolingo|practi[cs]e|lesson|podcast|lecture|lezen|leren|cursus)\b/i],

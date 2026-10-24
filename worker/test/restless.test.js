@@ -74,6 +74,9 @@ test('readLine: time, place and money come out of the words; a kind is only gues
   assert.equal(readLine('Something odd').kind, null); // waits in To sort
   assert.equal(readLine('Free climbing video').costs, null); // "free" in the middle is a word, not a price
   assert.equal(readLine('restless:   ').text, '');
+  // Paul's starter list (2026-10-24): what the fixed words make of it; the rest waits in To sort
+  const kinds = ['Pushups', 'Dance', 'Cook', 'Shower', 'go to gym', 'watch TV', 'Play Games'].map((t) => [readLine(t).text, readLine(t).kind]);
+  assert.deepEqual(kinds, [['Pushups', 'move'], ['Dance', 'move'], ['Cook', 'home'], ['Shower', null], ['Go to gym', 'move'], ['Watch TV', null], ['Play Games', null]]);
   assert.equal(guessKind('Walk to the harbour'), 'outside');
 });
 
