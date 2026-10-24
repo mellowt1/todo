@@ -250,11 +250,31 @@
   function addTask(text) {
     text = cleanText(text);
     if (!text) return;
+    if (RESTLESS.test(text)) return addRestless(text);
     const id = newId();
     justAdded.add(id);
     upsert({ id, text, section: addTo(), done: false, doneAt: null, pos: now() });
     tidyLater(id, text).finally(() => wantsReturnDate(id));
     return id;
+  }
+
+  /* The Restless list (Paul, 2026-10-24; worker/src/restless.js): "restless: kayak 2h outside €" in
+   * New task is not a task. It goes to the hub's list of things for spare energy, which Morning and
+   * Day offer when the dial says wired; the hub reads the time, place and money from the words. */
+  const RESTLESS = /^restless\s*:/i;
+  const MINS_WORDS = { 15: '15 min', 30: '30 min', 60: '1 h', 120: '2 h+' };
+  function addRestless(text) {
+    if (!navigator.onLine) { toast('Not added: the Restless list needs a connection.'); return null; }
+    fetch(API + '/api/restless/' + code + '/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, source: 'todo' }) })
+      .then(async (r) => {
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || !d.item) throw new Error((d && d.error) || 'status ' + r.status);
+        const it = d.item;
+        const bits = [it.text, MINS_WORDS[it.mins], it.place, it.costs === true ? 'costs money' : it.costs === false ? 'free' : null].filter(Boolean);
+        toast('On the Restless list: ' + bits.join(' · ') + '.');
+      })
+      .catch((e) => toast(e.message && !/^status/.test(e.message) ? e.message : 'Could not add it to the Restless list. Try again.'));
+    return 'restless-' + Date.now();
   }
 
   /* Return (Paul, 2026-10-21): a new task that starts with "Return" and still has no date once
@@ -1963,7 +1983,7 @@
   // The label crossfades only when its words change.
   function capLabel() {
     const l = $('capLabel');
-    const t = (capAdded.length ? 'Added to ' : 'Adds to ') + LABEL[addTo()];
+    const t = RESTLESS.test(capInput.value.trim()) ? 'Adds to the Restless list' : (capAdded.length ? 'Added to ' : 'Adds to ') + LABEL[addTo()];
     if (l.textContent === t) return;
     l.textContent = t;
     if (!$('capture').hidden) play(l, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
@@ -2021,16 +2041,19 @@
       e.preventDefault();
       const v = cleanText(capInput.value);
       if (!v) return closeCapture(); // Return on an empty field means finished
+      const rest = RESTLESS.test(v);
       const id = addTask(v);
+      capInput.value = '';
+      if (rest) { capLabel(); if (id) say('Sent to the Restless list.'); return; } // the toast says what the hub made of it
       capAdded.push(v);
       addCapLine(v, id);
-      capInput.value = '';
       say('Added to ' + LABEL[addTo()] + '.');
     } else if (e.key === 'Escape') {
       e.stopPropagation();
       closeCapture();
     }
   });
+  capInput.addEventListener('input', capLabel); // "restless:" says where it goes
   $('fab').addEventListener('click', openAdd);
   $('capDone').addEventListener('click', closeCapture);
   $('addDesk').addEventListener('click', () => (inlineOn ? hideInline() : showInline()));

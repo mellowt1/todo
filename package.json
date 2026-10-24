@@ -26,7 +26,8 @@
     "archive-check": "node scripts/archive-check.mjs",
     "network-link-check": "node scripts/network-link-check.mjs",
     "skills-track-check": "node scripts/skills-track-check.mjs",
-    "soundtrack-check": "node scripts/soundtrack-check.mjs"
+    "soundtrack-check": "node scripts/soundtrack-check.mjs",
+    "restless-check": "node scripts/restless-check.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
