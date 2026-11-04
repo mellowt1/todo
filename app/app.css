@@ -783,56 +783,92 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .ledger-foot button { flex-shrink: 0; min-height: 40px; padding: 0 12px; border-radius: 9px; background: var(--surface); color: var(--accent-text); font-size: 14px; font-weight: 600; }
 .ledger-empty { color: var(--secondary); font-size: 15px; }
 
-/* ---------- Energy soundtrack ----------
- * Play under the dial, "Music for this?" under the timer, and the sheet with each level's playlists. */
-.play-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; padding: 4px 4px 4px 6px; border-radius: 12px; background: var(--surface); }
-.play-row[hidden], .run-offer[hidden] { display: none; }
-.play-link, .offer-link { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; border-radius: 10px; }
-.play-disc { flex-shrink: 0; width: 34px; height: 34px; border-radius: 17px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; }
-.play-words { min-width: 0; display: flex; flex-direction: column; }
-.play-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.play-meta { font-size: var(--fs-meta); color: var(--secondary); }
-.play-edit { flex-shrink: 0; padding: 0 8px; font-size: 15px; font-weight: 500; }
-.play-link:active, .offer-link:active { opacity: 0.55; }
-#playSetup { margin-top: 0; }
+/* ---------- Music ----------
+ * The note at the top, "Music for this?" under the timer, and the Music sheet: three levels, their
+ * playlists (tap to play), two chips. Calm motion: the levels rise in on open, a form settles in, a
+ * new playlist slides in with a short green wash, a removed one folds away, Making shows a small
+ * equaliser. Reduced motion keeps only fades. */
+.title-row .music-btn { margin-left: auto; margin-right: 2px; }
+.music-btn .ic { transition: color var(--dur-press) ease; }
+.music-btn.on { color: var(--accent-text); }
+.music-btn.on .ic { animation: note-on 420ms var(--ease); }
+@keyframes note-on { 40% { transform: translateY(-2px) rotate(-6deg); } }
+.run-offer[hidden] { display: none; }
+.offer-link { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; border-radius: 10px; }
+.play-disc { flex-shrink: 0; width: 30px; height: 30px; border-radius: 15px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; }
+.offer-link:active { opacity: 0.55; }
 .running.has-offer { border-radius: 12px 12px 0 0; }
 .run-offer { display: flex; align-items: center; gap: 8px; padding: 2px 8px 4px 8px; border-radius: 0 0 12px 12px; background: var(--accent-soft); box-shadow: inset 0 1px 0 var(--accent-soft); }
-.offer-link { gap: 10px; }
-.offer-link .play-disc { width: 30px; height: 30px; }
 .offer-words { min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .offer-words b { font-weight: 600; }
 .run-btn.offer-not { background: transparent; color: var(--accent-text); padding: 0 10px; }
-.sound-body { display: flex; flex-direction: column; gap: 2px; }
-.sound-level { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: 15px; font-weight: 600; }
-.sound-list { list-style: none; margin: 0; padding: 0; }
-.sound-list li { display: flex; align-items: center; gap: 10px; min-height: 52px; border-bottom: 0.5px solid var(--sep); }
-.sound-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.sound-name { font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sound-sub { font-size: var(--fs-meta); color: var(--secondary); }
-.text-btn.sound-remove { flex-shrink: 0; color: var(--danger); font-size: 15px; font-weight: 500; }
-.text-btn.sound-add { align-self: flex-start; display: flex; align-items: center; gap: 6px; font-weight: 500; }
-.sound-acts { display: flex; flex-wrap: wrap; column-gap: 20px; }
-.sound-form input:disabled { opacity: 0.6; }
-.sound-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 12px; border-radius: 12px; background: var(--surface); }
-.sound-form input { height: 46px; min-width: 0; padding: 0 12px; border-radius: 10px; background: var(--bg); color: var(--text); font-size: var(--fs-body); border: 1.5px solid var(--sep); }
-.sound-form input:focus { border-color: var(--accent-text); outline: none; }
-.sound-form input.sound-link { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 15px; }
-.sound-hint { margin: 0; font-size: var(--fs-meta); color: var(--secondary); }
-.sound-err { margin: 0; font-size: 15px; color: var(--danger); }
-.sound-btns { display: flex; gap: 10px; margin-top: 4px; }
-.sound-btns button { flex: 1; height: 46px; border-radius: 10px; font-size: var(--fs-body); }
-.sound-cancel { background: var(--sep); color: var(--text); }
-.sound-save { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.sound-save:disabled, .sound-cancel:disabled { opacity: 0.45; }
-.sound-btns button:active { opacity: 0.55; }
-.sound-foot { margin: 10px 0 0; font-size: var(--fs-meta); color: var(--secondary); }
-/* Spotify connected (or not) at the top of the sheet, and his own playlists in the paste form. */
-.sp-row { display: flex; align-items: center; gap: 10px; min-height: 56px; border-bottom: 0.5px solid var(--sep); }
-.sp-connect { flex-shrink: 0; height: 40px; padding: 0 16px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 600; display: flex; align-items: center; text-decoration: none; }
+
+.sound-body { display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
+.mu-level { display: flex; flex-direction: column; gap: 6px; }
+.mu-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; color: var(--secondary); }
+.mu-level.now .mu-head { color: var(--text); }
+.mu-now { margin-left: 2px; padding: 1px 8px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-text); font-size: 12px; font-weight: 600; }
+.mu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.mu-row { display: flex; align-items: center; gap: 4px; border-radius: 12px; background: var(--surface); overflow: hidden; }
+.mu-play { flex: 1; min-width: 0; min-height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 4px 0 10px; color: var(--text); text-decoration: none; }
+.mu-disc { flex-shrink: 0; width: 30px; height: 30px; border-radius: 15px; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent-text); transition: background var(--dur-press) ease, color var(--dur-press) ease, transform var(--dur-press) var(--ease); }
+.mu-row:first-child .mu-disc { background: var(--accent); color: var(--on-accent); }
+.mu-play:active .mu-disc, .mu-row.playing .mu-disc { transform: scale(0.88); }
+.mu-row.playing .mu-disc { background: var(--accent); color: var(--on-accent); }
+.mu-name { min-width: 0; font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mu-made { flex-shrink: 0; display: flex; color: var(--accent-text); }
+.mu-x { flex-shrink: 0; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--secondary); transition: color var(--dur-press) ease, opacity var(--dur-press) ease; }
+.mu-x:active { opacity: 0.55; }
+@media (hover: hover) { .mu-x:hover { color: var(--danger); } .mu-play:hover .mu-disc { background: var(--accent); color: var(--on-accent); } }
+.mu-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.mu-chip { height: 36px; padding: 0 14px 0 11px; display: flex; align-items: center; gap: 6px; border-radius: 18px; border: 1px solid var(--sep); color: var(--accent-text); font-size: 15px; font-weight: 500; transition: background var(--dur-press) ease, opacity var(--dur-press) ease; }
+.mu-chip:active { opacity: 0.55; }
+@media (hover: hover) { .mu-chip:hover { background: var(--accent-soft); } }
+.mu-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; background: var(--surface); transform-origin: 50% 0; }
+.mu-form input { height: 46px; min-width: 0; padding: 0 12px; border-radius: 10px; background: var(--bg); color: var(--text); font-size: var(--fs-body); border: 1.5px solid var(--sep); transition: border-color var(--dur-press) ease; }
+.mu-form input:focus { border-color: var(--accent-text); outline: none; }
+.mu-form input.sound-link { font-size: 15px; }
+.mu-hint, .mu-found { margin: 0 2px; font-size: var(--fs-meta); color: var(--secondary); }
+.mu-found { display: flex; align-items: center; gap: 6px; color: var(--accent-text); font-weight: 500; animation: fade-in var(--dur-move) ease; }
+.mu-err { margin: 0 2px; font-size: 15px; color: var(--danger); animation: fade-in var(--dur-move) ease; }
+.mu-btns { display: flex; gap: 8px; }
+.mu-btns button { flex: 1; height: 44px; border-radius: 10px; font-size: var(--fs-body); display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity var(--dur-press) ease; }
+.mu-cancel { background: var(--sep); color: var(--text); }
+.mu-go { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.mu-go:disabled { opacity: 0.45; }
+.mu-btns button:active { opacity: 0.55; }
+.mu-making { flex-direction: row; align-items: center; gap: 12px; min-height: 50px; padding: 0 14px; color: var(--accent-text); font-size: 15px; font-weight: 500; background: var(--accent-soft); }
+.mu-eq { display: flex; align-items: flex-end; gap: 3px; height: 18px; }
+.mu-eq i { width: 3px; height: 100%; border-radius: 2px; background: currentColor; transform-origin: 50% 100%; animation: eq 900ms ease-in-out infinite alternate; }
+.mu-eq i:nth-child(2) { animation-delay: -300ms; animation-duration: 760ms; }
+.mu-eq i:nth-child(3) { animation-delay: -600ms; animation-duration: 1040ms; }
+.mu-eq i:nth-child(4) { animation-delay: -150ms; animation-duration: 840ms; }
+@keyframes eq { from { transform: scaleY(0.25); } to { transform: scaleY(1); } }
+.mu-foot { align-self: center; min-height: 44px; padding: 0 12px; color: var(--secondary); font-size: var(--fs-meta); }
+.mu-foot:active { opacity: 0.55; }
+.mu-connect { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 15px; }
+.mu-connect span { flex: 1; }
+.sp-connect { flex-shrink: 0; height: 36px; padding: 0 14px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 600; display: flex; align-items: center; text-decoration: none; }
 .sp-connect:active, .sp-list button:active { opacity: 0.55; }
-.sp-mine { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.sp-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; border-radius: 10px; background: var(--bg); }
+.sp-list { list-style: none; margin: 0; padding: 0; max-height: 176px; overflow-y: auto; overscroll-behavior: contain; border-radius: 10px; background: var(--bg); }
 .sp-list li + li { border-top: 0.5px solid var(--sep); }
 .sp-list button { width: 100%; min-height: 44px; padding: 0 12px; display: flex; align-items: center; gap: 10px; text-align: left; color: var(--text); font-size: var(--fs-body); }
 .sp-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-list small { flex-shrink: 0; color: var(--secondary); font-size: var(--fs-meta); }
+/* Motion */
+@keyframes mu-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes mu-settle { from { opacity: 0; transform: translateY(-4px) scaleY(0.96); } }
+@keyframes mu-fresh { 0% { opacity: 0; transform: translateY(-8px); background: var(--accent-soft); } 30% { opacity: 1; transform: none; background: var(--accent-soft); } 100% { background: var(--surface); } }
+.sound-body.stagger > * { animation: mu-rise 320ms var(--ease) backwards; }
+.sound-body.stagger > :nth-child(2) { animation-delay: 50ms; }
+.sound-body.stagger > :nth-child(3) { animation-delay: 100ms; }
+.sound-body.stagger > :nth-child(4) { animation-delay: 150ms; }
+.sound-body.stagger > :nth-child(5) { animation-delay: 200ms; }
+.mu-form.enter { animation: mu-settle var(--dur-move) var(--ease); }
+.mu-row.fresh { animation: mu-fresh 1600ms var(--ease); }
+@media (prefers-reduced-motion: reduce) {
+  .music-btn.on .ic, .mu-eq i { animation: none; }
+  .mu-eq i:nth-child(odd) { transform: scaleY(0.6); }
+  .mu-form.enter, .mu-row.fresh { animation: fade-in var(--dur-move) ease; }
+  .mu-disc { transition: background var(--dur-press) ease, color var(--dur-press) ease; transform: none !important; }
+}

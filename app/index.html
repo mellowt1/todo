@@ -33,6 +33,7 @@
   <symbol id="i-addbox" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5H5V6h5"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5.5l11-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></symbol>
   <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8"/></symbol>
 </svg>
 
@@ -57,6 +58,8 @@
     <header class="top">
       <div class="title-row">
         <h1 id="title">Today</h1>
+        <!-- Music (app.js, Music): the sheet with the playlists for each level; green when the level on has one. -->
+        <button id="musicBtn" class="icon-btn music-btn list-only" aria-label="Music"><svg class="ic" width="24" height="24"><use href="#i-music"/></svg></button>
         <button id="historyBtn" class="icon-btn phone-only list-only" aria-label="Done history"><svg class="ic" width="24" height="24"><use href="#i-clock"/></svg></button>
         <button id="closeDone" class="text-btn phone-only done-only">Close</button>
         <button id="addDesk" class="add-desk desk-only list-only" aria-label="Add task"><svg class="ic ic-2" width="20" height="20"><use href="#i-plus"/></svg></button>
@@ -77,12 +80,6 @@
           <button id="giveOne" class="text-btn" hidden>Give me one</button>
         </div>
         <button id="energySort" class="energy-sort meta" hidden></button>
-        <!-- The Energy soundtrack (app.js, Soundtrack): Play opens the level's first Spotify playlist. -->
-        <div id="playRow" class="play-row" hidden>
-          <a id="playLink" class="play-link" href="#"><span class="play-disc" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 2.2v9.6l8-4.8z" fill="currentColor"/></svg></span><span class="play-words"><span id="playTitle" class="play-title"></span><span id="playMeta" class="play-meta"></span></span></a>
-          <button id="playEdit" class="text-btn play-edit" aria-label="Edit the music for each level">Edit</button>
-        </div>
-        <button id="playSetup" class="energy-sort meta" hidden></button>
       </div>
       <!-- The Dread meter (app.js, Dread): the one timer that runs, from any app. Today only. -->
       <div id="running" class="running list-only" role="status" hidden>
@@ -330,16 +327,15 @@
   </div>
 </div>
 
-<!-- The Energy soundtrack: up to 3 Spotify playlists for each level (app.js, Soundtrack). The hub holds them. -->
+<!-- Music: up to 3 Spotify playlists for each level (app.js, Music). The hub holds them. -->
 <div id="sound" class="sheet-wrap" hidden>
   <div class="scrim"></div>
   <div class="sheet card-sheet sound-sheet" role="dialog" aria-labelledby="soundHead">
     <div class="grabber"></div>
     <div class="sheet-head">
-      <span id="soundHead" class="meta">Music for each level</span>
+      <span id="soundHead" class="meta">Music</span>
       <button id="soundClose" class="text-btn">Done</button>
     </div>
-    <p class="sort-intro">Paste a playlist link from Spotify (Share › Copy link), pick one of yours, or have a new one made. Nothing plays by itself, and only playlists made here are new in your Spotify.</p>
     <div id="soundBody" class="sound-body"></div>
   </div>
 </div>

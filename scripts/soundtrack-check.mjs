@@ -1,11 +1,10 @@
-// The Energy soundtrack, against a mocked Worker (no wrangler needed): Play under the dial opens the
-// level's first playlist (a spotify: link) and tells the hub, a level without one offers to add one,
-// the sheet reads a pasted link's name, adds, refuses an album in plain words and removes, and a
-// running timer shows "Music for this?" until Not now or Play. With Spotify connected the same tap
-// asks the hub to start it on this device (phone or computer), and the paste form offers his own
-// playlists; Disconnect turns the row back into Connect. Make a new one sends the level and words and
-// the new one plays first; a login from before the make scopes asks to connect again. Every playlist
-// and task is made up.
+// Music, against a mocked Worker (no wrangler needed): the note at the top turns green when the level
+// that is on has a playlist and opens the Music sheet: three levels, their playlists (tap one to play
+// it: a spotify: link, the hub told, Spotify started on this device), Add link (the name read from
+// Spotify, an album refused in plain words, or one of his own picked), a small x to remove, and Make
+// new playlist (the words go to the hub, Making shows, the new one comes first marked as made). A
+// login from before the make scopes asks to connect again; Disconnect turns into Connect. A running
+// timer shows "Music for this?" until Not now or Play. Every playlist and task is made up.
 //   PORT=8121 npm run serve, then: APP_URL=http://localhost:8121/ npm run soundtrack-check
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -56,7 +55,7 @@ function world() {
         w.lists[body.level] = [e, ...w.lists[body.level]].slice(0, 3);
         return { title: e.title, songs: 24, fresh: 8, url: e.url, uri: e.uri, lists: w.lists, dropped: null };
       }
-      if (p === `/api/spotify/${CODE}/disconnect`) { w.posts.push({ sub: 'disconnect' }); w.spotify = { configured: true, connected: false }; return { connected: false }; }
+      if (p === `/api/spotify/${CODE}/disconnect`) { w.posts.push({ sub: 'disconnect' }); w.spotify = { configured: true, connected: false, canMake: false }; return { connected: false }; }
       if (p.startsWith(`/api/soundtrack/${CODE}`)) {
         const sub = p.slice(`/api/soundtrack/${CODE}`.length).replace('/', '');
         if (!sub) return { lists: w.lists, max: 3 };
@@ -104,91 +103,103 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   const tap = (sel) => page.locator(sel).first().click();
   const last = (sub) => w.posts.filter((d) => d.sub === sub).at(-1);
   const poll = async (n = 3) => { for (let i = 0; i < n; i++) { await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await page.waitForTimeout(300); } };
+  const openMusic = async () => { await tap('#musicBtn'); await page.waitForSelector('#sound:not([hidden]) .mu-level'); await page.waitForTimeout(450); };
+  const closeMusic = async () => { if (phone) await tap('#soundClose'); else await page.keyboard.press('Escape'); await page.waitForSelector('#sound', { state: 'hidden' }); };
+  const rows = (level) => page.locator(`#soundBody .mu-level[aria-label="${level}"] .mu-name`).allTextContents();
 
-  // Drained is on: Play opens Low tide.
-  check(await page.isVisible('#playRow'), name + ': Play shows under the dial');
-  check((await page.textContent('#playTitle')) === 'Play Low tide', name + ': it plays the first Drained playlist');
-  check((await page.getAttribute('#playLink', 'href')) === 'spotify:playlist:' + P.low, name + ': a spotify: link, so the app opens');
-  check((await page.textContent('#playMeta')) === 'Your Drained playlist · plays in Spotify', name + ': says which level, and that Spotify plays it');
-  await page.screenshot({ path: file(name + '-play') });
-  await tap('#playLink');
-  await page.waitForTimeout(300);
+  // Today: no Play card any more, the note at the top is green (Drained has music).
+  check(!(await page.locator('#playRow').count()), name + ': no Play card under the dial');
+  check(await page.isVisible('#musicBtn'), name + ': the note is at the top');
+  check(await page.evaluate(() => document.getElementById('musicBtn').classList.contains('on')), name + ': green, Drained has music');
+  await page.screenshot({ path: file(name + '-today') });
+
+  // The sheet: three levels, Drained is Now, no intro text.
+  await openMusic();
+  const heads = await page.locator('#soundBody .mu-head').allTextContents();
+  check(JSON.stringify(heads) === '["Wired","Normal","DrainedNow"]', name + ': three levels, Drained marked Now ' + JSON.stringify(heads));
+  check(!(await page.locator('#sound .sort-intro').count()) && (await page.textContent('#soundHead')) === 'Music', name + ': headed Music, no intro text');
+  check(!(await page.locator('#soundBody .mu-connect').count()), name + ': connected: no Spotify row');
+  check(JSON.stringify(await rows('Drained')) === '["Low tide","Rain on the window"]', name + ': Drained lists its two');
+  await page.screenshot({ path: file(name + '-sheet') });
+
+  // Tap a playlist: it plays and the sheet steps aside.
+  await tap('#soundBody .mu-play[href="spotify:playlist:' + P.rain + '"]');
+  await page.waitForSelector('#sound', { state: 'hidden' });
   const played = last('played');
-  check(played && played.level === 'drained' && played.from === 'dial' && played.source === 'todo' && !played.startedAt, name + ': the hub heard Play from the dial ' + JSON.stringify(played));
+  check(played && played.level === 'drained' && played.from === 'dial' && played.source === 'todo', name + ': the hub heard Play ' + JSON.stringify(played));
   const sp1 = last('spotify-play');
-  check(sp1 && sp1.uri === 'spotify:playlist:' + P.low && sp1.kind === (phone ? 'phone' : 'computer'), name + ': the hub is asked to start it on this ' + (phone ? 'phone' : 'computer') + ' ' + JSON.stringify(sp1));
-  check((await page.getAttribute('#playLink', 'href')) === 'spotify:playlist:' + P.low, name + ': the link still opens Spotify');
+  check(sp1 && sp1.uri === 'spotify:playlist:' + P.rain && sp1.kind === (phone ? 'phone' : 'computer'), name + ': the hub starts it on this ' + (phone ? 'phone' : 'computer') + ' ' + JSON.stringify(sp1));
 
-  // Normal has none yet: a quiet way in, and the sheet opens at the paste form.
+  // Normal has none: the note is grey; Add link reads the name, refuses an album.
   await tap('#energySeg [data-level="normal"]');
   await page.waitForTimeout(400);
-  check(!(await page.isVisible('#playRow')) && (await page.textContent('#playSetup')) === 'Music for Normal? Add a playlist', name + ': a level without music offers to add some');
-  await tap('#playSetup');
-  await page.waitForSelector('#sound:not([hidden]) #soundUrl');
+  check(!(await page.evaluate(() => document.getElementById('musicBtn').classList.contains('on'))), name + ': Normal has no music: the note is grey');
+  await openMusic();
+  await tap('#soundBody [data-act="add"][data-level="normal"]');
+  await page.waitForSelector('#soundUrl');
   check(await page.evaluate(() => document.activeElement && document.activeElement.id === 'soundUrl'), name + ': the link field has the focus');
   await page.fill('#soundUrl', 'https://open.spotify.com/album/4uLU6hMCjMI75M1A2tKUQC');
   await page.dispatchEvent('#soundUrl', 'change');
-  await page.waitForSelector('#soundBody .sound-err');
-  check((await page.textContent('#soundBody .sound-err')) === 'That is an album, not a playlist.', name + ': an album is refused in plain words');
+  await page.waitForSelector('#soundBody .mu-err');
+  check((await page.textContent('#soundBody .mu-err')) === 'That is an album, not a playlist.', name + ': an album is refused in plain words');
   await page.fill('#soundUrl', 'https://open.spotify.com/playlist/' + P.desk + '?si=abc');
-  await page.waitForFunction(() => document.getElementById('soundName') && document.getElementById('soundName').value === 'Desk hours');
-  check(true, name + ': the name is read from Spotify');
+  await page.waitForFunction(() => (document.querySelector('#soundBody .mu-found') || {}).textContent === 'Desk hours');
+  check(!(await page.locator('#soundName').count()), name + ': the name is read from Spotify, no name field');
   await page.screenshot({ path: file(name + '-paste') });
   await tap('#soundBody [data-act="save"]');
   await page.waitForFunction(() => !document.getElementById('soundUrl'));
   const added = last('add');
   check(added && added.level === 'normal' && added.title === 'Desk hours' && added.url.includes(P.desk), name + ': the hub heard add ' + JSON.stringify(added));
-  const normalRows = await page.locator('#soundBody .sound-list').nth(0).locator('.sound-name').allTextContents();
-  check(JSON.stringify(normalRows) === '["Desk hours"]', name + ': Normal lists Desk hours ' + JSON.stringify(normalRows));
+  check(JSON.stringify(await rows('Normal')) === '["Desk hours"]', name + ': Normal lists Desk hours');
+  check(await page.evaluate(() => !!document.querySelector('#soundBody .mu-row.fresh')), name + ': the new one slides in');
 
-  // Remove the second Drained one; the first still plays.
+  // Remove: the row folds away.
   await tap('#soundBody [data-act="remove"][data-id="rainwind01"]');
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !document.querySelector('#soundBody .mu-row[data-id="rainwind01"]'));
   check(last('remove') && last('remove').id === 'rainwind01' && last('remove').level === 'drained', name + ': the hub heard remove');
-  check(!(await page.locator('#soundBody .sound-name', { hasText: 'Rain on the window' }).count()), name + ': Rain on the window is gone');
-  check((await page.textContent('#soundBody .sp-row .sound-name')) === 'Spotify is connected', name + ': the sheet says Spotify is connected');
-  // His own playlists in the paste form: pick one, add it.
+
+  // His own playlists in the link form: pick one, add it to Wired.
   await tap('#soundBody [data-act="add"][data-level="wired"]');
   await page.waitForSelector('#soundBody .sp-list button');
   await tap('#soundBody .sp-list button');
-  check((await page.inputValue('#soundUrl')).includes('5ABHKGoOzxkaa28ttQV9sE') && (await page.inputValue('#soundName')) === 'Full send', name + ': picking one of his fills the link and name');
+  check((await page.inputValue('#soundUrl')).includes('5ABHKGoOzxkaa28ttQV9sE'), name + ': picking one of his fills the link');
   await tap('#soundBody [data-act="save"]');
   await page.waitForFunction(() => !document.getElementById('soundUrl'));
-  check(last('add') && last('add').level === 'wired' && last('add').url.includes('5ABHKGoOzxkaa28ttQV9sE') && last('add').title === 'Full send', name + ': the picked one is added to Wired');
-  // Disconnect: the row turns into Connect, which goes to the hub's login.
+  check(last('add') && last('add').level === 'wired' && last('add').title === 'Full send', name + ': the picked one is added to Wired');
+
+  // Disconnect: Connect; connected before the make scopes: Connect again, no Make chips.
   await tap('#soundBody [data-act="disconnect"]');
-  await page.waitForSelector('#soundBody .sp-connect');
-  check((await page.getAttribute('#soundBody .sp-connect', 'href')).endsWith('/api/spotify/' + CODE + '/login'), name + ': Disconnect turns the row into Connect');
-  // Connected before the make scopes: Play works, Make asks to connect again first.
+  await page.waitForSelector('#soundBody .mu-connect');
+  check((await page.textContent('#soundBody .mu-connect span')) === 'Connect Spotify to play here' && (await page.getAttribute('#soundBody .sp-connect', 'href')).endsWith('/api/spotify/' + CODE + '/login'), name + ': Disconnect turns into Connect');
   w.spotify = { configured: true, connected: true, canMake: false };
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); // back from connecting
-  await page.waitForFunction(() => (document.querySelector('#soundBody .sp-row .sound-name') || {}).textContent === 'Connect Spotify again');
-  check(!(await page.locator('#soundBody [data-act="make"]').count()), name + ': an old login shows Connect again and no Make');
+  await page.waitForFunction(() => (document.querySelector('#soundBody .mu-connect span') || {}).textContent === 'Connect Spotify again to make playlists');
+  check(!(await page.locator('#soundBody [data-act="make"]').count()), name + ': an old login: Connect again and no Make');
   w.spotify = { configured: true, connected: true, canMake: true };
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  await page.waitForSelector('#soundBody .sp-row [data-act="disconnect"]');
-  check(true, name + ': coming back to the app reads the connection again');
-  // Make a new one for Drained, with a few words.
+  await page.waitForFunction(() => !document.querySelector('#soundBody .mu-connect'));
+  check(true, name + ': coming back reads the connection again');
+
+  // Make new playlist for Drained, with a few words.
   await tap('#soundBody [data-act="make"][data-level="drained"]');
   await page.waitForSelector('#soundWords');
   check(await page.evaluate(() => document.activeElement && document.activeElement.id === 'soundWords'), name + ': the words field has the focus');
-  check((await page.textContent('#soundBody [data-act="make-go"]')) === 'Make for Drained', name + ': the button names the level');
   await page.fill('#soundWords', 'rainy Sunday');
   await page.screenshot({ path: file(name + '-make') });
   await tap('#soundBody [data-act="make-go"]');
-  await page.waitForFunction(() => { const b = document.querySelector('#soundBody [data-act="make-go"]'); return b && b.disabled && b.textContent === 'Making…'; });
-  check(await page.locator('#soundWords').isDisabled(), name + ': while it is made, the form waits');
+  await page.waitForSelector('#soundBody .mu-making');
+  check((await page.textContent('#soundBody .mu-making')).trim() === 'Making your Drained playlist', name + ': Making shows');
+  await page.waitForTimeout(250);
   await page.screenshot({ path: file(name + '-making') });
-  await page.waitForFunction(() => !document.getElementById('soundWords'));
+  await page.waitForFunction(() => !document.querySelector('#soundBody .mu-making'));
   const made = last('make');
   check(made && made.level === 'drained' && made.words === 'rainy Sunday', name + ': the hub heard make ' + JSON.stringify(made));
-  const drainedFirst = page.locator('#soundBody .sound-list li').filter({ hasText: 'Drained · rainy Sunday' });
-  check((await drainedFirst.count()) === 1 && (await drainedFirst.locator('.sound-sub').textContent()) === 'Made for you · Play opens this one', name + ': the new one is first and says Made for you');
-  check(/Made Drained · rainy Sunday · 4 Nov: 24 songs, 8 new to you/.test(await page.evaluate(() => document.body.innerText)), name + ': it says what was made');
-  await page.screenshot({ path: file(name + '-sheet') });
-  if (phone) await tap('#soundClose'); else await page.keyboard.press('Escape');
-  await page.waitForSelector('#sound', { state: 'hidden' });
-  check((await page.textContent('#playTitle')) === 'Play Desk hours', name + ': Normal now plays Desk hours');
+  check(JSON.stringify(await rows('Drained')) === '["Drained · rainy Sunday · 4 Nov","Low tide"]', name + ': the new one comes first');
+  check(await page.evaluate(() => !!document.querySelector('#soundBody .mu-row.fresh[data-id="madenew001"] .mu-made')), name + ': it slides in, marked as made');
+  check((await page.textContent('#say')) === 'Made Drained · rainy Sunday · 4 Nov: 24 songs, 8 new to you', name + ': it says what was made');
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: file(name + '-made') });
+  await closeMusic();
 
   // A timer runs and the hub offers music: Not now ends it.
   const startedAt = new Date(Date.now() - 60e3).toISOString();
@@ -197,7 +208,6 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   await poll();
   await page.waitForSelector('#runOffer:not([hidden])');
   check((await page.textContent('#runOffer .offer-words')).trim() === 'Music for this? Desk hours', name + ': Music for this? under the timer');
-  check(await page.evaluate(() => document.getElementById('running').classList.contains('has-offer')), name + ': the pill and the offer are one block');
   await page.screenshot({ path: file(name + '-offer') });
   await tap('#offerNot');
   await page.waitForTimeout(200);
@@ -207,7 +217,7 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   // A new timer, a new offer: Play from it.
   const s2 = new Date().toISOString();
   w.running = { ...w.running, startedAt: s2 };
-  w.offer = { ...w.offer || {}, level: 'normal', title: 'Desk hours', url: 'https://open.spotify.com/playlist/' + P.desk, uri: 'spotify:playlist:' + P.desk, startedAt: s2 };
+  w.offer = { level: 'normal', title: 'Desk hours', url: 'https://open.spotify.com/playlist/' + P.desk, uri: 'spotify:playlist:' + P.desk, startedAt: s2 };
   await poll();
   await page.waitForSelector('#runOffer:not([hidden])');
   await tap('#offerLink');
@@ -217,10 +227,10 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   check(fromOffer && fromOffer.from === 'offer' && fromOffer.startedAt === s2 && fromOffer.level === 'normal', name + ': Play from the offer ' + JSON.stringify(fromOffer));
   check(!(await page.isVisible('#runOffer')), name + ': the offer goes after Play');
 
-  // No level: no Play and nothing to add.
+  // No level: the note stays, grey.
   await tap('#energySeg [data-level="normal"]'); // the level that is on: off
   await page.waitForTimeout(300);
-  check(!(await page.isVisible('#playRow')) && !(await page.isVisible('#playSetup')), name + ': no level, no Play');
+  check(await page.isVisible('#musicBtn') && !(await page.evaluate(() => document.getElementById('musicBtn').classList.contains('on'))), name + ': no level: the note is grey');
   check(!errors.length, name + ': no page errors ' + JSON.stringify(errors));
   await ctx.close();
 }
