@@ -43,6 +43,8 @@
   const params = new URLSearchParams(location.search);
   const isLocal = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const apiParam = params.get('api') || '';
+  // The checks run on piles of made-up tasks without a level; on localhost ?noforce keeps Sort and Waiting on from opening by themselves.
+  const noForce = isLocal && params.has('noforce');
   const API = (/^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)/.test(apiParam)
     ? apiParam
     : isLocal ? 'http://localhost:8787' : 'https://paul-hub.paul-o-a04.workers.dev').replace(/\/+$/, '');
@@ -99,6 +101,49 @@
     const t = performance.now();
     pts.push({ t, v });
     while (pts.length && t - pts[0].t > 100) pts.shift();
+  }
+
+  /* A small tap under the finger (Paul, 2026-11-04). iPhone Safari has no vibrate, but toggling a
+   * hidden switch control ticks the Taptic Engine (Safari 17.4 and on); elsewhere a short vibrate.
+   * Quietly nothing where neither works, and the focus stays where it was. */
+  const tap = (() => {
+    let label = null;
+    try {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('switch', '');
+      input.id = 'tapSwitch';
+      input.tabIndex = -1;
+      label = document.createElement('label');
+      label.htmlFor = 'tapSwitch';
+      for (const el of [input, label]) { el.className = 'tap-switch'; el.setAttribute('aria-hidden', 'true'); }
+      document.body.append(input, label);
+    } catch (e) { label = null; }
+    return () => {
+      try {
+        if (navigator.vibrate) { navigator.vibrate(8); return; }
+        if (!label) return;
+        const was = document.activeElement;
+        label.click();
+        if (was && document.activeElement !== was) was.focus({ preventScroll: true });
+      } catch (e) { /* no tap */ }
+    };
+  })();
+
+  // A number that turns over: the old one leaves upward as the new one comes in from below.
+  function rollTo(el, text) {
+    if (el.dataset.v === text) return;
+    const first = el.dataset.v === undefined;
+    el.dataset.v = text;
+    const old = el.lastElementChild;
+    const next = document.createElement('span');
+    next.textContent = text;
+    if (first || !old || M.reduced || !el.offsetParent) { el.replaceChildren(next); return; }
+    old.setAttribute('aria-hidden', 'true');
+    old.classList.add('roll-out'); // out of the text a reader or a check takes
+    el.append(next);
+    play(old, [{ transform: 'none', opacity: 1 }, { transform: 'translateY(-100%)', opacity: 0 }], { duration: 260 }).then(() => old.remove());
+    play(next, [{ transform: 'translateY(100%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260 });
   }
 
   /* ---------- One quiet live region ---------- */
@@ -422,6 +467,7 @@
     const at = now();
     const row = byId(id);
     if (row && view === 'list') xpDrop(row, pays(it, at));
+    tap();
     upsert(Object.assign({}, it, { done: true, doneAt: at }, it.week ? { week: null } : {})); // done takes the flag off; Undo puts it back
     // The task with the timer: the hub hears it is done, and Undo lets the timer run on.
     const timed = runDone(id, at);
@@ -573,6 +619,7 @@
       if (++pollCount % 6 === 1) loadWaiting(); // Waiting on, about once a minute
       if (pollCount % 3 === 1) loadDread(); // the timer, about every half minute: a start in Morning or Day
       if (pollCount % 6 === 1) loadFate(); // Archive's line, about once a minute
+      maybeForce();
       if (!st.queue.length) settle();
     } catch (e) {
       if (!loaded) { loaded = true; render(); }
@@ -887,7 +934,9 @@
     el.hidden = !total;
     if (!total) return;
     const xp = xpSum(doneSince(m).flatMap(paysAt));
-    $('progressText').textContent = ticked + ' of ' + total + ' done' + (xp ? ' · ' + fmt(xp) + ' XP today' : '');
+    if (!$('progressN')) $('progressText').innerHTML = '<span id="progressN" class="roll"></span><span id="progressRest"></span>';
+    rollTo($('progressN'), String(ticked));
+    $('progressRest').textContent = ' of ' + total + ' done' + (xp ? ' · ' + fmt(xp) + ' XP today' : '');
     $('progressFill').style.transform = 'scaleX(' + (ticked / total).toFixed(3) + ')';
   }
 
@@ -938,7 +987,6 @@
       if (!it || it.done || view !== 'list' || it.section !== ui.section) closeReveal();
     }
     renderChrome();
-    if (sortOpen) renderSort();
     if (leaving.size || pressed || menuRow || revealed) { renderQueued = true; return; }
     renderQueued = false;
     renderList();
@@ -3115,31 +3163,198 @@
     bs[(i + step + bs.length) % bs.length].focus();
   });
 
-  // Sort: every open task with three buttons. On open, tasks with neither a level nor a guess are
-  // sent once for a guess (POST /api/energy/:code/suggest, Claude Haiku, at most once a day).
-  let sortOpen = false;
-  let sortAsked = false;
-  // The ones still without a level first, then the rest; each part in list order. The order is
-  // taken when the sheet opens, so a row never jumps away under a tap.
-  let sortOrder = [];
-  function sortRows() {
-    const all = PLACES.flatMap((s) => openIn(s));
-    const rank = new Map(sortOrder.map((id, i) => [id, i]));
-    return all.sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
+  /* ---------- Swipe stack ----------
+   * One card at a time (Paul, 2026-11-04, from the Motion Lab). Drag the top card: it follows the
+   * finger at once, tilts, and takes the colour of where it is going. Past 96px, or a flick faster
+   * than 0.45 px/ms, it leaves at the speed it was thrown; short of that it settles back. A small
+   * tap when it would commit and when it goes. The buttons and the arrow keys do the same, and
+   * Undo brings the last one back from its side. Sort and Waiting on use it. */
+  function swipeStack(o) {
+    const stage = o.stage;
+    const hints = {};
+    for (const h of stage.querySelectorAll('.hint')) hints[h.dataset.dir] = h;
+    let queue = [], cards = [], history = [], busy = false, drag = null;
+    const COMMIT = 96, FLICK = 0.45;
+    function make(item) {
+      const c = document.createElement('div');
+      c.className = 'scard';
+      c.innerHTML = o.card(item);
+      return c;
+    }
+    function layout() {
+      cards.forEach((c, i) => {
+        c.style.zIndex = String(10 - i);
+        c.style.transform = i ? 'translateY(' + i * 10 + 'px) scale(' + (1 - i * 0.05) + ')' : '';
+        c.style.opacity = i > 2 ? '0' : '';
+        c.setAttribute('aria-hidden', String(i > 0));
+      });
+      const g = queue[0] && o.guess ? o.guess(queue[0]) : null;
+      for (const k in hints) { hints[k].classList.toggle('guess', k === g); hints[k].hidden = !queue.length; }
+      o.onChange(queue.length, history.length);
+    }
+    function load(list) {
+      for (const c of cards) c.remove();
+      queue = list.slice(); history = []; busy = false; drag = null;
+      cards = queue.map(make);
+      for (const c of cards.slice().reverse()) stage.append(c);
+      layout();
+    }
+    function hintOn(d) { for (const k in hints) hints[k].classList.toggle('on', k === d); }
+    function wash(c, d, p) {
+      c.style.setProperty('--wash', d ? 'var(--wash-' + o.dirs[d] + ')' : 'transparent');
+      c.style.setProperty('--p', String(Math.min(1, p)));
+    }
+    function fly(d, speed, from) {
+      const c = cards[0];
+      if (!c || busy || !o.dirs[d]) return;
+      busy = true;
+      const s = from || { x: 0, y: 0, r: 0 };
+      const far = stage.clientWidth + 120;
+      const to = d === 'up' ? { x: s.x * 1.4, y: -far, r: s.r } : { x: (d === 'right' ? 1 : -1) * far, y: s.y * 1.6, r: (d === 'right' ? 1 : -1) * 18 };
+      wash(c, d, 1);
+      hintOn(d);
+      tap();
+      c.classList.add('dragging');
+      const done = () => {
+        c.remove();
+        const item = queue.shift();
+        cards.shift();
+        const undo = o.commit(item, d);
+        history.push({ item, d, undo });
+        hintOn(null);
+        busy = false;
+        layout();
+        if (!queue.length && o.onEmpty) o.onEmpty();
+      };
+      if (M.reduced) { done(); return; }
+      const ms = Math.max(170, Math.min(320, 300 - (speed || 0) * 120));
+      play(c, [
+        { transform: 'translate(' + s.x + 'px,' + s.y + 'px) rotate(' + s.r + 'deg)', opacity: 1 },
+        { transform: 'translate(' + to.x + 'px,' + to.y + 'px) rotate(' + to.r + 'deg)', opacity: 0.2 },
+      ], { duration: ms, easing: 'cubic-bezier(.3,.6,.4,1)', fill: 'forwards' }).then(done);
+    }
+    function undo() {
+      const h = history.pop();
+      if (!h || busy) return;
+      if (h.undo) h.undo();
+      const c = make(h.item);
+      queue.unshift(h.item);
+      cards.unshift(c);
+      stage.append(c);
+      layout();
+      if (!M.reduced) {
+        const from = h.d === 'up' ? 'translateY(-' + stage.clientWidth + 'px)' : 'translateX(' + (h.d === 'right' ? 1 : -1) * stage.clientWidth + 'px) rotate(' + (h.d === 'right' ? 12 : -12) + 'deg)';
+        c.classList.add('dragging');
+        play(c, [{ transform: from, opacity: 0.2 }, { transform: 'none', opacity: 1 }], { duration: 300 }).then(() => c.classList.remove('dragging'));
+      }
+    }
+    stage.addEventListener('pointerdown', (e) => {
+      const c = cards[0];
+      if (!c || busy || !c.contains(e.target)) return;
+      drag = { c, x0: e.clientX, y0: e.clientY, pts: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }], dx: 0, dy: 0, armed: null };
+      c.classList.add('dragging');
+      try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      let dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      if (!o.dirs.up && dy < 0) dy *= 0.25; // no up here: it gives a little
+      if (dy > 0) dy *= 0.35;               // and never down
+      drag.dx = dx; drag.dy = dy;
+      drag.pts.push({ x: e.clientX, y: e.clientY, t: e.timeStamp });
+      if (drag.pts.length > 6) drag.pts.shift();
+      drag.c.style.transform = 'translate(' + dx + 'px,' + dy + 'px) rotate(' + dx / 16 + 'deg)';
+      const up = !!o.dirs.up && -dy > Math.abs(dx);
+      const d = up ? 'up' : dx > 0 ? 'right' : dx < 0 ? 'left' : null;
+      const p = (up ? -dy : Math.abs(dx)) / COMMIT;
+      const live = d && o.dirs[d] && p > 0.12 ? d : null;
+      wash(drag.c, live, live ? p * 0.9 : 0);
+      const armed = live && p >= 1 ? live : null;
+      hintOn(armed);
+      if (armed && armed !== drag.armed) tap();
+      drag.armed = armed;
+    });
+    function end() {
+      if (!drag) return;
+      const g = drag;
+      drag = null;
+      const a = g.pts[0], b = g.pts[g.pts.length - 1], dt = Math.max(1, b.t - a.t);
+      const vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt;
+      const up = !!o.dirs.up && -g.dy > Math.abs(g.dx);
+      const d = up ? 'up' : g.dx > 0 ? 'right' : 'left';
+      const dist = up ? -g.dy : Math.abs(g.dx);
+      const v = up ? -vy : Math.abs(vx);
+      const flick = v > FLICK && dist > 28 && (up ? vy < 0 : Math.sign(vx) === Math.sign(g.dx));
+      if (o.dirs[d] && (dist > COMMIT || flick)) { fly(d, v, { x: g.dx, y: g.dy, r: g.dx / 16 }); return; }
+      g.c.classList.remove('dragging');
+      g.c.style.transform = '';
+      wash(g.c, null, 0);
+      hintOn(null);
+    }
+    stage.addEventListener('pointerup', end);
+    stage.addEventListener('pointercancel', end);
+    stage.addEventListener('keydown', (e) => {
+      const d = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up' }[e.key];
+      if (d && o.dirs[d]) { e.preventDefault(); e.stopPropagation(); fly(d, 0.6); }
+      else if ((e.key === 'z' || e.key === 'Z') && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); undo(); }
+    });
+    return {
+      load, fly, undo,
+      size: () => queue.length,
+      forget() { history = []; layout(); },
+      refresh() { cards.forEach((c, i) => { c.innerHTML = o.card(queue[i]); }); layout(); },
+    };
   }
-  function renderSort() {
-    const rows = sortRows();
-    const set = rows.filter((i) => LEVELS.includes(i.energy)).length;
-    $('sortCount').textContent = set + ' of ' + rows.length + ' sorted';
-    $('sortList').innerHTML = rows.map((it) => {
-      const guess = !LEVELS.includes(it.energy) && LEVELS.includes(it.energyGuess) ? it.energyGuess : null;
-      const name = nameParts(it).name;
-      return '<li class="sort-row' + (it.energy ? ' set' : '') + '" data-id="' + it.id + '">' +
-        '<div class="sort-name"><span>' + esc(name) + '</span><span class="sort-where">' + LABEL[it.section] + '</span></div>' +
-        '<div class="sort-btns" role="radiogroup" aria-label="Energy for ' + esc(name) + '">' + LEVELS.map((l) =>
-          '<button role="radio" data-level="' + l + '" aria-checked="' + (it.energy === l) + '"' + (l === guess ? ' class="guess"' : '') + '>' + battSvg(l) + LNAME[l] + '</button>').join('') +
-        '</div></li>';
-    }).join('');
+
+  /* Sort (Paul, 2026-11-04): the open tasks without a level, one card at a time; swipe left for
+   * Wired, up for Normal, right for Drained, or tap the buttons. A guess (Claude Haiku, asked once
+   * on open, POST /api/energy/:code/suggest) shows on the card and lights its side. With
+   * FORCE_SORT or more without a level, Sort opens by itself and only lets go when they are done
+   * (Paul: "if I leave it too much pending it has to be done"). */
+  const FORCE_SORT = 5;
+  const DIR_LEVEL = { left: 'wired', up: 'normal', right: 'drained' };
+  const LEVEL_DIR = { wired: 'left', normal: 'up', drained: 'right' };
+  let sortOpen = false;
+  let sortForced = false;
+  let sortAsked = false;
+  const guessOf = (it) => (it && !LEVELS.includes(it.energy) && LEVELS.includes(it.energyGuess) ? it.energyGuess : null);
+  const unsortedOpen = () => PLACES.flatMap((s) => openIn(s)).filter((i) => !LEVELS.includes(i.energy));
+  const sortStack = swipeStack({
+    stage: $('sortStage'),
+    dirs: { left: 'wired', up: 'normal', right: 'drained' },
+    card(q) {
+      const it = items[q.id] || q;
+      const g = guessOf(it);
+      return '<span class="sc-name">' + esc(nameParts(it).name) + '</span><span class="sc-meta">' + (LABEL[it.section] || '') + (g ? ' · guess ' + LNAME[g] : '') + '</span>';
+    },
+    guess: (q) => LEVEL_DIR[guessOf(items[q.id] || q)] || null,
+    commit(q, d) {
+      const cur = items[q.id];
+      if (!cur || cur.done) return null;
+      const before = { energy: cur.energy || null, energyGuess: cur.energyGuess === undefined ? null : cur.energyGuess };
+      upsert(Object.assign({}, cur, { energy: DIR_LEVEL[d], energyGuess: null }));
+      say(nameParts(cur).name + ': ' + LNAME[DIR_LEVEL[d]]);
+      return () => { const now = items[q.id]; if (now) upsert(Object.assign({}, now, before)); };
+    },
+    onChange(left, undoable) {
+      rollTo($('sortLeft'), String(left));
+      $('sortUndo').disabled = !undoable;
+      $('sortDone').hidden = !!left;
+      $('sortBtns').hidden = !left;
+    },
+    onEmpty() {
+      sortForced = false;
+      paintSortHead();
+      setTimeout(() => { if (sortOpen && !sortStack.size()) closeSort(); }, 900);
+    },
+  });
+  $('sortStage').querySelector('.hint.left').innerHTML = '← ' + battSvg('wired') + 'Wired';
+  $('sortStage').querySelector('.hint.up').innerHTML = '↑ ' + battSvg('normal') + 'Normal';
+  $('sortStage').querySelector('.hint.right').innerHTML = battSvg('drained') + 'Drained →';
+  for (const b of $('sortBtns').querySelectorAll('button')) b.insertAdjacentHTML('afterbegin', battSvg(DIR_LEVEL[b.dataset.dir]));
+  function paintSortHead() {
+    $('sortClose').hidden = sortForced;
+    $('sortHead').textContent = sortForced ? 'Sort these first' : 'Energy';
   }
   async function askGuesses() {
     if (sortAsked || !navigator.onLine) return;
@@ -3147,30 +3362,33 @@
     sortAsked = true;
     try {
       const r = await fetch(API + '/api/energy/' + code + '/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (r.ok) await poll(); // the guesses are on the tasks now
+      if (r.ok) { await poll(); if (sortOpen) sortStack.refresh(); } // the guesses are on the tasks now
     } catch (e) { /* they stay blank; Paul can still pick */ }
   }
-  function openSort() {
-    const all = PLACES.flatMap((s) => openIn(s));
-    sortOrder = all.filter((i) => !LEVELS.includes(i.energy)).concat(all.filter((i) => LEVELS.includes(i.energy))).map((i) => i.id);
+  function openSort(forced) {
+    const list = unsortedOpen();
+    if (!list.length) return;
+    sortForced = forced === true;
     sortOpen = true;
-    renderSort();
-    openSheet($('sort'), 0, $('energySort'));
-    $('sortClose').focus({ preventScroll: true });
+    sortStack.load(list);
+    paintSortHead();
+    openSheet($('sort'), 0, sortForced ? null : $('energySort'));
+    $('sortStage').focus({ preventScroll: true });
     askGuesses();
   }
-  function closeSort() { if (!sortOpen) return; sortOpen = false; closeSheet($('sort')); }
-  $('energySort').addEventListener('click', openSort);
+  function closeSort() { if (!sortOpen || sortForced) return; sortOpen = false; closeSheet($('sort')); }
+  $('energySort').addEventListener('click', () => openSort(false));
   $('sortClose').addEventListener('click', closeSort);
   $('sort').querySelector('.scrim').addEventListener('click', closeSort);
-  $('sortList').addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-level]');
-    const li = b && b.closest('[data-id]');
-    const it = li && items[li.dataset.id];
-    if (!it) return;
-    const level = it.energy === b.dataset.level ? null : b.dataset.level;
-    upsert(Object.assign({}, it, { energy: level, energyGuess: level ? null : it.energyGuess }));
-  });
+  $('sortUndo').addEventListener('click', () => sortStack.undo());
+  $('sortBtns').addEventListener('click', (e) => { const b = e.target.closest('button[data-dir]'); if (b) sortStack.fly(b.dataset.dir, 0.6); });
+
+  // Too much left pending: the stack opens by itself (Sort first, then Waiting on) and stays until done.
+  function maybeForce() {
+    if (noForce || !loaded || view !== 'list' || modals.size || document.hidden) return;
+    if (unsortedOpen().length >= FORCE_SORT) { openSort(true); return; }
+    if (waiting.items.filter((w) => w.chaseDue).length >= FORCE_WAIT) openWaitList(true);
+  }
 
   /* ---------- Dread ----------
    * The Dread meter (Paul, 2026-10-22): start a task, say how much you dread it (1 to 5) or skip
@@ -3892,7 +4110,7 @@
       waiting = { items: d.items, open: d.open, due: d.due, names: d.names || [] };
       store.set('todo.waiting', waiting);
       renderChrome();
-      if (!$('waitList').hidden) renderWaitRows();
+      maybeForce();
     } catch (e) { /* the last copy stays */ }
   }
   async function waitPost(path, body) {
@@ -3981,48 +4199,84 @@
     if (id) closeEdit(() => openWait(id));
   });
 
-  // The list: oldest first, They answered and Snooze.
-  let snoozeOpen = null;
-  function renderWaitRows() {
-    if (!waiting.items.length) { $('waitRows').innerHTML = '<li class="wait-empty">Nothing you are waiting on.</li>'; return; }
-    $('waitRows').innerHTML = waiting.items.map((w) => {
-      const meta = [w.forWhom ? 'For ' + esc(w.forWhom) : '', CHANNEL[w.channel], 'since ' + shortDay(w.since), w.chases ? (w.chases === 1 ? 'chased once' : 'chased ' + w.chases + ' times') : '', w.chaseDue ? '' : 'chase on ' + shortDay(w.nextChase)].filter(Boolean).join(' · ');
-      const btns = snoozeOpen === w.id
-        ? '<button data-act="snooze" data-days="3">3 days</button><button data-act="snooze" data-days="7">1 week</button><button data-act="snooze" data-days="14">2 weeks</button>'
-        : '<button data-act="resolve">They answered</button><button data-act="snoozing">Snooze</button>';
-      return '<li class="wait-row" data-id="' + w.id + '"><div class="wr-top"><span><b>' + esc(w.who) + '</b> about ' + esc(w.what) + '</span>' +
-        (w.chaseDue ? '<span class="wr-due">Chase due</span>' : '') + '</div><span class="meta">' + meta + '</span><div class="wr-btns">' + btns + '</div></li>';
-    }).join('');
-  }
-  function openWaitList() {
-    snoozeOpen = null;
-    renderWaitRows();
-    openSheet($('waitList'), 0, $('waitLine'));
-    $('waitListClose').focus({ preventScroll: true });
+  /* The list as a stack (Paul, 2026-11-04): chases due first, then the oldest; swipe right when
+   * they answered, left to snooze 3 days. The hub hears a swipe 5 seconds later, or at the next
+   * swipe or on close, so Undo can take the last one back. With FORCE_WAIT or more chases due,
+   * it opens by itself with those and only lets go when each has been swiped. */
+  const FORCE_WAIT = 3;
+  const SNOOZE_DAYS = 3;
+  let waitForced = false;
+  let waitPending = null; // { id, body, timer }: the last swipe, not yet told to the hub
+  const waitMeta = (w) => [w.forWhom ? 'For ' + esc(w.forWhom) : '', CHANNEL[w.channel], 'since ' + shortDay(w.since), w.chases ? (w.chases === 1 ? 'chased once' : 'chased ' + w.chases + ' times') : '', w.chaseDue ? '<b class="wr-due">Chase due</b>' : 'chase on ' + shortDay(w.nextChase)].filter(Boolean).join(' · ');
+  const waitStack = swipeStack({
+    stage: $('waitStage'),
+    dirs: { left: 'normal', right: 'drained' },
+    card: (w) => '<span class="sc-name"><b>' + esc(w.who) + '</b> about ' + esc(w.what) + '</span><span class="sc-meta">' + waitMeta(w) + '</span>',
+    commit(w, d) {
+      flushWait();
+      const body = d === 'right' ? { action: 'resolve' } : { action: 'snooze', days: SNOOZE_DAYS };
+      waitPending = { id: w.id, body, timer: setTimeout(flushWait, 5000) };
+      say(d === 'right' ? 'Done waiting on ' + w.who : 'Snoozed ' + w.who + ' for ' + SNOOZE_DAYS + ' days');
+      return () => { if (waitPending && waitPending.id === w.id) { clearTimeout(waitPending.timer); waitPending = null; } };
+    },
+    onChange(left, undoable) {
+      rollTo($('waitLeft'), String(left));
+      $('waitUndo').disabled = !undoable || !waitPending;
+      $('waitDone').hidden = !!left;
+      $('waitDoneText').textContent = undoable ? 'Nothing to chase' : 'Nothing you are waiting on';
+      $('waitBtns').hidden = !left;
+    },
+    onEmpty() {
+      waitForced = false;
+      paintWaitHead();
+      if (waitStackForcedClose) setTimeout(() => { if (!$('waitList').hidden && !waitStack.size()) closeWaitList(); }, 900);
+    },
+  });
+  let waitStackForcedClose = false;
+  async function flushWait() {
+    const p = waitPending;
+    if (!p) return;
+    waitPending = null;
+    clearTimeout(p.timer);
+    waitStack.forget();
+    try {
+      await waitPost('/' + p.id, p.body);
+      poll();
+    } catch (e) {
+      toast('Could not save that. Try again.');
+    }
     loadWaiting();
   }
-  function closeWaitList(after) { closeSheet($('waitList'), after); }
-  $('waitLine').addEventListener('click', openWaitList);
+  function paintWaitHead() {
+    $('waitListClose').hidden = waitForced;
+    $('waitAdd').hidden = waitForced;
+    $('waitListHead').textContent = waitForced ? 'Chase these first' : 'Waiting on';
+  }
+  function openWaitList(forced) {
+    const list = waiting.items.filter((w) => forced !== true || w.chaseDue)
+      .sort((a, b) => (Number(!!b.chaseDue) - Number(!!a.chaseDue)) || (a.since < b.since ? -1 : a.since > b.since ? 1 : 0));
+    waitForced = forced === true && list.length > 0;
+    waitStackForcedClose = waitForced;
+    waitStack.load(list);
+    paintWaitHead();
+    openSheet($('waitList'), 0, waitForced ? null : $('waitLine'));
+    $('waitStage').focus({ preventScroll: true });
+  }
+  function closeWaitList(after) {
+    if (waitForced) return;
+    flushWait();
+    closeSheet($('waitList'), after);
+  }
+  $('waitLine').addEventListener('click', () => openWaitList(false));
   $('waitListClose').addEventListener('click', () => closeWaitList());
   $('waitList').querySelector('.scrim').addEventListener('click', () => closeWaitList());
   $('waitAdd').addEventListener('click', () => closeWaitList(() => openWait(null)));
-  $('waitRows').addEventListener('click', async (e) => {
-    const b = e.target.closest('button[data-act]');
-    const li = b && b.closest('[data-id]');
-    if (!li || b.disabled) return;
-    const id = li.dataset.id;
-    if (b.dataset.act === 'snoozing') { snoozeOpen = id; renderWaitRows(); const f = $('waitRows').querySelector('[data-id="' + id + '"] button'); if (f) f.focus(); return; }
+  $('waitUndo').addEventListener('click', () => waitStack.undo());
+  $('waitBtns').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-dir]');
+    if (!b) return;
     if (!navigator.onLine) { toast('Needs a connection.'); return; }
-    b.disabled = true;
-    try {
-      if (b.dataset.act === 'resolve') { await waitPost('/' + id, { action: 'resolve' }); say('Done waiting'); poll(); }
-      else { await waitPost('/' + id, { action: 'snooze', days: Number(b.dataset.days) }); say('Snoozed'); poll(); }
-      snoozeOpen = null;
-      await loadWaiting();
-    } catch (err) {
-      b.disabled = false;
-      toast('Could not do that. Try again.');
-    }
+    waitStack.fly(b.dataset.dir, 0.6);
   });
 
   // A chase task ticked: did they answer? Yes resolves the item, Still waiting chases again a gap later.

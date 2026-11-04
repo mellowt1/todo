@@ -62,7 +62,7 @@ for (const [name, viewport, scheme] of [['lanes-phone', { width: 390, height: 84
     const out = w.route(r.request());
     return out ? r.fulfill({ json: out, headers: h }) : r.fulfill({ status: 404, json: { error: 'not found' }, headers: h });
   });
-  await page.goto(APP + '?c=' + CODE + '&api=' + encodeURIComponent('http://localhost:8799'));
+  await page.goto(APP + '?c=' + CODE + '&noforce&api=' + encodeURIComponent('http://localhost:8799')); // these lists have many tasks without a level
   await page.waitForSelector('.row[data-id="today0000001"]');
   await page.waitForTimeout(600);
   const sync = () => page.waitForTimeout(1600);

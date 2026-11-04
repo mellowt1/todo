@@ -170,21 +170,61 @@ for (const [name, viewport, scheme] of [['energy-phone', { width: 390, height: 8
   await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
 
-  // Sort: asks for guesses once, shows them, a tap confirms.
+  // Sort: one card at a time; asks for guesses once and shows them; a swipe sets the level.
+  // Drags the top card of a stack: dx/dy in px, quick or slow.
+  const drag = async (stage, dx, dy = 0) => {
+    const b = await page.locator(stage + ' .scard[aria-hidden="false"]').boundingBox();
+    const x = b.x + b.width / 2, y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(450);
+  };
+  const topName = (stage) => page.locator(stage + ' .scard[aria-hidden="false"] .sc-name').textContent();
   await tap('[data-section="today"]:visible');
   await page.waitForTimeout(300);
   await tap('#energySort');
-  await page.waitForSelector('#sort:not([hidden]) .sort-row');
+  await page.waitForSelector('#sort:not([hidden]) .scard');
   await page.waitForTimeout(900);
   check(w.suggested === 1, name + ': Sort asked the hub for guesses once');
-  check(await page.locator('.sort-row[data-id="soonblank001"] [data-level="normal"].guess').count() === 1, name + ': the new guess shows outlined');
-  if (phone) await page.screenshot({ path: file(name + '-sort') });
-  await page.locator('.sort-row[data-id="soonblank001"] [data-level="drained"]').click();
-  await page.waitForTimeout(1600);
-  check(w.items.soonblank001.energy === 'drained' && !w.items.soonblank001.energyGuess, name + ': Sort confirmed another level than the guess');
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(500);
+  check(await page.isVisible('#sortClose') && (await page.textContent('#sortHead')) === 'Energy', name + ': opened by hand, it can be closed');
+  const blank = w.items.soonblank001.text;
+  let guessed = false, swiped = false;
+  for (let i = 0; i < 12 && await page.locator('#sortStage .scard').count(); i++) {
+    if ((await topName('#sortStage')) === blank) {
+      guessed = (await page.textContent('#sortStage .scard[aria-hidden="false"] .sc-meta')).includes('guess Normal') && (await page.locator('#sortStage .hint.up.guess').count()) === 1;
+      if (phone) await page.screenshot({ path: file(name + '-sort') });
+      await drag('#sortStage', 40); // short of the line: it settles back
+      check((await topName('#sortStage')) === blank, name + ': a short drag settles back');
+      await drag('#sortStage', 150);
+      swiped = true;
+    } else await tap('#sortBtns [data-dir="up"]');
+    await page.waitForTimeout(400);
+  }
+  check(guessed, name + ': the guess shows on the card and lights its side');
+  await page.waitForTimeout(1300);
+  check(swiped && w.items.soonblank001.energy === 'drained' && !w.items.soonblank001.energyGuess, name + ': a swipe right set Drained over the guess ' + JSON.stringify(w.items.soonblank001));
+  check(await page.isHidden('#sort'), name + ': all sorted, the sheet closed by itself');
   check(await page.isHidden('#energySort'), name + ': nothing left to sort');
+
+  // Five or more without a level: Sort opens by itself and stays until they are done.
+  for (let i = 0; i < 5; i++) w.items['forcesort00' + i] = { id: 'forcesort00' + i, text: 'Pending thing ' + (i + 1), section: 'soon', done: false, doneAt: null, updatedAt: Date.now(), pos: Date.now() + i };
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForSelector('#sort:not([hidden]) .scard', { timeout: 8000 });
+  await page.waitForTimeout(500);
+  check((await page.textContent('#sortHead')) === 'Sort these first' && await page.isHidden('#sortClose'), name + ': forced: no Done');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  check(await page.isVisible('#sort'), name + ': forced: Escape does not close it');
+  await tap('#sortBtns [data-dir="left"]');
+  await page.waitForTimeout(450);
+  await tap('#sortUndo');
+  await page.waitForTimeout(500);
+  check((await page.textContent('#sortLeft')).trim() === '5', name + ': Undo brings the card back ' + await page.textContent('#sortLeft'));
+  for (let i = 0; i < 5; i++) { await page.locator('#sortStage').focus(); await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(450); }
+  await page.waitForTimeout(1500);
+  check(await page.isHidden('#sort') && Object.keys(w.items).filter((k) => k.startsWith('forcesort')).every((k) => w.items[k].energy === 'wired'), name + ': arrow keys sorted all five; then it let go');
 
   // A level set in Morning shows here on the next poll.
   w.state = { level: 'wired', setAt: new Date().toISOString(), until: new Date(Date.now() + 2 * 3600e3).toISOString(), source: 'morning' };

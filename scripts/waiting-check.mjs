@@ -95,25 +95,40 @@ for (const [name, viewport, scheme] of [['waiting-phone', { width: 390, height: 
   await page.waitForTimeout(400);
   check((await page.textContent('#waitLine')) === 'Waiting on 2 · 1 chase due', name + ': the line on Soon ' + await page.textContent('#waitLine'));
 
-  // The list.
+  // The stack: chases due first; swipe right they answered, left snooze 3 days.
+  // Drags the top card of a stack: dx/dy in px, quick or slow.
+  const drag = async (stage, dx, dy = 0) => {
+    const b = await page.locator(stage + ' .scard[aria-hidden="false"]').boundingBox();
+    const x = b.x + b.width / 2, y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(450);
+  };
+  const topName = (stage) => page.locator(stage + ' .scard[aria-hidden="false"] .sc-name').textContent();
+  const metaTop = () => page.textContent('#waitStage .scard[aria-hidden="false"] .sc-meta');
   await tap('#waitLine');
-  await page.waitForSelector('#waitList:not([hidden]) .wait-row');
+  await page.waitForSelector('#waitList:not([hidden]) .scard');
   await page.waitForTimeout(400);
-  const rows = await page.$$eval('#waitRows .wait-row', (els) => els.map((e) => e.dataset.id));
-  check(JSON.stringify(rows) === JSON.stringify(['wgemeente0000001', 'waccountant00001']), name + ': oldest first');
-  check((await page.textContent('#waitRows [data-id="wgemeente0000001"] .wr-due')) === 'Chase due', name + ': a due one says so');
-  check((await page.textContent('#waitRows [data-id="waccountant00001"] .meta')).startsWith('For Sam'), name + ': someone else says for whom');
+  check((await topName('#waitStage')) === 'Gemeente about the parking permit', name + ': the due one first ' + await topName('#waitStage'));
+  check((await metaTop()).includes('Chase due'), name + ': a due one says so');
   if (phone) await page.screenshot({ path: file(name + '-list') });
-  await tap('#waitRows [data-id="waccountant00001"] [data-act="snoozing"]');
-  await tap('#waitRows [data-id="waccountant00001"] [data-days="7"]');
-  await page.waitForTimeout(500);
-  check(JSON.stringify(w.acts.at(-1)) === JSON.stringify({ id: 'waccountant00001', source: 'todo', action: 'snooze', days: 7 }), name + ': Snooze 1 week ' + JSON.stringify(w.acts.at(-1)));
-  await tap('#waitRows [data-id="wgemeente0000001"] [data-act="resolve"]');
+  const acts0 = w.acts.length;
+  await drag('#waitStage', 150);
+  check((await topName('#waitStage')) === 'the accountant about the tax overview' && (await metaTop()).startsWith('For Sam'), name + ': next card, someone else says for whom');
+  check(w.acts.length === acts0, name + ': the hub is told a moment later, not yet');
+  await tap('#waitBtns [data-dir="left"]');
   await page.waitForTimeout(600);
-  check(w.acts.at(-1).action === 'resolve' && w.acts.at(-1).id === 'wgemeente0000001', name + ': They answered resolves it');
-  check(!(await page.$('#waitRows [data-id="wgemeente0000001"]')), name + ': it leaves the list');
-  await page.keyboard.press('Escape');
+  check(w.acts.at(-1) && w.acts.at(-1).action === 'resolve' && w.acts.at(-1).id === 'wgemeente0000001', name + ': the next swipe sent They answered ' + JSON.stringify(w.acts.at(-1)));
+  await tap('#waitUndo');
   await page.waitForTimeout(500);
+  check((await topName('#waitStage')) === 'the accountant about the tax overview' && w.acts.length === acts0 + 1, name + ': Undo took the snooze back before it was sent');
+  await tap('#waitBtns [data-dir="left"]');
+  await page.waitForTimeout(450);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(700);
+  check(JSON.stringify(w.acts.at(-1)) === JSON.stringify({ id: 'waccountant00001', source: 'todo', action: 'snooze', days: 3 }), name + ': closing sent Snooze 3 days ' + JSON.stringify(w.acts.at(-1)));
 
   // Sent, now waiting from a task.
   await page.locator('.row[data-id="soonsend0001"] .text').click();
@@ -169,6 +184,18 @@ for (const [name, viewport, scheme] of [['waiting-phone', { width: 390, height: 
   await tap('#ansStill');
   await page.waitForTimeout(600);
   check(w.acts.at(-1).action === 'still' && w.acts.at(-1).id === 'wgemeente0000001', name + ': Still waiting tells the hub');
+
+  // Three chases due: the stack opens by itself with those and lets go when each is swiped.
+  for (const [id, who] of [['wforceaaaaaaaaa1', 'the landlord'], ['wforceaaaaaaaaa2', 'the bank'], ['wforceaaaaaaaaa3', 'the school']]) {
+    w.waits.push({ id, who, what: 'a reply', since: '2026-10-12', channel: 'email', chaseDays: 7, nextChase: '2026-10-19', forWhom: null, source: 'todo', state: 'open', chases: 0, chaseDue: true, chaseTask: null });
+  }
+  await page.reload();
+  await page.waitForSelector('#waitList:not([hidden]) .scard', { timeout: 8000 });
+  await page.waitForTimeout(500);
+  check((await page.textContent('#waitListHead')) === 'Chase these first' && await page.isHidden('#waitListClose') && await page.isHidden('#waitAdd'), name + ': forced: no Close, no Add');
+  for (let i = 0; i < 6 && await page.locator('#waitStage .scard').count(); i++) { await page.locator('#waitStage').focus(); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(450); } // Gemeente is still due too
+  await page.waitForTimeout(1500);
+  check(await page.isHidden('#waitList') && ['wforceaaaaaaaaa1', 'wforceaaaaaaaaa2', 'wforceaaaaaaaaa3'].every((id) => w.acts.some((a) => a.id === id && a.action === 'resolve')), name + ': each due one answered and sent, then it let go ' + JSON.stringify(w.acts.slice(-4)));
   check(errors.length === 0, name + ': no page errors ' + errors.join(' | '));
   await ctx.close();
 }

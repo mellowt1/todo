@@ -11,6 +11,9 @@
   --accent: #3F7D5C;        /* fills: add button, active segment, swipe, done check */
   --accent-text: #3F7D5C;   /* text, focus rings, caret */
   --accent-soft: rgba(63, 125, 92, 0.14);
+  --wash-wired: rgba(201, 129, 38, 0.20);   /* the swipe stacks: where a card is going */
+  --wash-normal: rgba(84, 110, 140, 0.18);
+  --wash-drained: rgba(63, 125, 92, 0.22);
   --on-accent: #FFFFFF;
   --danger: #C62828;
   --toast: #1C1C1E;
@@ -54,6 +57,9 @@
     --accent-text: #7DBF98;
     --on-accent: #000000;     /* white on #7DBF98 is about 2:1 */
     --accent-soft: rgba(125, 191, 152, 0.16);
+    --wash-wired: rgba(230, 160, 70, 0.24);
+    --wash-normal: rgba(130, 160, 200, 0.22);
+    --wash-drained: rgba(125, 191, 152, 0.24);
     --danger: #FF6B60;
     --toast: #2C2C2E;
     --scrim: rgba(0, 0, 0, 0.5);
@@ -685,7 +691,7 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .energy { display: flex; flex-direction: column; margin-top: 12px; }
 .energy-seg button { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .seg.energy-seg:not(:has([aria-checked="true"]))::before { opacity: 0; }
-.energy-seg button.guess, .sort-btns button.guess { outline: 1.5px dashed var(--accent-text); outline-offset: -3px; font-weight: 600; }
+.energy-seg button.guess { outline: 1.5px dashed var(--accent-text); outline-offset: -3px; font-weight: 600; }
 .batt { flex-shrink: 0; }
 .energy-line { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 44px; }
 .energy-line[hidden] { display: none; }
@@ -697,16 +703,48 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .pick-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .pick-two button, .pick-again { height: 46px; border-radius: 12px; background: var(--surface); color: var(--text); font-size: 16px; }
 .pick-again { width: 100%; margin-top: 18px; font-weight: 600; }
-.pick-do:active, .pick-two button:active, .pick-again:active, .sort-btns button:active { opacity: 0.55; }
-.sort-intro { margin: 0; font-size: 15px; line-height: 1.35; color: var(--secondary); }
-.sort-list { margin: 0; padding: 0; list-style: none; }
-.sort-row { padding: 12px 0; border-top: 0.5px solid var(--sep); }
-.sort-name { display: flex; justify-content: space-between; gap: 10px; font-size: 16px; line-height: 1.3; }
-.sort-row.set .sort-name > span:first-child { color: var(--secondary); }
-.sort-where { flex-shrink: 0; font-size: 12px; color: var(--secondary); padding-top: 2px; }
-.sort-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
-.sort-btns button { height: 40px; border-radius: 9px; background: var(--surface); color: var(--text); font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 5px; }
-.sort-btns button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.pick-do:active, .pick-two button:active, .pick-again:active { opacity: 0.55; }
+/* ---------- Swipe stacks (Sort, Waiting on) ----------
+ * The top card follows the finger; --wash and --p colour it toward where it is going. */
+.stage { position: relative; height: 236px; margin-top: 4px; border-radius: 18px; background: var(--surface); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.stage:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.stage .hint { position: absolute; z-index: 20; display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--secondary); opacity: 0.5; pointer-events: none; transition: opacity var(--dur-press) ease, color var(--dur-press) ease, transform var(--dur-press) var(--ease); }
+.stage .hint.left { left: 14px; bottom: 12px; }
+.stage .hint.right { right: 14px; bottom: 12px; }
+.stage .hint.up { top: 10px; left: 50%; translate: -50% 0; }
+.stage .hint.guess { color: var(--accent-text); opacity: 0.85; }
+.stage .hint.on { opacity: 1; color: var(--text); }
+.stage .hint.left.on { transform: translateX(-3px); }
+.stage .hint.right.on { transform: translateX(3px); }
+.stage .hint.up.on { transform: translateY(-3px); }
+.stage .hint .batt, .stack-btns .batt { flex-shrink: 0; }
+.scard { position: absolute; left: 50%; top: 40px; width: min(76%, 300px); height: 128px; translate: -50% 0; padding: 16px 16px 14px; border-radius: 16px; background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.10); display: flex; flex-direction: column; justify-content: space-between; gap: 8px; overflow: hidden; cursor: grab; transition: transform var(--dur-move) var(--ease), opacity var(--dur-move) ease; will-change: transform; }
+.scard::after { content: ""; position: absolute; inset: 0; background: var(--wash, transparent); opacity: var(--p, 0); pointer-events: none; }
+.scard.dragging { transition: none; cursor: grabbing; }
+.sc-name { position: relative; font-size: 17px; font-weight: 600; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.sc-name b { font-weight: 700; }
+.sc-meta { position: relative; font-size: 13px; color: var(--secondary); }
+.sc-meta .wr-due { font-weight: 600; color: var(--amber-ink); }
+.stack-done { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 17px; animation: stack-rise 320ms var(--ease); }
+.stack-done[hidden] { display: none; }
+.stack-done path { stroke-dasharray: 30; stroke-dashoffset: 30; animation: stack-draw 420ms var(--ease) 80ms forwards; }
+@keyframes stack-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes stack-draw { to { stroke-dashoffset: 0; } }
+.stack-foot { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
+.stack-foot .text-btn:disabled { opacity: 0.35; }
+.stack-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.stack-btns.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stack-btns[hidden] { display: none; }
+.stack-btns button { height: 44px; border-radius: 10px; background: var(--surface); color: var(--text); font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity var(--dur-press) ease, transform var(--dur-press) var(--ease); }
+.stack-btns button:active { opacity: 0.55; transform: scale(0.97); }
+/* A number that turns over (rollTo); the leaving one is out of the text. */
+.roll { display: inline-grid; overflow: hidden; vertical-align: bottom; font-variant-numeric: tabular-nums; }
+.roll > span { grid-area: 1 / 1; }
+.tap-switch { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .scard, .hint { transition-duration: 1ms; }
+  .stack-done, .stack-done path { animation: none; stroke-dashoffset: 0; }
+}
 .tbatt { align-self: center; display: inline-flex; color: var(--secondary); }
 
 /* ---------- Waiting on (app.js, Waiting) ---------- */

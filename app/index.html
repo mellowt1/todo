@@ -307,7 +307,7 @@
   </div>
 </div>
 
-<!-- Energy for each open task: a guess shows outlined, nothing counts until Paul taps (app.js, Energy). -->
+<!-- Sort by energy: the tasks without a level, one card at a time; swipe left Wired, up Normal, right Drained (app.js, Sort). -->
 <div id="sort" class="sheet-wrap" hidden>
   <div class="scrim"></div>
   <div class="sheet card-sheet sort-sheet" role="dialog" aria-labelledby="sortHead">
@@ -316,8 +316,12 @@
       <span id="sortHead" class="meta">Energy</span>
       <button id="sortClose" class="text-btn">Done</button>
     </div>
-    <p id="sortCount" class="meta"></p>
-    <ul id="sortList" class="sort-list"></ul>
+    <div id="sortStage" class="stage" tabindex="0" aria-label="Sort by energy. Swipe or use the arrow keys: left Wired, up Normal, right Drained.">
+      <span class="hint left" data-dir="left"></span><span class="hint up" data-dir="up"></span><span class="hint right" data-dir="right"></span>
+      <div id="sortDone" class="stack-done" hidden><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="19" fill="var(--accent)"/><path d="M12 20.5l5.5 5.5L28 15" fill="none" stroke="var(--on-accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b>All sorted</b></div>
+    </div>
+    <div class="stack-foot"><span class="meta"><span id="sortLeft" class="roll"></span> left</span><button id="sortUndo" class="text-btn" disabled>Undo</button></div>
+    <div class="stack-btns" id="sortBtns"><button data-dir="left">Wired</button><button data-dir="up">Normal</button><button data-dir="right">Drained</button></div>
   </div>
 </div>
 
@@ -395,7 +399,12 @@
       <span id="waitListHead" class="meta">Waiting on</span>
       <button id="waitListClose" class="text-btn">Close</button>
     </div>
-    <ul id="waitRows" class="wait-rows" aria-live="polite"></ul>
+    <div id="waitStage" class="stage" tabindex="0" aria-label="Waiting on. Swipe or use the arrow keys: right They answered, left Snooze 3 days.">
+      <span class="hint left" data-dir="left">← Snooze</span><span class="hint right" data-dir="right">They answered →</span>
+      <div id="waitDone" class="stack-done" hidden><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="19" fill="var(--accent)"/><path d="M12 20.5l5.5 5.5L28 15" fill="none" stroke="var(--on-accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b id="waitDoneText">Nothing to chase</b></div>
+    </div>
+    <div class="stack-foot"><span class="meta"><span id="waitLeft" class="roll"></span> left</span><button id="waitUndo" class="text-btn" disabled>Undo</button></div>
+    <div class="stack-btns two" id="waitBtns"><button data-dir="left">Snooze 3 days</button><button data-dir="right">They answered</button></div>
     <button id="waitAdd" class="pick-again">Add</button>
   </div>
 </div>
