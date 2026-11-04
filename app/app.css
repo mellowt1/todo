@@ -151,6 +151,8 @@ h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0
 /* Soon is amber, passed is red: the same two colours as a letter card's days left. */
 .tdue.near { color: var(--amber-ink); font-weight: 600; }
 .tdue.late { color: var(--danger); font-weight: 600; }
+/* An appointment with no date yet (2026-11-04): amber where the date would be, until it has one. */
+.tdue.nodate { color: var(--amber-ink); font-weight: 600; }
 /* A link the hub set (a vacancy's page): a quiet icon with a 44px target that keeps the row's height. */
 .row .link {
   flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;

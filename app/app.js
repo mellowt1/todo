@@ -208,6 +208,7 @@
       ...(it.week !== undefined ? { week: it.week === true ? true : null } : {}), // "this week"
       ...(it.series ? { series: it.series } : {}),
       ...(it.waiting ? { waiting: it.waiting } : {}), // a chase task's Waiting on item, set by the hub
+      ...(it.appt !== undefined ? { appt: it.appt === true ? true : null } : {}), // Tidy read it as an appointment
     } });
   }
 
@@ -234,10 +235,13 @@
     }));
     // Soon: "this week" tasks first (2026-10-21), sorted the same way among themselves.
     const wk = (it) => (section === 'soon' && it.week === true ? 0 : 1);
+    // Today: an appointment with no date yet first (2026-11-04), so it is seen until it has one.
+    const pin = (it) => (section === 'today' && undatedAppt(it) ? 0 : 1);
     // Others: person by person (A to Z, no name last), each person's tasks sorted as usual.
     const who = (it) => (section === 'others' ? personOf(it).toLowerCase() || '￿' : '');
     return rows.sort((a, b) => {
       if (who(a) !== who(b)) return who(a) < who(b) ? -1 : 1;
+      if (pin(a) !== pin(b)) return pin(a) - pin(b);
       if (wk(a) !== wk(b)) return wk(a) - wk(b);
       const ka = key.get(a.id), kb = key.get(b.id);
       if (ka && kb) return ka < kb ? -1 : ka > kb ? 1 : b.pos - a.pos;
@@ -254,7 +258,7 @@
     const id = newId();
     justAdded.add(id);
     upsert({ id, text, section: addTo(), done: false, doneAt: null, pos: now() });
-    tidyLater(id, text).finally(() => wantsReturnDate(id));
+    tidyLater(id, text, false, ui.section).finally(() => wantsReturnDate(id));
     return id;
   }
 
@@ -329,8 +333,13 @@
   /* A question for Claude or a message to write (Tidy's kind "ask" or "write", 2026-10-19) leaves
    * the list again and goes to Desk; its answer opens in the Claude sheet (Ask, below). An edited
    * task (edit true) is only tidied, never sent. */
-  async function tidyLater(id, typed, edit) {
+  /* Where it goes (2026-11-04): Tidy also says where a new task belongs and whether it is an
+   * appointment. Typed on Today it may go anywhere; typed on the Lanes tab only to another lane;
+   * typed anywhere else, or moved before Tidy answered, it stays where Paul put it. An edit is
+   * never moved. The toast says where it went, and Undo puts back the text, the place and the flag. */
+  async function tidyLater(id, typed, edit, on) {
     if (!navigator.onLine) return;
+    const from = items[id] ? items[id].section : null;
     try {
       const r = await fetch(API + '/api/tidy/' + code, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: typed }) });
       const d = r.ok ? await r.json() : null;
@@ -339,26 +348,71 @@
       if (!d || !it || it.done || it.text !== typed) return;
       // Tidy also guesses the energy the task takes; it shows outlined until Paul confirms it.
       const guess = LEVELS.includes(d.energy) && !it.energy && !it.energyGuess ? { energyGuess: d.energy } : null;
-      if (!d.changed || !d.text) { if (guess) upsert(Object.assign({}, it, guess)); return; }
-      upsert(Object.assign({}, it, { text: d.text }, guess));
-      tidied[id] = d.text;
-      const undo = () => { const cur = items[id]; if (cur) { upsert(Object.assign({}, cur, { text: typed })); teach('undone', d.text, typed); } delete tidied[id]; };
-      if (!$('capture').hidden && !capClosing) return capTidied(id, typed, d.text, undo);
-      toast('Tidied.', undo, id);
+      const may = on === 'today' ? PLACES : on === 'lanes' ? LANES : [];
+      const to = !edit && it.section === from && may.includes(d.place) && d.place !== it.section ? d.place : null;
+      const was = it.appt === true;
+      const appt = typeof d.appt === 'boolean' ? d.appt : was;
+      const text = d.changed && d.text ? d.text : it.text;
+      const section = to || it.section;
+      // What Tidy gave, for the lessons: its text only when it changed the words (an edit after
+      // that corrects Tidy), its place and flag always (a move after that corrects them too).
+      if (!edit || memo[id] || text !== it.text) rememberTidy(id, Object.assign({}, edit ? memo[id] : null, { typed: (edit && memo[id] && memo[id].typed) || typed, text: text !== it.text ? text : null, section, appt }));
+      const changes = Object.assign({}, guess, text !== it.text ? { text } : null, to ? { section: to, pos: now() } : null, appt !== was ? { appt: appt || null } : null);
+      if (!Object.keys(changes).length) return;
+      upsert(Object.assign({}, it, changes));
+      if (text === it.text && !to) return; // a guess or a flag only: nothing to say
+      const undo = () => {
+        const cur = items[id];
+        if (cur) {
+          upsert(Object.assign({}, cur, { text: typed, appt: was || null }, to ? { section: from, pos: it.pos } : null));
+          if (to || appt !== was) teach('undone', placed(text, section, appt), placed(typed, from, was), typed);
+          else teach('undone', text, typed);
+        }
+        rememberTidy(id, null);
+      };
+      const words = text === it.text ? 'Moved to ' + LABEL[to] + '.' : to ? 'Tidied · in ' + LABEL[to] + '.' : 'Tidied.';
+      if (!$('capture').hidden && !capClosing) return capTidied(id, typed, text, undo, to, words);
+      toast(words, undo, id);
     } catch (e) { /* stays as typed */ }
   }
+  function undatedAppt(it) { return it.appt === true && !it.done && !nameParts(it).due; }
 
-  /* Lessons (worker/src/lessons.js): an Undo of a tidy, or an edit of a tidied task, tells the hub
-   * what Paul wanted instead. On Sundays Claude turns those into rules he keeps or drops on Morning. */
-  const tidied = {};
-  function teach(kind, before, after) {
+  /* Lessons (worker/src/lessons.js): an Undo of a tidy, an edit of a tidied task, or a move of a
+   * task Tidy placed tells the hub what Paul wanted instead. Tidy reads the latest of these back on
+   * every call (2026-11-04), and on Sundays Claude turns them into rules he keeps or drops on Morning.
+   * What Tidy gave is kept MEMO_DAYS in local storage, so a correction days later still counts. */
+  const MEMO_DAYS = 14;
+  const memo = (() => {
+    const m = store.get('todo.tidyMemo') || {};
+    const cut = Date.now() - MEMO_DAYS * 864e5;
+    for (const k of Object.keys(m)) if (!m[k] || !(m[k].at > cut)) delete m[k];
+    return m;
+  })();
+  function rememberTidy(id, rec) {
+    if (rec) memo[id] = Object.assign({}, rec, { at: (memo[id] && memo[id].at) || Date.now() });
+    else delete memo[id];
+    store.set('todo.tidyMemo', memo);
+  }
+  // A task as the lessons read it: "Peronik · 2026-11-09 12:45 [soon, appointment]".
+  const placed = (text, section, appt) => text + ' [' + section + (appt ? ', appointment' : '') + ']';
+  function teach(kind, before, after, note) {
     if (!before || !after || before === after) return;
-    report('tidy', kind, before, after);
+    report('tidy', kind, before, after, note);
+  }
+  // Paul moved a task Tidy placed, or an undated appointment out of Today (which takes the flag off).
+  function teachMove(id) {
+    const m = memo[id];
+    const it = items[id];
+    if (!m || !it || it.done) return;
+    const appt = it.appt === true;
+    if (m.section === it.section && m.appt === appt) return;
+    report('tidy', 'moved', placed(it.text, m.section, m.appt), placed(it.text, it.section, appt), m.typed);
+    rememberTidy(id, Object.assign({}, m, { text: it.text, section: it.section, appt }));
   }
   // Also Intake (an edit or a delete of a task read from a letter) and "Keep as a task" (2026-10-19).
-  function report(app, kind, before, after) {
+  function report(app, kind, before, after, note) {
     if (!navigator.onLine || !before) return;
-    fetch(API + '/api/lessons/' + code + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app, kind, before, after }) }).catch(() => {});
+    fetch(API + '/api/lessons/' + code + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app, kind, before, after, ...(note ? { note } : {}) }) }).catch(() => {});
   }
 
   function markDone(id) {
@@ -384,9 +438,12 @@
     const it = items[id];
     if (!it || it.section === section) return;
     const prev = Object.assign({}, it);
-    upsert(Object.assign({}, it, { section, pos: now() }));
+    // An appointment with no date moved out of Today: Paul says it is not one, or not now (2026-11-04).
+    const off = undatedAppt(it) && section !== 'today' ? { appt: null } : null;
+    upsert(Object.assign({}, it, { section, pos: now() }, off));
     if (withToast) toast('Moved to ' + LABEL[section] + '.', () => upsert(prev), id);
     if (withToast && prev.section === 'today' && !prev.done) tellMoved(id); // the edit sheet tells it on close
+    if (withToast) teachMove(id); // the edit sheet teaches on close
   }
 
   // "This week" on or off (2026-10-21). In Soon the task joins or leaves the group on top.
@@ -733,6 +790,7 @@
     if (it.repeat && !it.done) meta += REPEAT_ICON;
     if (run && run.task === it.id && !it.done) meta += '<span class="trun" title="Timer running">' + runMins() + ' min</span>'; // the Dread meter's timer
     if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + (p.time ? ' ' + p.time : '') + '">' + d.words + (p.time ? ' ' + p.time : '') + '</span>'; }
+    else if (undatedAppt(it)) meta += '<span class="tdue nodate" title="An appointment: write its day in the task">No date yet</span>';
     // The confirmed energy level, a small battery (a guess shows only in the edit sheet).
     if (withSkill && !it.done && LEVELS.includes(it.energy)) meta += '<span class="tbatt" title="' + LNAME[it.energy] + ' energy">' + battSvg(it.energy, LNAME[it.energy] + ' energy') + '</span>';
     // One slot at the right: the skill the task pays most into (a letter's Defence, an Apply's Slayer).
@@ -1996,11 +2054,11 @@
     el.textContent = text;
     play(el, [{ opacity: 0 }, { opacity: 1 }], { duration: M.press, easing: 'ease' });
   }
-  function capTidied(id, typed, clean, undo) {
-    capUndo = { id, undo };
+  function capTidied(id, typed, clean, undo, to, words) {
+    capUndo = { id, undo, words };
     const li = $('capAdded').querySelector('li[data-id="' + id + '"]:not(.leaving)');
     const p = nameParts({ text: clean });
-    const shown = p.name + (p.due ? ' · ' + dueLabel(p.due).words + (p.time ? ' ' + p.time : '') : ''); // as the list row reads it
+    const shown = p.name + (p.due ? ' · ' + dueLabel(p.due).words + (p.time ? ' ' + p.time : '') : '') + (to ? ' · ' + LABEL[to] : ''); // as the list row reads it, and where it went
     if (!li) return say('Tidied: ' + shown + '.');
     swapCapText(li.querySelector('.t'), shown);
     const b = document.createElement('button');
@@ -2032,7 +2090,7 @@
     capUndo = null;
     closeSheet($('capture'), () => {
       capClosing = false;
-      if (held && tidied[held.id]) toast('Tidied.', held.undo, held.id);
+      if (held && memo[held.id]) toast(held.words, held.undo, held.id);
       setTimeout(askReturn, 0); // a Return task waiting for its date asks now
     });
   }
@@ -2255,11 +2313,11 @@
     // A changed text is tidied like a new task (Paul, 2026-10-17), once the sheet is closed.
     const edited = from && items[from.id];
     if (edited && !edited.done && edited.text !== from.text) {
-      if (tidied[edited.id] === from.text) teach('edited', from.text, edited.text);
+      if (memo[edited.id] && memo[edited.id].text === from.text) teach('edited', from.text, edited.text, memo[edited.id].typed);
       if (INTAKE_MARK.test(from.text)) report('intake', 'edited', from.text, edited.text);
-      delete tidied[edited.id];
       tidyLater(edited.id, edited.text, true);
     }
+    if (edited && edited.section !== from.section) teachMove(edited.id);
     // Focus goes back to the row it opened from. A task that ended up in another section says
     // where it went, once, however many times the section was changed.
     closeSheet($('edit'), () => {
@@ -2729,7 +2787,7 @@
   async function toDesk(id, typed, kind) {
     const section = items[id] ? items[id].section : ui.section;
     remove(id);
-    delete tidied[id];
+    rememberTidy(id, null);
     const li = $('capAdded').querySelector('li[data-id="' + id + '"]:not(.leaving)');
     if (li) swapCapText(li.querySelector('.t'), 'For Claude: ' + typed);
     readingN++;
