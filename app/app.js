@@ -269,6 +269,12 @@
     const p = nameParts(it);
     return p.due ? p.due + ' ' + (p.time || '') : null;
   }
+  // Soon: a repeating task folds away under one quiet "3 repeats" line at the bottom (2026-11-04).
+  // It is not waiting on Paul, so it is not counted either; the hub still brings each one into
+  // Today on its day. A This week flag keeps it in the list.
+  const folds = (it) => it.section === 'soon' && !!(it.repeat && it.repeat.every) && it.week !== true;
+  let repsOpen = false; // the fold, open or shut; shut again on each launch
+  const countIn = (section) => openIn(section).filter((it) => !folds(it)).length;
   function openIn(section) {
     if (section === 'lanes') return LANES.flatMap((l) => openIn(l)); // grouped, lane by lane
     const rows = Object.values(items).filter((i) => !i.done && i.section === section);
@@ -289,6 +295,7 @@
       if (who(a) !== who(b)) return who(a) < who(b) ? -1 : 1;
       if (pin(a) !== pin(b)) return pin(a) - pin(b);
       if (wk(a) !== wk(b)) return wk(a) - wk(b);
+      if (folds(a) !== folds(b)) return folds(a) ? 1 : -1; // the repeats last, under their fold
       const ka = key.get(a.id), kb = key.get(b.id);
       if (ka && kb) return ka < kb ? -1 : ka > kb ? 1 : b.pos - a.pos;
       if (ka || kb) return ka ? -1 : 1;
@@ -1015,11 +1022,11 @@
       const on = view === 'done' ? b.dataset.section === 'done' : b.dataset.section === ui.section;
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
       const c = b.querySelector('.count');
-      if (c) { const n = openIn(b.dataset.section).length; c.textContent = n ? String(n) : ''; }
+      if (c) { const n = countIn(b.dataset.section); c.textContent = n ? String(n) : ''; }
     }
     // The phone switcher shows how much waits in Soon and Someday, as the sidebar does.
     for (const c of document.querySelectorAll('#switcher .scount')) {
-      const n = openIn(c.parentElement.dataset.section).length;
+      const n = countIn(c.parentElement.dataset.section);
       c.textContent = n ? String(n) : '';
     }
     renderProgress();
@@ -1061,8 +1068,10 @@
       key = 'skeleton';
       html = [1, 2, 3].map(() => '<li class="row skeleton" aria-hidden="true"><div class="row-inner"><span class="circle-static"></span><div class="bar"></div></div></li>').join('');
     } else if (view === 'list') {
-      const rows = openIn(ui.section);
-      ids = new Set(rows.map((it) => it.id));
+      const open = openIn(ui.section);
+      const reps = open.filter(folds); // Soon's repeats, last in the order
+      const rows = reps.length ? open.slice(0, open.length - reps.length) : open;
+      ids = new Set((repsOpen ? open : rows).map((it) => it.id));
       // Soon: a quiet "No date" label where the undated tasks start, when there are both.
       // Soon's labels: "This week" on top when anything is flagged, then "Dated" (only under This
       // week), then a quiet "No date" where the undated tasks start, when there are both.
@@ -1083,7 +1092,12 @@
       const personHead = (it, i) => (it.section === 'others' && (i === 0 || rows[i - 1].section !== 'others' || personOf(rows[i - 1]) !== personOf(it))
         ? '<li class="sublabel sublabel-person">' + esc(personOf(it) || 'Someone else') + '</li>' : '');
       html = rows.map((it, i) => (lanesTab ? laneHead(it, i) : label(i)) + personHead(it, i) + rowHtml(it, justAdded.has(it.id))).join('');
-      if (!rows.length) {
+      if (reps.length) {
+        html += '<li class="sublabel sublabel-fold"><button type="button" class="rep-fold" aria-expanded="' + repsOpen + '">' +
+          REPEAT_ICON.replace('role="img" aria-label="Repeats"', 'aria-hidden="true"') + reps.length + (reps.length === 1 ? ' repeat' : ' repeats') + '</button></li>';
+        if (repsOpen) html += reps.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
+      }
+      if (!rows.length && !reps.length) {
         emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
           : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];
       }
@@ -1734,6 +1748,7 @@
       if (d) reopenRow(d);
       return;
     }
+    if (e.target.closest('.rep-fold')) { repsOpen = !repsOpen; render(); return; }
     const row = e.target.closest('.row');
     if (!row || row.classList.contains('skeleton')) return;
     const mv = e.target.closest('.swipe-move button');

@@ -410,6 +410,13 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 .sublabel-lane { display: flex; justify-content: space-between; }
 .sublabel-lane span { font-weight: 400; }
 .sublabel-person { padding-top: 8px; font-weight: 400; font-style: italic; }
+/* Soon's repeats (2026-11-04): one quiet line at the bottom that unfolds them. */
+.sublabel-fold { padding-top: 14px; padding-bottom: 2px; margin-left: -8px; }
+.rep-fold { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: none; font: inherit; font-weight: 400; color: var(--secondary); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.rep-fold .trep { transition: transform var(--dur-move) var(--ease); }
+.rep-fold[aria-expanded="true"] .trep { transform: rotate(-180deg); }
+.rep-fold:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+@media (hover: hover) { .rep-fold:hover { color: var(--text); } }
 .nav-head { padding: 14px 12px 4px; }
 /* Return (2026-10-21): the small sheet that asks for a date. */
 .ret-sheet { gap: 12px; }
