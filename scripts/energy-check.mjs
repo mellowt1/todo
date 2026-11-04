@@ -104,7 +104,7 @@ for (const [name, viewport, scheme] of [['energy-phone', { width: 390, height: 8
   check(await page.isVisible('#energy'), name + ': the dial shows on Today');
   check((await page.textContent('#energyText')).includes('How much energy'), name + ': no level yet');
   check(await page.isHidden('#giveOne'), name + ': no Give me one without a level');
-  check((await page.textContent('#energySort')).startsWith('2 tasks have no level'), name + ': Sort counts the tasks with no level');
+  check((await page.textContent('#energySort')) === '2 unsorted' && (await page.getAttribute('#energySort', 'aria-label')).startsWith('2 tasks have no level'), name + ': Sort counts the tasks with no level');
   check((await page.locator('.row[data-id="todayplain01"] .tbatt').count()) === 1, name + ': a confirmed level shows as a battery on the row');
   if (phone) await page.screenshot({ path: file(name + '-unset') });
 

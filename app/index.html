@@ -75,11 +75,11 @@
           <button role="radio" aria-checked="false" data-level="normal"></button>
           <button role="radio" aria-checked="false" data-level="drained"></button>
         </div>
-        <div class="energy-line">
-          <span id="energyText" class="meta"></span>
+        <span id="energyText" class="sr-only" aria-live="polite"></span>
+        <div id="energyLine" class="energy-line">
+          <button id="energySort" class="energy-sort meta" hidden></button>
           <button id="giveOne" class="text-btn" hidden>Give me one</button>
         </div>
-        <button id="energySort" class="energy-sort meta" hidden></button>
       </div>
       <!-- The Dread meter (app.js, Dread): the one timer that runs, from any app. Today only. -->
       <div id="running" class="running list-only" role="status" hidden>
@@ -90,16 +90,15 @@
       </div>
       <!-- "Music for this?" under the timer (app.js, Soundtrack): the hub's offer, gone after Play or Not now. -->
       <div id="runOffer" class="run-offer list-only" hidden>
-        <a id="offerLink" class="offer-link" href="#"><span class="play-disc" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 2.2v9.6l8-4.8z" fill="currentColor"/></svg></span><span class="offer-words">Music for this? <b id="offerTitle"></b></span></a>
-        <button id="offerNot" class="run-btn offer-not">Not now</button>
+        <a id="offerLink" class="offer-link" href="#"><span class="play-disc" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 2.2v9.6l8-4.8z" fill="currentColor"/></svg></span><span class="offer-words"><b id="offerTitle"></b></span></a>
+        <button id="offerNot" class="run-btn offer-not" aria-label="Not now"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
       </div>
       <!-- Archive (app.js, Archive): a task passed on 5 times, decided in place. Today only. -->
       <div id="fate" class="fate list-only" role="region" aria-labelledby="fateName" hidden>
         <div id="fateAsk">
-          <div class="fate-top"><span id="fateWhy" class="meta"></span><button id="fateLater" class="fate-later">Later</button></div>
-          <span id="fateName" class="fate-name"></span>
+          <div class="fate-top"><span class="fate-name"><span id="fateName"></span> <span id="fateWhy" class="fate-n"></span></span><button id="fateLater" class="fate-later" aria-label="Later"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div>
           <div class="fate-btns">
-            <button id="fateDo" class="fate-main">Do it now</button>
+            <button id="fateDo" class="fate-main">Do it</button>
             <button id="fateHand">Hand off</button>
             <button id="fateArch">Archive</button>
           </div>
@@ -204,29 +203,25 @@
       <span class="head-btns"><button id="editStart" class="text-btn">Start timer</button><button id="editClose" class="text-btn">Close</button></span>
     </div>
     <textarea id="editText" rows="3" maxlength="500" autocapitalize="sentences"></textarea>
-    <div class="meta">Section</div>
     <div id="editSeg" class="seg" role="radiogroup" aria-label="Section">
       <button role="radio" data-section="today">Today</button>
       <button role="radio" data-section="soon">Soon</button>
       <button role="radio" data-section="someday">Someday</button>
     </div>
-    <div class="meta">Or a lane</div>
     <div id="editLane" class="seg seg-lane" role="radiogroup" aria-label="Lane" style="--n: 3">
       <button role="radio" data-section="build">Build</button>
       <button role="radio" data-section="fun">Fun</button>
       <button role="radio" data-section="others">Others</button>
     </div>
-    <label class="week-row"><span class="week-words">This week<small>On top of Soon until Sunday’s reset</small></span><input id="editWeek" type="checkbox" role="switch" class="switch"></label>
-    <div class="meta">Energy it takes</div>
+    <label class="week-row"><span class="week-words">This week</span><input id="editWeek" type="checkbox" role="switch" class="switch"></label>
     <div id="editEnergy" class="seg energy-seg" role="radiogroup" aria-label="Energy it takes" aria-describedby="editEnergyNote">
       <button role="radio" aria-checked="false" data-level="wired"></button>
       <button role="radio" aria-checked="false" data-level="normal"></button>
       <button role="radio" aria-checked="false" data-level="drained"></button>
     </div>
-    <p id="editEnergyNote" class="meta energy-note" hidden>A guess. Tap it to confirm, or pick another.</p>
-    <div class="meta" id="editRepeatHead">Repeat</div>
-    <div id="editRepeat" class="seg seg4" role="radiogroup" aria-labelledby="editRepeatHead">
-      <button role="radio" data-every="">Never</button>
+    <p id="editEnergyNote" class="meta energy-note" hidden>A guess. Tap to confirm.</p>
+    <div id="editRepeat" class="seg seg4" role="radiogroup" aria-label="Repeat">
+      <button role="radio" data-every="">Once</button>
       <button role="radio" data-every="week">Weekly</button>
       <button role="radio" data-every="2weeks">2 weeks</button>
       <button role="radio" data-every="month">Monthly</button>
@@ -241,8 +236,8 @@
       <p id="editFromSummary"></p>
       <ul id="editFromQuotes"></ul>
     </div>
-    <button id="editWait" class="wait-open"><span>Sent, now waiting<small>Ticks this off and chases it later</small></span><span class="card-open">›</span></button>
-    <button id="editApply" class="apply-open" hidden><span>Prepare on the PC<small>CV, letter in Word and a checklist, in a folder</small></span><span class="card-open">Open ›</span></button>
+    <button id="editWait" class="wait-open"><span>Sent, now waiting</span><span class="card-open">›</span></button>
+    <button id="editApply" class="apply-open" hidden><span>Prepare on the PC</span><span class="card-open">Open ›</span></button>
     <div class="grow"></div>
     <button id="editDelete" class="danger-btn">Delete task</button>
   </div>
@@ -321,7 +316,6 @@
       <span id="sortHead" class="meta">Energy</span>
       <button id="sortClose" class="text-btn">Done</button>
     </div>
-    <p class="sort-intro">A guess is outlined. Tap it to confirm, or tap another. Nothing is saved until you tap.</p>
     <p id="sortCount" class="meta"></p>
     <ul id="sortList" class="sort-list"></ul>
   </div>
@@ -398,11 +392,11 @@
   <div class="sheet card-sheet" role="dialog" aria-labelledby="waitListHead">
     <div class="grabber"></div>
     <div class="sheet-head">
-      <span id="waitListHead" class="meta">Waiting on, oldest first</span>
+      <span id="waitListHead" class="meta">Waiting on</span>
       <button id="waitListClose" class="text-btn">Close</button>
     </div>
     <ul id="waitRows" class="wait-rows" aria-live="polite"></ul>
-    <button id="waitAdd" class="pick-again">Add something I am waiting on</button>
+    <button id="waitAdd" class="pick-again">Add</button>
   </div>
 </div>
 

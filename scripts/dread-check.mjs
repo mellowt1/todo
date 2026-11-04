@@ -122,9 +122,9 @@ for (const [name, viewport, scheme] of [['dread-phone', { width: 390, height: 84
   await page.waitForTimeout(500);
   const runId = startPost.task;
   check(await page.isVisible('#running'), name + ': the pill runs on Today');
-  check((await page.textContent('#runMeta')).includes('Running 1 min · dread 4'), name + ': pill says minutes and dread ' + await page.textContent('#runMeta'));
+  check((await page.textContent('#runMeta')) === '1 min' && (await page.getAttribute('#running', 'aria-label')).includes('Running 1 min, dread 4'), name + ': pill says the minutes; the dread is read out ' + await page.textContent('#runMeta'));
   check(await page.isHidden('#runRate'), name + ': rated already, no Rate');
-  check((await page.locator(`.row[data-id="${runId}"] .trun`).count()) === 1, name + ': the row shows its minutes');
+  check((await page.locator(`.row[data-id="${runId}"] .trun`).count()) === 0, name + ': the minutes show once, in the pill');
   await page.screenshot({ path: file(name + '-running') });
 
   // Tick it off: the toast says how long it took; Undo lets the timer run on.
@@ -148,7 +148,7 @@ for (const [name, viewport, scheme] of [['dread-phone', { width: 390, height: 84
   // A timer started in Morning shows on the next read; Rate asks; a number rates it.
   w.running = { task: 'todaylamp001', name: 'Return the lamp', startedAt: new Date(Date.now() - 5 * 60e3).toISOString(), dread: null, source: 'morning', mins: 5 };
   await poll();
-  check((await page.textContent('#runMeta')).includes('started in Morning'), name + ': a Morning timer shows ' + await page.textContent('#runMeta'));
+  check((await page.getAttribute('#running', 'aria-label')).includes('started in Morning'), name + ': a Morning timer shows ' + await page.textContent('#runMeta'));
   check(await page.isVisible('#runRate'), name + ': not rated: Rate shows');
   await tap('#runRate');
   await page.waitForSelector('#pick:not([hidden]) .dread-chips');
@@ -156,7 +156,7 @@ for (const [name, viewport, scheme] of [['dread-phone', { width: 390, height: 84
   await tap('#pickBody [data-dread="2"]');
   await page.waitForTimeout(600);
   check(last('rate') && last('rate').dread === 2 && last('rate').task === 'todaylamp001', name + ': rated 2');
-  check((await page.textContent('#runMeta')).includes('dread 2') && await page.isHidden('#pick'), name + ': the pill says dread 2, the sheet closed');
+  check((await page.getAttribute('#running', 'aria-label')).includes('dread 2') && await page.isHidden('#pick'), name + ': the pill says dread 2, the sheet closed');
 
   // The edit sheet of the running task stops it.
   await page.locator('.row[data-id="todaylamp001"] .text').click();

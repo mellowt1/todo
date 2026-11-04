@@ -687,8 +687,9 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .seg.energy-seg:not(:has([aria-checked="true"]))::before { opacity: 0; }
 .energy-seg button.guess, .sort-btns button.guess { outline: 1.5px dashed var(--accent-text); outline-offset: -3px; font-weight: 600; }
 .batt { flex-shrink: 0; }
-.energy-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
-.energy-sort { align-self: flex-start; min-height: 32px; margin-top: -6px; color: var(--accent-text); text-align: left; }
+.energy-line { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 44px; }
+.energy-line[hidden] { display: none; }
+.energy-sort { margin-right: auto; min-height: 44px; color: var(--accent-text); text-align: left; }
 .energy-note { margin: -8px 0 6px; }
 .pick-name { margin: 6px 0 0; font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .pick-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 18px; font-size: 15px; color: var(--secondary); }
@@ -765,8 +766,10 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .fate-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 .fate-btns button { min-height: 44px; padding: 0 14px; border-radius: 9px; background: var(--surface); color: var(--text); font-size: 15px; }
 .fate-btns button.fate-main { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.fate-top { display: flex; justify-content: space-between; align-items: center; margin: -10px -8px -6px 0; }
-.fate-later { min-height: 44px; padding: 0 8px; color: var(--secondary); font-size: 15px; }
+.fate-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin: -6px -12px 0 0; }
+.fate-top .fate-name { padding-top: 8px; }
+.fate-n { font-size: 13px; font-weight: 600; color: var(--secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fate-later { flex-shrink: 0; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--secondary); }
 .fate-btns button:active { opacity: 0.55; }
 .fate input { height: 44px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--ring); background: var(--bg); color: var(--text); font: inherit; font-size: 16px; }
 .fate input:focus { border-color: var(--accent-text); outline: none; }
@@ -803,7 +806,7 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .run-offer { display: flex; align-items: center; gap: 8px; padding: 2px 8px 4px 8px; border-radius: 0 0 12px 12px; background: var(--accent-soft); box-shadow: inset 0 1px 0 var(--accent-soft); }
 .offer-words { min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .offer-words b { font-weight: 600; }
-.run-btn.offer-not { background: transparent; color: var(--accent-text); padding: 0 10px; }
+.run-btn.offer-not { width: 44px; height: 44px; padding: 0; display: flex; align-items: center; justify-content: center; background: transparent; color: var(--accent-text); }
 
 .sound-body { display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
 .mu-level { display: flex; flex-direction: column; gap: 6px; }

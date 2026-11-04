@@ -207,7 +207,7 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   w.offer = { level: 'normal', title: 'Desk hours', url: 'https://open.spotify.com/playlist/' + P.desk, uri: 'spotify:playlist:' + P.desk, startedAt };
   await poll();
   await page.waitForSelector('#runOffer:not([hidden])');
-  check((await page.textContent('#runOffer .offer-words')).trim() === 'Music for this? Desk hours', name + ': Music for this? under the timer');
+  check((await page.textContent('#runOffer .offer-words')).trim() === 'Desk hours', name + ': the playlist under the timer');
   await page.screenshot({ path: file(name + '-offer') });
   await tap('#offerNot');
   await page.waitForTimeout(200);

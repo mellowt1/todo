@@ -788,7 +788,6 @@
     let meta = '';
     if (it.week === true && !it.done && it.section !== 'soon') meta += WEEK_ICON; // Soon has its group
     if (it.repeat && !it.done) meta += REPEAT_ICON;
-    if (run && run.task === it.id && !it.done) meta += '<span class="trun" title="Timer running">' + runMins() + ' min</span>'; // the Dread meter's timer
     if (p.due) { const d = dueLabel(p.due); meta += '<span class="tdue' + (it.done ? '' : d.state) + '" title="' + p.due + (p.time ? ' ' + p.time : '') + '">' + d.words + (p.time ? ' ' + p.time : '') + '</span>'; }
     else if (undatedAppt(it)) meta += '<span class="tdue nodate" title="An appointment: write its day in the task">No date yet</span>';
     // The confirmed energy level, a small battery (a guess shows only in the edit sheet).
@@ -2225,7 +2224,6 @@
   function paintRepeat(it) {
     const r = it.repeat || null;
     const bins = !!r && r.every === 'bins';
-    $('editRepeatHead').hidden = bins;
     $('editRepeat').hidden = bins;
     for (const b of document.querySelectorAll('#editRepeat button')) {
       const on = (r && !bins ? r.every : '') === b.dataset.every;
@@ -2936,7 +2934,9 @@
     $('giveOne').hidden = !level;
     const n = unsorted().length;
     $('energySort').hidden = !n;
-    $('energySort').textContent = n === 1 ? '1 task has no level yet. Sort it' : n + ' tasks have no level yet. Sort them';
+    $('energySort').textContent = n + ' unsorted';
+    $('energySort').setAttribute('aria-label', n === 1 ? '1 task has no level yet. Sort it' : n + ' tasks have no level yet. Sort them');
+    $('energyLine').hidden = !level && !n;
     renderMusicBtn(level);
   }
 
@@ -3130,7 +3130,7 @@
   function renderSort() {
     const rows = sortRows();
     const set = rows.filter((i) => LEVELS.includes(i.energy)).length;
-    $('sortCount').textContent = set + ' of ' + rows.length + ' open tasks have a level';
+    $('sortCount').textContent = set + ' of ' + rows.length + ' sorted';
     $('sortList').innerHTML = rows.map((it) => {
       const guess = !LEVELS.includes(it.energy) && LEVELS.includes(it.energyGuess) ? it.energyGuess : null;
       const name = nameParts(it).name;
@@ -3216,8 +3216,8 @@
     const it = items[run.task];
     const name = it ? nameParts(it).name : run.name;
     $('runName').textContent = name;
-    $('runMeta').textContent = 'Running ' + runMins() + ' min' + (run.dread ? ' · dread ' + run.dread : '') +
-      (RUN_FROM[run.source] ? ' · started in ' + RUN_FROM[run.source] : '');
+    $('runMeta').textContent = runMins() + ' min';
+    $('running').setAttribute('aria-label', 'Running ' + runMins() + ' min' + (run.dread ? ', dread ' + run.dread : '') + (RUN_FROM[run.source] ? ', started in ' + RUN_FROM[run.source] : ''));
     $('runRate').hidden = !!run.dread;
     $('runRate').setAttribute('aria-label', 'Rate the dread of ' + name);
     $('runStop').setAttribute('aria-label', 'Stop the timer on ' + name);
@@ -3226,7 +3226,6 @@
   setInterval(() => {
     if (!run || document.hidden) return;
     renderRun();
-    for (const el of document.querySelectorAll('.row[data-id="' + run.task + '"] .trun')) el.textContent = runMins() + ' min';
   }, 20000);
 
   // The chips, in the pick sheet: ask, then "started".
@@ -3780,7 +3779,9 @@
     const name = nameParts(items[f.task]).name;
     if ($('fate').dataset.task !== f.task) { $('fateNote').hidden = true; $('fateAsk').hidden = false; $('fateNoteIn').value = ''; }
     $('fate').dataset.task = f.task;
-    $('fateWhy').textContent = 'Passed on ' + f.skips + ' times';
+    $('fateWhy').textContent = f.skips + '×';
+    $('fateWhy').setAttribute('title', 'Passed on ' + f.skips + ' times');
+    $('fateWhy').setAttribute('aria-label', 'passed on ' + f.skips + ' times');
     $('fateName').textContent = name;
     $('fateNoteHead').textContent = 'Archive “' + name + '”';
   }

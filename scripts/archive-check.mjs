@@ -87,7 +87,7 @@ for (const [name, viewport, scheme] of [['archive-phone', { width: 390, height: 
   const last = (sub) => w.posts.filter((d) => d.sub === sub).at(-1);
 
   check(await page.isVisible('#fate'), name + ': the line shows on Today');
-  check((await page.textContent('#fateName')) === 'Ticket for Lucho November' && (await page.textContent('#fateWhy')) === 'Passed on 5 times', name + ': names the task and the count');
+  check((await page.textContent('#fateName')) === 'Ticket for Lucho November' && (await page.textContent('#fateWhy')) === '5×' && (await page.getAttribute('#fateWhy', 'title')) === 'Passed on 5 times', name + ': names the task and the count');
   await page.screenshot({ path: file(name + '-line') });
 
   // Later: gone, the next one shows.
