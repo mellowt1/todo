@@ -91,10 +91,12 @@ for (const [name, viewport, scheme] of [['lanes-phone', { width: 390, height: 84
 
   // The edit sheet: the lane group shows the lane; Soon takes it back out.
   await page.click('.row[data-id="build0000002"] .text');
-  await page.waitForSelector('#edit:not([hidden]) #editLane');
+  await page.waitForSelector('#edit:not([hidden]) #chipRow .chip');
   await page.waitForTimeout(400);
   check(await page.getAttribute('#editLane [data-section="build"]', 'aria-checked') === 'true' && await page.$$eval('#editSeg [aria-checked="true"]', (b) => b.length) === 0, name + ': the sheet shows Build, no section');
   await page.screenshot({ path: file(name + '-sheet') });
+  check((await page.textContent('#chipRow [data-k="place"]')).trim() === 'Build', name + ': the place chip says Build');
+  await page.click('#chipRow [data-k="place"]');
   await page.click('#editSeg [data-section="soon"]');
   await page.click('#editClose');
   await sync();

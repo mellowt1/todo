@@ -358,6 +358,32 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 .rep-note { margin: -6px 2px 0; font-size: var(--fs-meta); color: var(--secondary); line-height: 1.4; }
 .trep { color: var(--secondary); align-self: center; }
 /* This week (2026-10-21): a switch in the edit sheet, a group on top of Soon, a flag elsewhere. */
+/* ---------- Edit chips ---------- */
+.chipline { position: relative; min-height: 40px; }
+.chips, .chip-opts { display: flex; align-items: center; gap: 6px; }
+.chips[hidden], .chip-opts[hidden], .week-row[hidden] { display: none; }
+.chips { flex-wrap: wrap; touch-action: pan-y; }
+.chip-opts { overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.chip-opts::-webkit-scrollbar { display: none; }
+.chip { flex-shrink: 0; height: 38px; padding: 0 12px; border-radius: 19px; background: var(--surface); color: var(--text); display: inline-flex; align-items: center; font-size: 15px; font-weight: 500; white-space: nowrap; transition: transform var(--dur-press) var(--ease), background var(--dur-press) ease, color var(--dur-press) ease; }
+.chip:active { transform: scale(0.96); }
+.chip .val { display: inline-grid; overflow: hidden; }
+.chip .val > span { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 6px; }
+.chip .batt { width: 20px; height: 11px; }
+.chip.off { background: transparent; color: var(--secondary); font-weight: 400; box-shadow: inset 0 0 0 1px var(--sep); }
+.chip.guess { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent-text); border-style: dashed; }
+.chip.week-on { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.chip.fixed { opacity: 0.75; }
+.chip.pulse { animation: chip-pulse 380ms var(--ease); }
+@keyframes chip-pulse { 40% { background: var(--accent-soft); transform: scale(1.05); } }
+.opt-back { flex-shrink: 0; width: 32px; height: 38px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--secondary); }
+.chip-opts .seg { display: flex; gap: 6px; height: auto; padding: 0; background: none; border-radius: 0; flex-shrink: 0; }
+.chip-opts .seg::before { display: none; }
+.chip-opts .seg button { flex: 0 0 auto; height: 38px; padding: 0 12px; border-radius: 19px; font-size: 15px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chip-opts .seg button::after { inset: -3px 0; }
+.chip-opts .seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
+.chip-opts .seg button.guess { outline: 1.5px dashed var(--accent-text); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { .chip.pulse { animation: none; } }
 .week-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 6px 14px; border-radius: 12px; background: var(--field); margin-top: -4px; }
 .week-words { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-body); }
 .week-words small { font-size: var(--fs-meta); color: var(--secondary); }

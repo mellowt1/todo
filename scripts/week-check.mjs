@@ -100,11 +100,12 @@ for (const [name, viewport, scheme] of [['week-phone', { width: 390, height: 844
 
   // The edit sheet's switch takes a flag off.
   await page.click('.row[data-id="flagsoon0001"] .text');
-  await page.waitForSelector('#edit:not([hidden]) #editWeek');
+  await page.waitForSelector('#edit:not([hidden]) #chipRow [data-k="week"]');
   await page.waitForTimeout(400);
   check(await page.isChecked('#editWeek'), name + ': the switch shows the flag');
   await page.screenshot({ path: file(name + '-sheet') });
-  if (viewport.width < 700) await page.tap('#editWeek'); else await page.click('.week-row');
+  check((await page.getAttribute('#chipRow [data-k="week"]', 'aria-pressed')) === 'true', name + ': the This week chip is on');
+  if (viewport.width < 700) await page.tap('#chipRow [data-k="week"]'); else await page.click('#chipRow [data-k="week"]');
   await page.waitForTimeout(200);
   check(!(await page.isChecked('#editWeek')), name + ': the switch turns off');
   await page.click('#editClose');

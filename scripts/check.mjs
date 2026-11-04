@@ -192,6 +192,7 @@ await step('tap text opens edit sheet; edits autosave', async () => {
 
 await step('edit sheet section control moves the task', async () => {
   await row(page, 'Buy coffee beans').locator('.text').click();
+  await page.click('#chipRow [data-k="place"]'); // Edit in one line: the place chip opens its choices
   await page.click('#editSeg button[data-section="soon"]');
   await page.click('#editClose');
   await page.waitForSelector('#edit', { state: 'hidden' });

@@ -2216,6 +2216,9 @@
     editText.value = it.text.replace(INTAKE_MARK, ''); // the mark stays on the task, not in the box
     showFrom(it);
     $('editApply').hidden = !isApply(it);
+    chipOpen = null;
+    for (const o of $('editChips').querySelectorAll('.chip-opts')) o.hidden = true;
+    $('chipRow').hidden = false;
     paintEditEnergy(it);
     $('editWait').hidden = !!it.waiting; // a chase task is already part of one
     paintEditStart(it);
@@ -2245,6 +2248,7 @@
       }
       if (!bs.some((b) => b.dataset.section === section)) bs[0].tabIndex = 0; // the other group still takes a tab
     }
+    paintChips();
   }
   $('editSeg').addEventListener('keydown', (e) => {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
@@ -2273,6 +2277,7 @@
     const r = it.repeat || null;
     const bins = !!r && r.every === 'bins';
     $('editRepeat').hidden = bins;
+    paintChips();
     for (const b of document.querySelectorAll('#editRepeat button')) {
       const on = (r && !bins ? r.every : '') === b.dataset.every;
       b.setAttribute('aria-checked', String(on));
@@ -2312,7 +2317,148 @@
     repWrite(next);
   }
   for (const b of document.querySelectorAll('#editRepeat button')) b.addEventListener('click', () => setRepeat(b.dataset.every));
-  $('editWeek').addEventListener('change', () => { saveEditText(); if (editId) setWeek(editId, $('editWeek').checked, false); });
+  $('editWeek').addEventListener('change', () => { saveEditText(); if (editId) setWeek(editId, $('editWeek').checked, false); paintChips(); });
+
+  /* ---------- Edit chips ----------
+   * Edit in one line (Paul, 2026-11-04: "3 bars of stuff ... would still drown the screen"). The
+   * settings show as one line of chips: where it is, its energy, its repeat, This week. A tap opens
+   * only that chip's choices in the same line (the bars above, restyled, so every handler stays);
+   * a pick folds it back and the chip flashes once. A sideways swipe on a chip steps it to the next
+   * or previous choice without opening it. Off settings (no energy, Once, not this week) are faint. */
+  const PLACE_ORDER = ['today', 'soon', 'someday', 'build', 'fun', 'others'];
+  const REP_ORDER = ['', 'week', '2weeks', 'month'];
+  const REP_NAME = { '': 'Once', week: 'Weekly', '2weeks': '2 weeks', month: 'Monthly', bins: 'Bins' };
+  let chipOpen = null;
+  let chipSwiped = false;
+  function chipVal(k, it) {
+    if (k === 'place') return { html: esc(LABEL[it.section] || 'Today'), off: false };
+    if (k === 'energy') {
+      const lvl = LEVELS.includes(it.energy) ? it.energy : null;
+      const g = !lvl && LEVELS.includes(it.energyGuess) ? it.energyGuess : null;
+      if (lvl) return { html: battSvg(lvl) + LNAME[lvl], off: false, say: LNAME[lvl] };
+      if (g) return { html: battSvg(g) + LNAME[g] + '?', off: false, guess: true, say: 'a guess, ' + LNAME[g] };
+      return { html: 'Energy', off: true, say: 'not set' };
+    }
+    const every = it.repeat ? it.repeat.every : '';
+    return { html: REP_NAME[every] || 'Once', off: !every, fixed: every === 'bins' };
+  }
+  function paintChips(pulse) {
+    const it = editId && items[editId];
+    if (!it) return;
+    const head = { place: 'Place', energy: 'Energy', repeat: 'Repeat' };
+    $('chipRow').innerHTML = ['place', 'energy', 'repeat'].map((k) => {
+      const v = chipVal(k, it);
+      return '<button type="button" class="chip' + (v.off ? ' off' : '') + (v.guess ? ' guess' : '') + (v.fixed ? ' fixed' : '') + (pulse === k ? ' pulse' : '') + '" data-k="' + k + '"' +
+        ' aria-label="' + head[k] + ': ' + (v.say || v.html.replace(/<[^>]+>/g, '')) + (v.fixed ? '' : '. Tap to change, or swipe sideways') + '"' + (v.fixed ? ' aria-disabled="true"' : '') + '>' +
+        '<span class="val"><span>' + v.html + '</span></span></button>';
+    }).join('') +
+      '<button type="button" class="chip' + (it.week === true ? ' week-on' : ' off') + (pulse === 'week' ? ' pulse' : '') + '" data-k="week" aria-pressed="' + (it.week === true) + '">This week</button>';
+  }
+  function chipBox(k) { return $('editChips').querySelector('.chip-opts[data-k="' + k + '"]'); }
+  function openChip(k) {
+    const it = items[editId];
+    if (!it || (k === 'repeat' && it.repeat && it.repeat.every === 'bins')) return;
+    chipOpen = k;
+    $('chipRow').hidden = true;
+    for (const o of $('editChips').querySelectorAll('.chip-opts')) o.hidden = o.dataset.k !== k;
+    const box = chipBox(k);
+    const btns = Array.from(box.querySelectorAll('button'));
+    if (!M.reduced) btns.forEach((b, i) => play(b, [{ opacity: 0, transform: 'scale(0.94)' }, { opacity: 1, transform: 'none' }], { delay: i * 22, fill: 'backwards' }));
+    const on = box.querySelector('.seg [aria-checked="true"]');
+    if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    (on || box.querySelector('.seg button')).focus({ preventScroll: true });
+  }
+  function closeChip(pulse) {
+    const k = chipOpen;
+    chipOpen = null;
+    for (const o of $('editChips').querySelectorAll('.chip-opts')) o.hidden = true;
+    $('chipRow').hidden = false;
+    paintChips(pulse);
+    if (!M.reduced) Array.from($('chipRow').children).forEach((c, i) => play(c, [{ opacity: 0, transform: 'scale(0.96)' }, { opacity: 1, transform: 'none' }], { delay: i * 22, fill: 'backwards' }));
+    const c = $('chipRow').querySelector('[data-k="' + (pulse || k || 'place') + '"]');
+    if (c) c.focus({ preventScroll: true });
+  }
+  // A pick inside an open chip: the bar's own handler has run (it is on the button); then fold back.
+  $('editChips').addEventListener('click', (e) => {
+    if (e.target.closest('.opt-back')) { closeChip(); return; }
+    const b = e.target.closest('.chip-opts .seg button');
+    if (b && chipOpen) { const k = chipOpen; tap(); setTimeout(() => { if (chipOpen === k) closeChip(k); }, M.reduced ? 0 : 140); }
+  });
+  $('editChips').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && chipOpen) { e.preventDefault(); e.stopPropagation(); closeChip(); }
+  });
+  // Steps a chip without opening it: the next button of its bar is clicked, so the same code runs.
+  function stepChip(k, d) {
+    const it = items[editId];
+    if (!it) return;
+    const before = chipVal(k, it).html;
+    let target = null;
+    if (k === 'place') {
+      const i = Math.max(0, PLACE_ORDER.indexOf(it.section));
+      const next = PLACE_ORDER[(i + d + PLACE_ORDER.length) % PLACE_ORDER.length];
+      target = $('editChips').querySelector('[data-k="place"] .seg button[data-section="' + next + '"]');
+    } else if (k === 'energy') {
+      const i = LEVELS.indexOf(it.energy);
+      const next = i < 0 ? (d > 0 ? LEVELS[0] : LEVELS[LEVELS.length - 1]) : LEVELS[(i + d + LEVELS.length) % LEVELS.length];
+      target = $('editEnergy').querySelector('button[data-level="' + next + '"]');
+    } else if (k === 'repeat') {
+      const every = it.repeat ? it.repeat.every : '';
+      if (every === 'bins') return;
+      const i = Math.max(0, REP_ORDER.indexOf(every));
+      target = $('editRepeat').querySelector('button[data-every="' + REP_ORDER[(i + d + REP_ORDER.length) % REP_ORDER.length] + '"]');
+    }
+    if (!target) return;
+    target.click();
+    tap();
+    paintChips();
+    const c = $('chipRow').querySelector('[data-k="' + k + '"]');
+    const val = c && c.querySelector('.val');
+    if (val && !M.reduced) {
+      const old = document.createElement('span');
+      old.innerHTML = before;
+      old.setAttribute('aria-hidden', 'true');
+      val.prepend(old);
+      play(old, [{ transform: 'none', opacity: 1 }, { transform: 'translateX(' + -d * 100 + '%)', opacity: 0 }], { duration: 240, fill: 'forwards' }).then(() => old.remove());
+      play(val.lastElementChild, [{ transform: 'translateX(' + d * 100 + '%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 240 });
+    }
+    if (c) c.focus({ preventScroll: true });
+  }
+  let chipDrag = null;
+  $('chipRow').addEventListener('pointerdown', (e) => {
+    const c = e.target.closest('.chip');
+    chipSwiped = false;
+    if (c && c.dataset.k !== 'week' && !c.classList.contains('fixed')) chipDrag = { c, k: c.dataset.k, x0: e.clientX, y0: e.clientY, moved: false };
+  });
+  $('chipRow').addEventListener('pointermove', (e) => {
+    if (!chipDrag) return;
+    const dx = e.clientX - chipDrag.x0;
+    if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(e.clientY - chipDrag.y0)) {
+      chipDrag.moved = true;
+      chipDrag.c.style.transform = 'translateX(' + Math.max(-14, Math.min(14, dx / 3)) + 'px)';
+    }
+  });
+  const chipUp = (e) => {
+    if (!chipDrag) return;
+    const g = chipDrag;
+    chipDrag = null;
+    g.c.style.transform = '';
+    const dx = e.clientX - g.x0;
+    if (g.moved) { chipSwiped = true; if (Math.abs(dx) > 30) stepChip(g.k, dx < 0 ? 1 : -1); }
+  };
+  $('chipRow').addEventListener('pointerup', chipUp);
+  $('chipRow').addEventListener('pointercancel', () => { if (chipDrag) chipDrag.c.style.transform = ''; chipDrag = null; });
+  $('chipRow').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip');
+    if (!c || chipSwiped) { chipSwiped = false; return; }
+    if (c.dataset.k === 'week') { $('editWeek').click(); tap(); paintChips('week'); $('chipRow').querySelector('[data-k="week"]').focus({ preventScroll: true }); return; }
+    openChip(c.dataset.k);
+  });
+  $('chipRow').addEventListener('keydown', (e) => {
+    const c = e.target.closest('.chip');
+    if (!c || c.dataset.k === 'week' || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return;
+    e.preventDefault();
+    stepChip(c.dataset.k, e.key === 'ArrowRight' ? 1 : -1);
+  });
   repDate.addEventListener('change', () => {
     const it = items[editId];
     if (!it) return;
@@ -3141,7 +3287,8 @@
       b.classList.toggle('guess', b.dataset.level === guess);
       b.tabIndex = on || (!it.energy && b.dataset.level === (guess || 'wired')) ? 0 : -1;
     }
-    $('editEnergyNote').hidden = !guess;
+    $('editEnergyNote').hidden = true; // the energy chip says a guess with a question mark
+    paintChips();
   }
   for (const b of $('editEnergy').querySelectorAll('button')) {
     b.addEventListener('click', () => {

@@ -80,6 +80,21 @@ for (const [name, viewport, scheme] of [[TAG + '-phone', { width: 390, height: 8
   await page.waitForSelector('#edit:not([hidden])');
   await page.waitForTimeout(400);
   await page.screenshot({ path: file(name + '-edit') });
+  if (await page.locator('#chipRow').count()) {
+    // Edit in one line: a sideways swipe steps the energy chip; a tap on place opens its choices.
+    const b = await page.locator('#chipRow [data-k="energy"]').boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2 - 70, b.y + b.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    console.log('energy chip after a swipe left:', (await page.textContent('#chipRow [data-k="energy"]')).trim(), '· task energy:', w.items.todaybike001.energy || '(none yet: the write is queued)');
+    await page.click('#chipRow [data-k="place"]');
+    await page.waitForTimeout(450);
+    await page.screenshot({ path: file(name + '-edit-open') });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
   await shut();
   if (await page.isVisible('#energySort')) {
     await page.click('#energySort');

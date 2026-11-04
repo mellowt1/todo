@@ -114,6 +114,7 @@ for (const [name, viewport] of [['place-phone', { width: 390, height: 844 }], ['
   await tab('today');
   await page.click(`.row[data-id="${psych.id}"] .text`);
   await page.waitForSelector('#edit:not([hidden])');
+  await page.click('#chipRow [data-k="place"]');
   await page.click('#editSeg [data-section="someday"]');
   await page.click('#editClose');
   await sync();

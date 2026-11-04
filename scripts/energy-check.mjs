@@ -162,8 +162,10 @@ for (const [name, viewport, scheme] of [['energy-phone', { width: 390, height: 8
   await page.waitForSelector('#edit:not([hidden])');
   await page.waitForTimeout(400);
   check(await page.locator('#editEnergy [data-level="normal"].guess').count() === 1, name + ': the guess is outlined');
-  check(await page.isVisible('#editEnergyNote'), name + ': says it is a guess');
+  check((await page.textContent('#chipRow [data-k="energy"]')).trim() === 'Normal?' && await page.locator('#chipRow [data-k="energy"].guess').count() === 1, name + ': the energy chip says it is a guess');
   if (phone) await page.screenshot({ path: file(name + '-edit') });
+  await tap('#chipRow [data-k="energy"]');
+  await page.waitForTimeout(300);
   await tap('#editEnergy [data-level="normal"]');
   await page.waitForTimeout(1600);
   check(w.items.soonguess001.energy === 'normal' && !w.items.soonguess001.energyGuess, name + ': confirmed, the guess gone ' + JSON.stringify(w.items.soonguess001));

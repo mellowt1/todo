@@ -76,11 +76,15 @@ for (const [name, viewport, scheme] of [['repeat-phone', { width: 390, height: 8
 
   // 1. An undated task: Weekly gives it today's date, shown as First date.
   await page.click('.row[data-id="plants000001"] .text');
-  await page.waitForSelector('#edit:not([hidden]) #editRepeat');
+  await page.waitForSelector('#edit:not([hidden]) #chipRow .chip');
   await page.waitForTimeout(400);
   check(await page.getAttribute('#editRepeat [data-every=""]', 'aria-checked') === 'true', name + ': Never is chosen for a plain task');
   check(await page.isHidden('#editRepeatMore'), name + ': no date rows while it does not repeat');
+  check((await page.textContent('#chipRow [data-k="repeat"]')).trim() === 'Once', name + ': the repeat chip says Once');
+  await page.click('#chipRow [data-k="repeat"]');
   await page.click('#editRepeat [data-every="week"]');
+  await page.waitForTimeout(300);
+  check((await page.textContent('#chipRow [data-k="repeat"]')).trim() === 'Weekly' && await page.isVisible('#chipRow'), name + ': the pick folds back, the chip says Weekly');
   await page.waitForTimeout(300);
   check(await page.inputValue('#editText') === `Water the plants · ${day(0)}`, name + ': Weekly adds today to the text ' + await page.inputValue('#editText'));
   check(await page.textContent('#repDateLabel') === 'First date', name + ': the date row says First date');

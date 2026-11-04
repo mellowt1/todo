@@ -203,29 +203,40 @@
       <span class="head-btns"><button id="editStart" class="text-btn">Start timer</button><button id="editClose" class="text-btn">Close</button></span>
     </div>
     <textarea id="editText" rows="3" maxlength="500" autocapitalize="sentences"></textarea>
-    <div id="editSeg" class="seg" role="radiogroup" aria-label="Section">
-      <button role="radio" data-section="today">Today</button>
-      <button role="radio" data-section="soon">Soon</button>
-      <button role="radio" data-section="someday">Someday</button>
+    <!-- Edit in one line (app.js, Edit chips): place, energy, repeat and this week as chips. A tap opens
+         only that chip's choices in the same line, a pick folds it back; a sideways swipe steps a chip. -->
+    <div id="editChips" class="chipline">
+      <div id="chipRow" class="chips" role="group" aria-label="Settings"></div>
+      <div class="chip-opts" data-k="place" hidden><button type="button" class="opt-back" aria-label="Back to the settings">‹</button>
+        <div id="editSeg" class="seg" role="radiogroup" aria-label="Section">
+          <button role="radio" data-section="today">Today</button>
+          <button role="radio" data-section="soon">Soon</button>
+          <button role="radio" data-section="someday">Someday</button>
+        </div>
+        <div id="editLane" class="seg seg-lane" role="radiogroup" aria-label="Lane" style="--n: 3">
+          <button role="radio" data-section="build">Build</button>
+          <button role="radio" data-section="fun">Fun</button>
+          <button role="radio" data-section="others">Others</button>
+        </div>
+      </div>
+      <div class="chip-opts" data-k="energy" hidden><button type="button" class="opt-back" aria-label="Back to the settings">‹</button>
+        <div id="editEnergy" class="seg energy-seg" role="radiogroup" aria-label="Energy it takes" aria-describedby="editEnergyNote">
+          <button role="radio" aria-checked="false" data-level="wired"></button>
+          <button role="radio" aria-checked="false" data-level="normal"></button>
+          <button role="radio" aria-checked="false" data-level="drained"></button>
+        </div>
+      </div>
+      <div class="chip-opts" data-k="repeat" hidden><button type="button" class="opt-back" aria-label="Back to the settings">‹</button>
+        <div id="editRepeat" class="seg seg4" role="radiogroup" aria-label="Repeat">
+          <button role="radio" data-every="">Once</button>
+          <button role="radio" data-every="week">Weekly</button>
+          <button role="radio" data-every="2weeks">2 weeks</button>
+          <button role="radio" data-every="month">Monthly</button>
+        </div>
+      </div>
     </div>
-    <div id="editLane" class="seg seg-lane" role="radiogroup" aria-label="Lane" style="--n: 3">
-      <button role="radio" data-section="build">Build</button>
-      <button role="radio" data-section="fun">Fun</button>
-      <button role="radio" data-section="others">Others</button>
-    </div>
-    <label class="week-row"><span class="week-words">This week</span><input id="editWeek" type="checkbox" role="switch" class="switch"></label>
-    <div id="editEnergy" class="seg energy-seg" role="radiogroup" aria-label="Energy it takes" aria-describedby="editEnergyNote">
-      <button role="radio" aria-checked="false" data-level="wired"></button>
-      <button role="radio" aria-checked="false" data-level="normal"></button>
-      <button role="radio" aria-checked="false" data-level="drained"></button>
-    </div>
+    <label class="week-row" hidden><span class="week-words">This week</span><input id="editWeek" type="checkbox" role="switch" class="switch"></label>
     <p id="editEnergyNote" class="meta energy-note" hidden>A guess. Tap to confirm.</p>
-    <div id="editRepeat" class="seg seg4" role="radiogroup" aria-label="Repeat">
-      <button role="radio" data-every="">Once</button>
-      <button role="radio" data-every="week">Weekly</button>
-      <button role="radio" data-every="2weeks">2 weeks</button>
-      <button role="radio" data-every="month">Monthly</button>
-    </div>
     <div id="editRepeatMore" class="rep-more" hidden>
       <label class="rep-row"><span id="repDateLabel">Next</span><input id="repDate" type="date"></label>
       <div class="rep-row"><label for="repUntil">Ends</label><span class="rep-end"><input id="repUntil" type="date"><button id="repUntilClear" type="button" class="text-btn">Never</button></span></div>
