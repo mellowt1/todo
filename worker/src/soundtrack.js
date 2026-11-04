@@ -1,7 +1,7 @@
 /* The Energy soundtrack (Paul, 2026-10-24): Spotify playlists for each energy level. When a level is
  * set, To-do, Morning and Day show Play, which opens the level's first playlist in the Spotify app;
  * when a task starts (the Dread meter's dread.started, the hub's task.started), the running pill asks
- * "Music for this?". Nothing plays by itself and nothing in Spotify changes: links only.
+ * "Music for this?". Nothing plays by itself; the hub only adds to Spotify the playlists Make a new one makes (src/mixtape.js).
  *
  *   GET  /api/soundtrack/:code                -> { lists, max }
  *   POST /api/soundtrack/:code/peek           <- { url }                  -> { pid, title, url, uri }   adds nothing
@@ -102,7 +102,7 @@ export function cleanLists(v) {
   for (const k of ENERGY) {
     for (const e of (v && Array.isArray(v[k]) ? v[k] : [])) {
       if (!e || !ENTRY_ID.test(e.id) || !PID.test(e.pid) || !cleanTitle(e.title)) continue;
-      if (out[k].length < MAX_PER_LEVEL) out[k].push({ id: e.id, pid: e.pid, title: cleanTitle(e.title) });
+      if (out[k].length < MAX_PER_LEVEL) out[k].push({ id: e.id, pid: e.pid, title: cleanTitle(e.title), ...(e.made ? { made: true } : {}) });
     }
   }
   return out;
@@ -115,7 +115,7 @@ export async function readLists(env) {
 /* Pure: the lists as the apps see them. */
 export function listsView(lists) {
   const out = empty();
-  for (const k of ENERGY) out[k] = lists[k].map((e) => ({ id: e.id, title: e.title, url: webUrl(e.pid), uri: appUri(e.pid) }));
+  for (const k of ENERGY) out[k] = lists[k].map((e) => ({ id: e.id, title: e.title, url: webUrl(e.pid), uri: appUri(e.pid), ...(e.made ? { made: true } : {}) }));
   return out;
 }
 
@@ -143,6 +143,27 @@ export async function addPlaylist(env, level, raw, title) {
   lists[level].push(added);
   await env.HUB_KV.put(KEY, JSON.stringify(lists));
   return { lists: listsView(lists), added: { id: added.id, title: name, url: webUrl(got.pid), uri: appUri(got.pid) } };
+}
+
+/* A playlist the hub just made (src/mixtape.js) takes the first place, so Play starts it. A full
+ * level lets one go: the last one the hub made, else the last one. It stays in his Spotify. */
+export function putFirst(lists, level, entry) {
+  const list = [entry, ...lists[level]];
+  let dropped = null;
+  if (list.length > MAX_PER_LEVEL) {
+    let i = list.length - 1;
+    while (i > 0 && !list[i].made) i--;
+    if (i === 0) i = list.length - 1;
+    dropped = list.splice(i, 1)[0];
+  }
+  return { lists: { ...lists, [level]: list }, dropped };
+}
+
+export async function addMade(env, level, pid, title) {
+  const entry = { id: rand(10), pid, title: cleanTitle(title), made: true };
+  const { lists, dropped } = putFirst(await readLists(env), level, entry);
+  await env.HUB_KV.put(KEY, JSON.stringify(lists));
+  return { lists: listsView(lists), added: { id: entry.id, title: entry.title, url: webUrl(pid), uri: appUri(pid) }, dropped: dropped ? dropped.title : null };
 }
 
 export async function removePlaylist(env, level, id) {

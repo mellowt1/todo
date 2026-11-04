@@ -126,6 +126,7 @@
  * Play also asks here, and the hub starts the playlist on the Spotify of the device he tapped on.
  *   GET /api/spotify/:code[/login | /playlists]   GET /api/spotify/callback   POST /api/spotify/:code/(play | disconnect)
  *   POST /api/hub/spotify/day/play
+ *   POST /api/spotify/:code/make   a new playlist for a level, songs picked by Claude (src/mixtape.js)
  *
  * Restless list (src/restless.js; the to-do's code, Day with Bearer <HUB_SECRET_DAY>): things to do with
  * spare energy, in D1 restless_items; when the dial says wired, Morning and Day pick one that fits.
@@ -220,6 +221,7 @@ import { handleEnergy, handleEnergyDay } from './energy.js';
 import { handleDread, handleDreadDay, dreadCron } from './dread.js';
 import { handleSoundtrack, handleSoundtrackDay } from './soundtrack.js';
 import { handleSpotify, handleSpotifyDay } from './spotify.js';
+import { handleMake } from './mixtape.js';
 import { handleRestless, handleRestlessDay } from './restless.js';
 import { handleArchive, archiveCron } from './archive.js';
 import { handleOracle, oracleCron } from './oracle.js';
@@ -457,7 +459,7 @@ const MODULES = {
   waiting: (request, env, rest) => handleWaiting(request, env, rest, json),
   dread: (request, env, rest) => handleDread(request, env, rest, json),
   soundtrack: (request, env, rest) => handleSoundtrack(request, env, rest, json),
-  spotify: (request, env, rest, url, ctx) => handleSpotify(request, env, rest, url, json, ctx),
+  spotify: (request, env, rest, url, ctx) => (rest[1] === 'make' ? handleMake(request, env, rest, json, ctx) : handleSpotify(request, env, rest, url, json, ctx)),
   restless: (request, env, rest) => handleRestless(request, env, rest, json),
   archive: (request, env, rest) => handleArchive(request, env, rest, json),
   oracle: (request, env, rest) => handleOracle(request, env, rest, json),

@@ -9,11 +9,16 @@
  *   GET  /api/spotify/:code/playlists      -> { playlists: [{ pid, title, count, url, uri }] }   his own and followed
  *   POST /api/spotify/:code/play           <- { uri, kind: "phone" | "computer" }  -> { ok, device? } | { ok: false, why, waiting? }
  *   POST /api/spotify/:code/disconnect     -> { connected: false }
+ *   POST /api/spotify/:code/make           a new playlist for a level (src/mixtape.js)
  *   POST /api/hub/spotify/day/play         the same for Day, Bearer HUB_SECRET_DAY, always "phone"
  *
  * Scopes, and only these (Paul, 2026-10-24): playlist-read-private (his playlists, read only),
  * user-read-playback-state (which devices are there), user-modify-playback-state (play on one).
- * Never a playlist written, nothing public, nothing followed.
+ * Since 2026-11-04 (Paul's OK, for Make a new one in src/mixtape.js) also: playlist-modify-private
+ * (make a private playlist), user-top-read, user-library-read and user-read-recently-played (what
+ * he listens to, read only). A login from before has the first three only: the status says
+ * canMake false and the sheet asks him to connect again. Nothing public, nothing followed, and a
+ * playlist the hub did not make is never changed.
  *
  * Secrets: SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET (his developer app) and SPOTIFY_KEY (32 random
  * bytes, base64). Spotify can hand out a new refresh token at any time and a Worker cannot write its
@@ -22,12 +27,14 @@
 
 import { CODE, safeEqual, bearer } from './todo.js';
 
-export const SCOPES = 'playlist-read-private user-read-playback-state user-modify-playback-state';
+export const PLAY_SCOPES = 'playlist-read-private user-read-playback-state user-modify-playback-state';
+export const MAKE_SCOPES = 'playlist-modify-private user-top-read user-library-read user-read-recently-played';
+export const SCOPES = PLAY_SCOPES + ' ' + MAKE_SCOPES;
 export const REDIRECT = 'https://paul-hub.paul-o-a04.workers.dev/api/spotify/callback';
 const LOGIN = 'spotify:login';
 const STATE = 'spotify:state:';
 const ACCOUNTS = 'https://accounts.spotify.com';
-const API = 'https://api.spotify.com/v1';
+export const API = 'https://api.spotify.com/v1';
 const URI = /^spotify:playlist:[A-Za-z0-9]{22}$/;
 export const KINDS = { phone: ['Smartphone', 'Tablet'], computer: ['Computer'] };
 export const WAIT = { tries: 14, every: 1500 }; // about 20 seconds for Spotify to come up
@@ -86,9 +93,13 @@ export async function accessToken(env, now = Date.now()) {
     if (got.status === 400 && got.d.error === 'invalid_grant') await env.HUB_KV.delete(LOGIN);
     return null;
   }
-  await writeLogin(env, { refresh: got.d.refresh_token || login.refresh, access: got.d.access_token, expiresAt: now + (got.d.expires_in || 3600) * 1000 });
+  await writeLogin(env, { refresh: got.d.refresh_token || login.refresh, access: got.d.access_token, expiresAt: now + (got.d.expires_in || 3600) * 1000, scope: got.d.scope || login.scope || '' });
   return got.d.access_token;
 }
+
+/* Pure: does a granted scope string hold every scope Make needs? */
+export const canMakeWith = (scope) => { const have = new Set(String(scope || '').split(/\s+/)); return MAKE_SCOPES.split(' ').every((s) => have.has(s)); };
+export async function canMake(env) { const login = configured(env) ? await readLogin(env) : null; return !!(login && canMakeWith(login.scope)); }
 
 /* ---------- Devices and playing ---------- */
 
@@ -205,8 +216,8 @@ export async function callback(env, url, now = Date.now()) {
   if (!code || code.length > 1000) return page('Not connected', 'Spotify sent no answer. Try again from To-do.', 400);
   const got = await tokenCall(env, { grant_type: 'authorization_code', code, redirect_uri: REDIRECT });
   if (!got.ok || !got.d.refresh_token) return page('Not connected', 'Spotify did not finish the login. Try again from To-do.', 502);
-  await writeLogin(env, { refresh: got.d.refresh_token, access: got.d.access_token, expiresAt: now + (got.d.expires_in || 3600) * 1000 });
-  return page('Spotify is connected', 'Play now starts the music on the phone or PC you tap it on. Close this page to go back to To-do.');
+  await writeLogin(env, { refresh: got.d.refresh_token, access: got.d.access_token, expiresAt: now + (got.d.expires_in || 3600) * 1000, scope: got.d.scope || '' });
+  return page('Spotify is connected', 'Play now starts the music on the phone or PC you tap it on, and To-do can make new playlists. Close this page to go back to To-do.');
 }
 
 /* ---------- Routes ---------- */
@@ -237,7 +248,8 @@ export async function handleSpotify(request, env, rest, url, json, ctx) {
   if (!env.TODO_CODE || !safeEqual(code, env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
   const sub = rest.slice(1);
   if (sub.length === 0 && request.method === 'GET') {
-    return json({ configured: configured(env), connected: configured(env) && !!(await env.HUB_KV.get(LOGIN)) }, request);
+    const connected = configured(env) && !!(await env.HUB_KV.get(LOGIN));
+    return json({ configured: configured(env), connected, canMake: connected && (await canMake(env)) }, request);
   }
   if (!configured(env)) return json({ error: 'not set up' }, request, 503);
   const wait = ctx && ctx.waitUntil ? (p) => ctx.waitUntil(p) : null;

@@ -104,14 +104,14 @@ test('pickDevice: the kind he tapped on, an active one first, never a restricted
   assert.equal(pickDevice([pc], 'tv'), null);
 });
 
-test('connecting: the consent page asks for the three scopes only; the login is kept sealed', async () => {
+test('connecting: the consent page asks for the seven scopes only (three to play, four to make); the login is kept sealed', async () => {
   const e = env();
-  assert.deepEqual((await call(e, 'spotify/' + CODE)).body, { configured: true, connected: false });
+  assert.deepEqual((await call(e, 'spotify/' + CODE)).body, { configured: true, connected: false, canMake: false });
   const r = await raw(e, 'spotify/' + CODE + '/login');
   assert.equal(r.status, 302);
   const to = new URL(r.headers.get('Location'));
   assert.equal(to.origin + to.pathname, 'https://accounts.spotify.com/authorize');
-  assert.equal(to.searchParams.get('scope'), 'playlist-read-private user-read-playback-state user-modify-playback-state');
+  assert.equal(to.searchParams.get('scope'), 'playlist-read-private user-read-playback-state user-modify-playback-state playlist-modify-private user-top-read user-library-read user-read-recently-played');
   assert.equal(to.searchParams.get('redirect_uri'), REDIRECT);
   assert.equal(to.searchParams.get('client_id'), 'client-id-made-up');
   // a made-up or used state is refused
@@ -123,7 +123,7 @@ test('connecting: the consent page asks for the three scopes only; the login is 
   assert.equal((await raw(e, 'spotify/callback?code=good-code&state=' + state)).status, 400);
   const kept = e.HUB_KV.m.get('spotify:login');
   assert.ok(kept && !/refresh-1|access-1/.test(kept));
-  assert.deepEqual((await call(e, 'spotify/' + CODE)).body, { configured: true, connected: true });
+  assert.deepEqual((await call(e, 'spotify/' + CODE)).body, { configured: true, connected: true, canMake: true });
   // a refused consent keeps nothing
   const e2 = env();
   const r2 = await raw(e2, 'spotify/' + CODE + '/login');
@@ -189,7 +189,7 @@ test('play: Spotify was closed; the tap opened it, the hub plays once it shows u
 
 test('not set up or not connected: Play still opens Spotify, the hub just says so', async () => {
   const bare = env({ SPOTIFY_CLIENT_ID: undefined, SPOTIFY_CLIENT_SECRET: undefined, SPOTIFY_KEY: undefined });
-  assert.deepEqual((await call(bare, 'spotify/' + CODE)).body, { configured: false, connected: false });
+  assert.deepEqual((await call(bare, 'spotify/' + CODE)).body, { configured: false, connected: false, canMake: false });
   assert.equal((await call(bare, 'spotify/' + CODE + '/play', { uri: URI, kind: 'phone' })).status, 503);
   assert.deepEqual((await call(env(), 'spotify/' + CODE + '/play', { uri: URI, kind: 'phone' })).body, { ok: false, why: 'not connected' });
   assert.equal((await call(env(), 'spotify/zzzzzzzz12345678')).status, 404);
@@ -235,4 +235,12 @@ test('play: Spotify is open on the PC but the phone played last; Play moves it t
   assert.deepEqual(puts, ['/me/player/play?device_id=dev-pc', '/me/player', '/me/player/play?device_id=dev-pc']);
   assert.deepEqual(JSON.parse(sp.calls.find((c) => c.u.endsWith('/me/player')).body), { device_ids: ['dev-pc'], play: false });
   sp.needsMove = false;
+});
+
+test('a login from before the four make scopes plays on but cannot make: connect again', async () => {
+  const e = env();
+  await e.HUB_KV.put('spotify:login', await seal(e, { refresh: sp.refresh, access: 'access-old', expiresAt: NOW + 3600000 }));
+  assert.deepEqual((await call(e, 'spotify/' + CODE)).body, { configured: true, connected: true, canMake: false });
+  await e.HUB_KV.put('spotify:login', await seal(e, { refresh: sp.refresh, access: 'access-old', expiresAt: NOW + 3600000, scope: 'user-read-playback-state playlist-read-private' }));
+  assert.equal((await call(e, 'spotify/' + CODE)).body.canMake, false);
 });
