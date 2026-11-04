@@ -49,7 +49,7 @@ for (const [name, viewport] of [['place-phone', { width: 390, height: 844 }], ['
     return r.fulfill({ status: 404, json: {}, headers: h });
   });
   const open = async () => {
-    await page.goto(APP + '?c=' + CODE + '&api=' + encodeURIComponent('http://localhost:8799'));
+    await page.goto(APP + '?c=' + CODE + '&noforce&api=' + encodeURIComponent('http://localhost:8799')); // many tasks without a level
     await page.waitForTimeout(800);
   };
   const add = async (lines) => {
