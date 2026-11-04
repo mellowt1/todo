@@ -3302,13 +3302,16 @@
    * `offer` puts "Music for this?" under the pill; Play or Not now, here or in Morning or Day, ends it.
    * Play and Not now are told to the hub without holding up the link. Editing needs a connection.
    * With Spotify connected (worker/src/spotify.js) the same tap also asks the hub to start the
-   * playlist on this device's Spotify: the link still opens the app, which is how the hub finds it. */
+   * playlist on this device's Spotify: the link still opens the app, which is how the hub finds it.
+   * Make a new one (Paul, 2026-11-04): the hub has Claude pick a new private playlist for a level,
+   * with a few words of mood if he likes (worker/src/mixtape.js); it goes first, so Play starts it. */
   const SOUND_MAX = 3;
   let sound = Object.assign({ wired: [], normal: [], drained: [] }, store.get('todo.sound') || {});
   let offer = null;     // the hub's "Music for this?" for the timer that runs
   let soundAdd = null;  // the paste form: { level, url, title, named, hint, err, busy }
   let soundBusy = false;
   let peekFor = '';     // the link last sent to be read
+  let soundMake = null; // the make form: { level, words, busy, err }
 
   async function soundPost(sub, body) {
     const quiet = sub === 'played' || sub === 'notnow';
@@ -3379,7 +3382,7 @@
       if (!r.ok) return;
       const d = await r.json();
       const was = spotify.connected;
-      spotify = { configured: !!d.configured, connected: !!d.connected, known: true };
+      spotify = { configured: !!d.configured, connected: !!d.connected, canMake: !!d.canMake, known: true };
       store.set('todo.spotify', spotify);
       if (!spotify.connected) mine = null;
       renderEnergy();
@@ -3422,11 +3425,15 @@
 
   /* The sheet: each level with its playlists (the first is the one Play opens), Remove, and a paste
    * form whose name the hub reads from Spotify (peek); Paul can change it. */
+  const sparkSvg = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1v3.2M7 9.8V13M1 7h3.2M9.8 7H13M2.8 2.8l2 2M9.2 9.2l2 2M11.2 2.8l-2 2M4.8 9.2l-2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
   const plusSvg = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5v11M1.5 7h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   function renderSound() {
     let h = '';
     if (spotify.configured) {
-      h += spotify.connected
+      h += spotify.connected && !spotify.canMake
+        ? '<div class="sp-row"><span class="sound-words"><span class="sound-name">Connect Spotify again</span><span class="sound-sub">So To-do can make new playlists for you. Play keeps working meanwhile.</span></span>' +
+          '<a class="sp-connect" href="' + esc(API + '/api/spotify/' + code + '/login') + '">Connect</a></div>'
+        : spotify.connected
         ? '<div class="sp-row"><span class="sound-words"><span class="sound-name">Spotify is connected</span><span class="sound-sub">Play starts the music on the phone or PC you tap it on.</span></span>' +
           '<button class="text-btn sound-remove" data-act="disconnect">Disconnect</button></div>'
         : '<div class="sp-row"><span class="sound-words"><span class="sound-name">Connect Spotify</span><span class="sound-sub">So Play starts the music, not only opens it.</span></span>' +
@@ -3437,7 +3444,7 @@
       h += '<h3 class="sound-level">' + battSvg(level) + '<span>' + LNAME[level] + '</span></h3>';
       if (list.length) {
         h += '<ul class="sound-list">' + list.map((p, i) => '<li><span class="sound-words"><span class="sound-name">' + esc(p.title) + '</span>' +
-          '<span class="sound-sub">Spotify' + (i === 0 ? ' · Play opens this one' : '') + '</span></span>' +
+          '<span class="sound-sub">' + (p.made ? 'Made for you' : 'Spotify') + (i === 0 ? ' · Play opens this one' : '') + '</span></span>' +
           '<button class="text-btn sound-remove" data-act="remove" data-level="' + level + '" data-id="' + esc(p.id) + '" aria-label="Remove ' + esc(p.title) + ' from ' + LNAME[level] + '">Remove</button></li>').join('') + '</ul>';
       }
       if (soundAdd && soundAdd.level === level) {
@@ -3448,15 +3455,62 @@
           (a.err ? '<p class="sound-err" role="alert">' + esc(a.err) + '</p>' : '<p class="sound-hint" aria-live="polite">' + esc(a.hint || 'The name is read from Spotify. Change it if you like.') + '</p>') +
           mineHtml(level) +
           '<div class="sound-btns"><button class="sound-cancel" data-act="cancel">Cancel</button><button class="sound-save" data-act="save"' + (a.busy ? ' disabled' : '') + '>Add to ' + LNAME[level] + '</button></div></div>';
-      } else if (list.length < SOUND_MAX) {
-        h += '<button class="text-btn sound-add" data-act="add" data-level="' + level + '">' + plusSvg + 'Paste a link</button>';
+      } else if (soundMake && soundMake.level === level) {
+        h += makeHtml(level, list);
       } else {
-        h += '<p class="sound-hint">' + SOUND_MAX + ' is the most. Remove one to add another.</p>';
+        const canMake = spotify.connected && spotify.canMake;
+        h += '<div class="sound-acts">' + (list.length < SOUND_MAX ? '<button class="text-btn sound-add" data-act="add" data-level="' + level + '">' + plusSvg + 'Paste a link</button>' : '') +
+          (canMake ? '<button class="text-btn sound-add" data-act="make" data-level="' + level + '">' + sparkSvg + 'Make a new one</button>' : '') + '</div>';
+        if (list.length >= SOUND_MAX && !canMake) h += '<p class="sound-hint">' + SOUND_MAX + ' is the most. Remove one to add another.</p>';
       }
     }
     h += '<p class="sound-foot">Kept in the hub, so To-do, Morning and Day all play the same one.</p>';
     $('soundBody').innerHTML = h;
   }
+  /* The make form: a few words, optional. A full level says which one makes room (as the hub does:
+   * the last one made for him, else the last); it stays in his Spotify. */
+  function makeHtml(level, list) {
+    const m = soundMake;
+    let goes = null;
+    if (list.length >= SOUND_MAX) {
+      for (let i = list.length - 1; i >= 0 && !goes; i--) if (list[i].made) goes = list[i];
+      goes = goes || list[list.length - 1];
+    }
+    const hint = m.busy ? 'Claude is picking about 25 songs, some you know and some new. This takes about half a minute.'
+      : 'About 25 songs, some you play a lot and some new. It goes first, so Play starts it.' + (goes ? ' ' + goes.title + ' makes room; it stays in your Spotify.' : '');
+    return '<div class="sound-form">' +
+      '<label class="meta" for="soundWords">Your mood, in a few words (optional)</label><input id="soundWords" type="text" maxlength="80" autocomplete="off" enterkeyhint="go" placeholder="rainy Sunday, slow coffee" value="' + esc(m.words) + '"' + (m.busy ? ' disabled' : '') + '>' +
+      (m.err ? '<p class="sound-err" role="alert">' + esc(m.err) + '</p>' : '<p class="sound-hint" aria-live="polite">' + esc(hint) + '</p>') +
+      '<div class="sound-btns"><button class="sound-cancel" data-act="make-cancel"' + (m.busy ? ' disabled' : '') + '>Cancel</button><button class="sound-save" data-act="make-go"' + (m.busy ? ' disabled' : '') + '>' + (m.busy ? 'Making…' : 'Make for ' + LNAME[level]) + '</button></div></div>';
+  }
+  async function makeMix() {
+    const m = soundMake;
+    if (!m || m.busy) return;
+    if (!navigator.onLine) { m.err = 'Making one needs a connection.'; return renderSoundKeep(); }
+    m.busy = true;
+    m.err = '';
+    renderSoundKeep();
+    try {
+      const r = await fetch(API + '/api/spotify/' + code + '/make', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level: m.level, words: m.words }) });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d || d.error) {
+        if (d && d.reconnect) loadSpotify();
+        throw new Error((d && d.error) || 'Could not make it. Try again.');
+      }
+      if (soundMake === m) soundMake = null;
+      takeLists(d.lists);
+      say('Made ' + d.title + ': ' + d.songs + ' songs' + (d.fresh ? ', ' + d.fresh + ' new to you' : ''));
+      if (!$('sound').hidden) $('soundClose').focus({ preventScroll: true });
+    } catch (e) {
+      m.busy = false;
+      // A dropped connection: the hub carries on, so the new one may turn up in the lists.
+      const lost = e instanceof TypeError;
+      m.err = lost ? 'Lost the connection. If it was made, it shows here in a minute.' : e.message;
+      if (lost) setTimeout(loadSound, 45000);
+      if (soundMake === m) renderSoundKeep();
+    }
+  }
+
   // With Spotify connected: his own playlists to pick from, the ones already on this level left out.
   function mineHtml(level) {
     if (!spotify.connected || !mine) return '';
@@ -3479,13 +3533,14 @@
   function newAdd(level) { peekFor = ''; return { level, url: '', title: '', named: false, hint: '', err: '', busy: false }; }
   function openSound(level) {
     soundAdd = level && sound[level].length < SOUND_MAX ? newAdd(level) : null;
+    if (!soundMake || !soundMake.busy) soundMake = null;
     renderSound();
     openSheet($('sound'), undefined, document.activeElement);
     loadSound();
     loadSpotify().then(() => { if (soundAdd && !mine) loadMine(); });
     if (soundAdd) $('soundUrl').focus({ preventScroll: true });
   }
-  function closeSound() { if ($('sound').hidden) return; soundAdd = null; closeSheet($('sound')); }
+  function closeSound() { if ($('sound').hidden) return; soundAdd = null; if (soundMake && !soundMake.busy) soundMake = null; closeSheet($('sound')); }
 
   // A link is read as soon as it is pasted or typed in full: the name comes back from Spotify.
   async function peekLink() {
@@ -3535,15 +3590,32 @@
     }
     if (e.target.id === 'soundName') { soundAdd.title = e.target.value; soundAdd.named = !!e.target.value.trim(); }
   });
+  $('soundBody').addEventListener('input', (e) => { if (e.target.id === 'soundWords' && soundMake) soundMake.words = e.target.value; });
   $('soundBody').addEventListener('change', (e) => { if (e.target.id === 'soundUrl') peekLink(); });
   $('soundBody').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.target.id === 'soundUrl' || e.target.id === 'soundName')) { e.preventDefault(); saveSound(); }
+    if (e.key === 'Enter' && e.target.id === 'soundWords') { e.preventDefault(); makeMix(); }
   });
   $('soundBody').addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
     const act = b.dataset.act;
-    if (act === 'add') {
+    if (act === 'make') {
+      if (soundMake && soundMake.busy) { toast('One is being made. Give it half a minute.'); return; }
+      soundAdd = null;
+      soundMake = { level: b.dataset.level, words: '', busy: false, err: '' };
+      renderSound();
+      $('soundWords').focus({ preventScroll: true });
+    } else if (act === 'make-go') {
+      makeMix();
+    } else if (act === 'make-cancel') {
+      const level = soundMake && soundMake.level;
+      soundMake = null;
+      renderSound();
+      const mk = $('soundBody').querySelector('[data-act="make"][data-level="' + level + '"]');
+      (mk || $('soundClose')).focus({ preventScroll: true });
+    } else if (act === 'add') {
+      if (!soundMake || !soundMake.busy) soundMake = null;
       soundAdd = newAdd(b.dataset.level);
       renderSound();
       $('soundUrl').focus({ preventScroll: true });

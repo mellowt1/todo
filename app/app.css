@@ -811,6 +811,8 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .sound-sub { font-size: var(--fs-meta); color: var(--secondary); }
 .text-btn.sound-remove { flex-shrink: 0; color: var(--danger); font-size: 15px; font-weight: 500; }
 .text-btn.sound-add { align-self: flex-start; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+.sound-acts { display: flex; flex-wrap: wrap; column-gap: 20px; }
+.sound-form input:disabled { opacity: 0.6; }
 .sound-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 12px; border-radius: 12px; background: var(--surface); }
 .sound-form input { height: 46px; min-width: 0; padding: 0 12px; border-radius: 10px; background: var(--bg); color: var(--text); font-size: var(--fs-body); border: 1.5px solid var(--sep); }
 .sound-form input:focus { border-color: var(--accent-text); outline: none; }
@@ -821,7 +823,7 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .sound-btns button { flex: 1; height: 46px; border-radius: 10px; font-size: var(--fs-body); }
 .sound-cancel { background: var(--sep); color: var(--text); }
 .sound-save { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.sound-save:disabled { opacity: 0.45; }
+.sound-save:disabled, .sound-cancel:disabled { opacity: 0.45; }
 .sound-btns button:active { opacity: 0.55; }
 .sound-foot { margin: 10px 0 0; font-size: var(--fs-meta); color: var(--secondary); }
 /* Spotify connected (or not) at the top of the sheet, and his own playlists in the paste form. */

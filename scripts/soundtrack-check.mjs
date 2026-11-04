@@ -3,7 +3,9 @@
 // the sheet reads a pasted link's name, adds, refuses an album in plain words and removes, and a
 // running timer shows "Music for this?" until Not now or Play. With Spotify connected the same tap
 // asks the hub to start it on this device (phone or computer), and the paste form offers his own
-// playlists; Disconnect turns the row back into Connect. Every playlist and task is made up.
+// playlists; Disconnect turns the row back into Connect. Make a new one sends the level and words and
+// the new one plays first; a login from before the make scopes asks to connect again. Every playlist
+// and task is made up.
 //   PORT=8121 npm run serve, then: APP_URL=http://localhost:8121/ npm run soundtrack-check
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -30,7 +32,7 @@ function world() {
     t('todaylamp001', 'Return the lamp', 'today', { energy: 'normal' }),
   ].map((i) => [i.id, i]));
   const w = {
-    items, posts: [], running: null, offer: null, spotify: { configured: true, connected: true },
+    items, posts: [], running: null, offer: null, spotify: { configured: true, connected: true, canMake: true },
     mine: [{ pid: '5ABHKGoOzxkaa28ttQV9sE', title: 'Full send', count: 40, url: 'https://open.spotify.com/playlist/5ABHKGoOzxkaa28ttQV9sE', uri: 'spotify:playlist:5ABHKGoOzxkaa28ttQV9sE' }],
     lists: { wired: [], normal: [], drained: [entry('lowtide001', P.low), entry('rainwind01', P.rain)] },
     state: { level: 'drained', setAt: new Date().toISOString(), until: new Date(Date.now() + 3 * 3600e3).toISOString(), source: 'todo' },
@@ -48,6 +50,12 @@ function world() {
       if (p === `/api/spotify/${CODE}`) return w.spotify;
       if (p === `/api/spotify/${CODE}/playlists`) return { playlists: w.mine };
       if (p === `/api/spotify/${CODE}/play`) { w.posts.push({ sub: 'spotify-play', ...body }); return { ok: true, device: 'iPhone' }; }
+      if (p === `/api/spotify/${CODE}/make`) {
+        w.posts.push({ sub: 'make', ...body });
+        const e = { ...entry('madenew001', '7aBcDeFgHiJkLmNoPqRsTu', 'Drained · ' + body.words + ' · 4 Nov'), made: true };
+        w.lists[body.level] = [e, ...w.lists[body.level]].slice(0, 3);
+        return { title: e.title, songs: 24, fresh: 8, url: e.url, uri: e.uri, lists: w.lists, dropped: null };
+      }
       if (p === `/api/spotify/${CODE}/disconnect`) { w.posts.push({ sub: 'disconnect' }); w.spotify = { configured: true, connected: false }; return { connected: false }; }
       if (p.startsWith(`/api/soundtrack/${CODE}`)) {
         const sub = p.slice(`/api/soundtrack/${CODE}`.length).replace('/', '');
@@ -83,6 +91,7 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   await page.route('**/api/**', async (r) => {
     const h = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' };
     if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: h });
+    if (r.request().url().endsWith('/make')) await new Promise((ok) => setTimeout(ok, 900)); // Claude takes a while
     const out = w.route(r.request());
     if (out && out.status) return r.fulfill({ status: out.status, json: { error: out.error }, headers: h });
     return out ? r.fulfill({ json: out, headers: h }) : r.fulfill({ status: 404, json: { error: 'not found' }, headers: h });
@@ -150,10 +159,32 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   await tap('#soundBody [data-act="disconnect"]');
   await page.waitForSelector('#soundBody .sp-connect');
   check((await page.getAttribute('#soundBody .sp-connect', 'href')).endsWith('/api/spotify/' + CODE + '/login'), name + ': Disconnect turns the row into Connect');
-  w.spotify = { configured: true, connected: true };
+  // Connected before the make scopes: Play works, Make asks to connect again first.
+  w.spotify = { configured: true, connected: true, canMake: false };
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); // back from connecting
+  await page.waitForFunction(() => (document.querySelector('#soundBody .sp-row .sound-name') || {}).textContent === 'Connect Spotify again');
+  check(!(await page.locator('#soundBody [data-act="make"]').count()), name + ': an old login shows Connect again and no Make');
+  w.spotify = { configured: true, connected: true, canMake: true };
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await page.waitForSelector('#soundBody .sp-row [data-act="disconnect"]');
   check(true, name + ': coming back to the app reads the connection again');
+  // Make a new one for Drained, with a few words.
+  await tap('#soundBody [data-act="make"][data-level="drained"]');
+  await page.waitForSelector('#soundWords');
+  check(await page.evaluate(() => document.activeElement && document.activeElement.id === 'soundWords'), name + ': the words field has the focus');
+  check((await page.textContent('#soundBody [data-act="make-go"]')) === 'Make for Drained', name + ': the button names the level');
+  await page.fill('#soundWords', 'rainy Sunday');
+  await page.screenshot({ path: file(name + '-make') });
+  await tap('#soundBody [data-act="make-go"]');
+  await page.waitForFunction(() => { const b = document.querySelector('#soundBody [data-act="make-go"]'); return b && b.disabled && b.textContent === 'Making…'; });
+  check(await page.locator('#soundWords').isDisabled(), name + ': while it is made, the form waits');
+  await page.screenshot({ path: file(name + '-making') });
+  await page.waitForFunction(() => !document.getElementById('soundWords'));
+  const made = last('make');
+  check(made && made.level === 'drained' && made.words === 'rainy Sunday', name + ': the hub heard make ' + JSON.stringify(made));
+  const drainedFirst = page.locator('#soundBody .sound-list li').filter({ hasText: 'Drained · rainy Sunday' });
+  check((await drainedFirst.count()) === 1 && (await drainedFirst.locator('.sound-sub').textContent()) === 'Made for you · Play opens this one', name + ': the new one is first and says Made for you');
+  check(/Made Drained · rainy Sunday · 4 Nov: 24 songs, 8 new to you/.test(await page.evaluate(() => document.body.innerText)), name + ': it says what was made');
   await page.screenshot({ path: file(name + '-sheet') });
   if (phone) await tap('#soundClose'); else await page.keyboard.press('Escape');
   await page.waitForSelector('#sound', { state: 'hidden' });
