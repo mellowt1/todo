@@ -1004,3 +1004,5 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 /* Waiting on's Add: a quiet line under the stack, not a second big button. */
 #waitAdd { background: none; color: var(--accent-text); height: 44px; margin-top: 6px; }
 #waitAdd::before { content: "+ "; }
+.cal-fold[aria-expanded="true"] .trep { transform: none; } /* the calendar does not turn */
+.sublabel-fold + .sublabel-fold { padding-top: 0; } /* the calendar line, then the repeats line */

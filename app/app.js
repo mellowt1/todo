@@ -274,7 +274,19 @@
   // Today on its day. A This week flag keeps it in the list.
   const folds = (it) => it.section === 'soon' && !!(it.repeat && it.repeat.every) && it.week !== true;
   let repsOpen = false; // the fold, open or shut; shut again on each launch
-  const countIn = (section) => openIn(section).filter((it) => !folds(it)).length;
+  // On the calendar (Paul, 2026-11-04): an appointment Day has confirmed (cal, set by the hub,
+  // worker/src/dayplan.js) waits behind one quiet "2 on the calendar" line until its day, when the
+  // hub brings it into Today. Its date changed in To-do: it shows again until Day confirms the new
+  // one. A This week flag keeps it in the list.
+  function onCal(it) {
+    if (it.section !== 'soon' || it.appt !== true || !it.cal || it.week === true || folds(it)) return false;
+    const d = new Date(now());
+    const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return it.cal > today && nameParts(it).due === it.cal;
+  }
+  let calOpen = false; // like repsOpen
+  const tail = (it) => (folds(it) ? 2 : onCal(it) ? 1 : 0); // Soon's folds, last: calendar, then repeats
+  const countIn = (section) => openIn(section).filter((it) => !tail(it)).length;
   function openIn(section) {
     if (section === 'lanes') return LANES.flatMap((l) => openIn(l)); // grouped, lane by lane
     const rows = Object.values(items).filter((i) => !i.done && i.section === section);
@@ -295,7 +307,7 @@
       if (who(a) !== who(b)) return who(a) < who(b) ? -1 : 1;
       if (pin(a) !== pin(b)) return pin(a) - pin(b);
       if (wk(a) !== wk(b)) return wk(a) - wk(b);
-      if (folds(a) !== folds(b)) return folds(a) ? 1 : -1; // the repeats last, under their fold
+      if (tail(a) !== tail(b)) return tail(a) - tail(b); // the folded ones last, under their lines
       const ka = key.get(a.id), kb = key.get(b.id);
       if (ka && kb) return ka < kb ? -1 : ka > kb ? 1 : b.pos - a.pos;
       if (ka || kb) return ka ? -1 : 1;
@@ -774,6 +786,7 @@
   }
   const longDay = (d) => { const t = new Date(d + 'T12:00:00'); return DAYS[t.getDay()] + ' ' + t.getDate() + ' ' + MONTHS[t.getMonth()]; };
   const WEEK_ICON = '<svg class="ic tweek" width="13" height="13" viewBox="0 0 16 16" role="img" aria-label="This week"><path d="M3.5 14V2.5M3.5 2.5h8.2l-1.8 3 1.8 3H3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const CAL_ICON = '<svg class="ic trep" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
   const REPEAT_ICON = '<svg class="ic trep" width="13" height="13" viewBox="0 0 16 16" role="img" aria-label="Repeats"><path d="M3 7.5A5 5 0 0 1 12.2 4.6M13 8.5A5 5 0 0 1 3.8 11.4M12.6 1.8v3.2H9.4M3.4 14.2V11h3.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   /* ---------- Hiscores ----------
@@ -1069,9 +1082,10 @@
       html = [1, 2, 3].map(() => '<li class="row skeleton" aria-hidden="true"><div class="row-inner"><span class="circle-static"></span><div class="bar"></div></div></li>').join('');
     } else if (view === 'list') {
       const open = openIn(ui.section);
-      const reps = open.filter(folds); // Soon's repeats, last in the order
-      const rows = reps.length ? open.slice(0, open.length - reps.length) : open;
-      ids = new Set((repsOpen ? open : rows).map((it) => it.id));
+      const cals = open.filter((it) => tail(it) === 1); // Soon's confirmed appointments, then
+      const reps = open.filter((it) => tail(it) === 2); // its repeats, last in the order
+      const rows = open.filter((it) => !tail(it));
+      ids = new Set([...rows, ...(calOpen ? cals : []), ...(repsOpen ? reps : [])].map((it) => it.id));
       // Soon: a quiet "No date" label where the undated tasks start, when there are both.
       // Soon's labels: "This week" on top when anything is flagged, then "Dated" (only under This
       // week), then a quiet "No date" where the undated tasks start, when there are both.
@@ -1092,12 +1106,17 @@
       const personHead = (it, i) => (it.section === 'others' && (i === 0 || rows[i - 1].section !== 'others' || personOf(rows[i - 1]) !== personOf(it))
         ? '<li class="sublabel sublabel-person">' + esc(personOf(it) || 'Someone else') + '</li>' : '');
       html = rows.map((it, i) => (lanesTab ? laneHead(it, i) : label(i)) + personHead(it, i) + rowHtml(it, justAdded.has(it.id))).join('');
+      if (cals.length) {
+        html += '<li class="sublabel sublabel-fold"><button type="button" class="rep-fold cal-fold" aria-expanded="' + calOpen + '">' +
+          CAL_ICON + cals.length + ' on the calendar</button></li>';
+        if (calOpen) html += cals.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
+      }
       if (reps.length) {
         html += '<li class="sublabel sublabel-fold"><button type="button" class="rep-fold" aria-expanded="' + repsOpen + '">' +
           REPEAT_ICON.replace('role="img" aria-label="Repeats"', 'aria-hidden="true"') + reps.length + (reps.length === 1 ? ' repeat' : ' repeats') + '</button></li>';
         if (repsOpen) html += reps.map((it) => rowHtml(it, justAdded.has(it.id))).join('');
       }
-      if (!rows.length && !reps.length) {
+      if (!rows.length && !reps.length && !cals.length) {
         emptyText = !all.length ? (desk.matches ? 'Nothing here yet. Press N or click plus to add a task.' : 'Nothing here yet. Tap plus to add a task.')
           : ui.section === 'today' && doneToday(all) ? ALL_DONE : EMPTY[ui.section];
       }
@@ -1748,6 +1767,7 @@
       if (d) reopenRow(d);
       return;
     }
+    if (e.target.closest('.cal-fold')) { calOpen = !calOpen; render(); return; }
     if (e.target.closest('.rep-fold')) { repsOpen = !repsOpen; render(); return; }
     const row = e.target.closest('.row');
     if (!row || row.classList.contains('skeleton')) return;
