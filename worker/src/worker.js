@@ -209,6 +209,7 @@ import { handleDesk } from './desk.js';
 import { handleApply } from './apply.js';
 import { retireOthers } from './retire.js';
 import { laneMoves } from './lanes.js';
+import { taskSkillsOnce } from './taskskills.js';
 import { dueCron } from './due.js';
 import { repeatCron } from './repeat.js';
 import { handleTidy } from './tidy.js';
@@ -490,7 +491,7 @@ export default {
   async scheduled(event, env, ctx) {
     const t = event && event.scheduledTime;
     const hourly = event && event.cron ? event.cron === '23 * * * *' : !t || new Date(t).getUTCMinutes() === 23;
-    const jobs = [weekCron(env).then((w) => oracleCron(env).catch((e) => ({ error: String(e && e.name) })).then((o) => ({ ...w, oracle: o }))), waitingCron(env), dreadCron(env).then(() => archiveCron(env)), repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env).then(() => laneMoves(env)), weekLessons(env)]; // the last three run once, then skip (lanes: src/lanes.js)
+    const jobs = [weekCron(env).then((w) => oracleCron(env).catch((e) => ({ error: String(e && e.name) })).then((o) => ({ ...w, oracle: o }))), waitingCron(env), dreadCron(env).then(() => archiveCron(env)), repeatCron(env).catch((e) => ({ error: String(e) })).then((r) => dueCron(env).then((d) => ({ ...r, due: d }))), doorCron(env), mirrorCron(env).then(() => hiscoresCron(env, Date.now(), hourly)), intakeCatchUp(env), retireOthers(env).then(() => laneMoves(env)).then(() => taskSkillsOnce(env)), weekLessons(env)]; // the last three run once, then skip (lanes: src/lanes.js, task skills: src/taskskills.js)
     jobs.push(networkCron(env), skillsCron(env));
     if (hourly) jobs.push(checkHealth(env), snapshot(env), refreshStatus(env));
     ctx.waitUntil(Promise.allSettled(jobs));

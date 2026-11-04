@@ -25,12 +25,16 @@
  * src/lessons.js recentFor) go into each call as examples, so the next similar line lands right
  * without waiting for the Sunday rules. Still one Haiku call per line.
  *
- *   -> { text, changed, kind, energy, place, appt }   place null: leave it where it is */
+ *   -> { text, changed, kind, energy, place, appt, skill }   place null: leave it where it is
+ *
+ * The skill (Paul, 2026-11-04: "not every task is woodcutting, it can be a task plus job
+ * application"): the OSRS skill the task trains besides Woodcutting (TASK_SKILLS, src/hiscores.js
+ * pays it on the tick), or null for an ordinary task. The same call; SKILL_LINES says which is which. */
 
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
-import { CODE, safeEqual, MAX_TEXT, cleanText, LANES } from './todo.js';
+import { CODE, safeEqual, MAX_TEXT, cleanText, LANES, TASK_SKILLS } from './todo.js';
 import { anthropic, bumpUsage, dayOf } from './intake.js';
 
 export const TIDY_MODEL = 'claude-haiku-5-5';
@@ -52,7 +56,27 @@ const Tidy = z.object({
   energy: z.enum(['wired', 'normal', 'drained']).describe('the energy the task takes: wired (needs real focus), normal (ordinary, some thinking), drained (small and easy)'),
   place: z.enum(['keep', 'today', 'soon', 'someday', 'build', 'fun', 'others']).describe('where the task belongs; keep when unsure'),
   appointment: z.boolean().describe('true when Paul has to be somewhere, or on a call, at a set moment'),
+  skill: z.enum([...TASK_SKILLS, 'none']).describe('the one OSRS skill the task trains besides Woodcutting; none for an ordinary task'),
 });
+
+/* What each task skill stands for, in Paul's own tasks (he picked the table, 2026-11-04). Also the
+ * prompt of the one-off pass over his old tasks (src/taskskills.js). */
+export const SKILL_LINES = [
+  'slayer: job hunting: applications, interview prep, networking or follow-ups for a job ("Prep call with JCD", "Jeroen Blom follow up", "Upload Rik notes and send thank you email")',
+  'defence: official things: government, bills to pay, insurance, legal, contracts, forms ("Call DUO and RLO", "Pay Energie", "Full evidence for the interpleader", "Cancel Amazon Prime")',
+  'thieving: money: banks, claims, credit, refunds, budgets ("Hans claim", "Call Capital One", "Derreck credit check")',
+  'herblore: health: medicine, pharmacy, doctors, psychologist, dentist ("Xanax apotheek", "Psychologist visit", "Change doctors")',
+  'construction: home, DIY, repairs, furniture, cleaning, the bike ("Waterproof the VanMoof", "Order bed frame", "Deshrink wool sweaters")',
+  'smithing: building his own apps and sites, code ("Layout fixes on all new features", "Day doesn\'t pick up the AirPods mic")',
+  'crafting: making things by hand, art, costumes, drawing ("Finish foam of Agamemnon and costume", "Draw Saoirse")',
+  'cooking: food, cooking, groceries for a meal ("Pumpkin ricotta to Yvonne")',
+  'farming: pets and plants ("Deworm cats", "Vet appointment Mani")',
+  'sailing: travel, trips, tickets to go somewhere ("Book London", "Book grandpa ticket")',
+  'magic: learning, courses, languages ("Dutch on his diploma application")',
+  'runecraft: writing: articles, letters, translations, posts ("LinkedIn article", "Translate letter into Dutch")',
+  'firemaking: people and social life: invites, replies, birthdays, presents, meeting friends ("Thanksgiving invite", "Answer Chris")',
+  'none: anything else ("Upload mom\'s books", "Print Olivia label"). When unsure between a skill and none, none.',
+];
 export const PLACES = ['today', 'soon', 'someday', ...LANES];
 export const KINDS = ['task', 'ask', 'write'];
 
@@ -69,6 +93,8 @@ export const SYSTEM = [
   'energy: your guess at the energy the task takes, which Paul confirms himself. "wired": needs real focus or drive (building, writing, applying for a job, a hard conversation, anything long or new). "normal": an ordinary task with some thinking (a meeting, booking, sorting out an account). "drained": small and easy, fine on a tired evening (buy, text, return, look up one thing). When unsure between two, the lower one.',
   'place: "keep" (the default, and whenever unsure). "build": an idea, bug or feature for one of his own apps or sites (To-do, Day, Morning, Lift, Kitchen, Feeling, Door, Odysseus, Runway, paul-hub, his website). "fun": leisure, games, hobbies, a match to watch. "others": done for or on behalf of someone else (Grandpa, Nick, Olivia, Dad, Mom, a friend); then the name starts with that person and a colon, or keeps the "Name:" he wrote. His own task that only names someone is not others ("Call dad", "Tell Nick to split payments"). "someday" only when he says so (someday, ooit, algún día); "soon" for soon, this week, binnenkort; "today" for today, now. A dated line is "keep" unless it is for a lane.',
   'appointment: true when he has to be somewhere, or on a call or meeting with someone, at a set moment (doctor, psychologist, dentist, vet, haircut, a class, an afspraak or cita, a name with a time like "Peronik 12:45"). False otherwise, also for arranging one ("Book a haircut", "Change doctors") and for calls he can make any time ("Call Capital One"). Never add a date or time an appointment does not have.',
+  'skill: the one skill the task trains besides Woodcutting (every task pays that). The main thing the task is about decides:',
+  ...SKILL_LINES.map((l) => '- ' + l),
   'Check every word for spelling, also short ones. Examples (today Saturday 2026-10-17):',
   '"dad: fix his printr" -> name "Dad: fix his printer", due null, time null, kind "task", place "others", appointment false',
   '"remind me to buy cat food tmrw" -> name "Buy cat food", due "2026-10-18", time null, kind "task", place "keep", appointment false',
@@ -167,5 +193,6 @@ export async function handleTidy(request, env, rest, json, now = Date.now()) {
   // A guess only: the app stores it as energyGuess and Paul confirms it (Energy dial, src/energy.js).
   const energy = ['wired', 'normal', 'drained'].includes(got.out.energy) ? got.out.energy : null;
   const due = (text.match(DUE_END) || [])[1] || null;
-  return json({ text, changed: text !== typed, kind, energy, place: toPlace(got.out, due, local(now).date), appt: got.out.appointment === true }, request);
+  const skill = TASK_SKILLS.includes(got.out.skill) ? got.out.skill : null;
+  return json({ text, changed: text !== typed, kind, energy, place: toPlace(got.out, due, local(now).date), appt: got.out.appointment === true, skill }, request);
 }

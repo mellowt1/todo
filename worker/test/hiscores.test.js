@@ -128,9 +128,9 @@ test('the board: levels, next level, today, total', () => {
   const wc = b.skills.find((s) => s.id === 'woodcutting');
   assert.deepEqual([wc.level, wc.at, wc.next, wc.today], [30, 13363, 14833, 200]);
   assert.equal(b.skills.find((s) => s.id === 'cooking').level, 1);
-  assert.equal(b.skills.length, 17);
-  assert.equal(b.total, 30 + 10 + 15); // Hitpoints starts at 10
-  assert.deepEqual(b.skills.map((s) => s.id), ['attack', 'hitpoints', 'mining', 'strength', 'smithing', 'defence', 'herblore', 'fishing', 'ranged', 'cooking', 'prayer', 'crafting', 'magic', 'woodcutting', 'slayer', 'construction', 'hunter']);
+  assert.equal(b.skills.length, 22);
+  assert.equal(b.total, 30 + 10 + 20); // Hitpoints starts at 10
+  assert.deepEqual(b.skills.map((s) => s.id), ['attack', 'hitpoints', 'mining', 'strength', 'smithing', 'defence', 'herblore', 'fishing', 'ranged', 'thieving', 'cooking', 'prayer', 'crafting', 'firemaking', 'magic', 'woodcutting', 'runecraft', 'slayer', 'farming', 'construction', 'hunter', 'sailing']);
   // Hitpoints: 1154 plus a third of the combat XP, today too
   const c = board({ strength: 3000, ranged: 3000, magic: 0, woodcutting: 9000 }, { strength: 300 });
   const hp = c.skills.find((s) => s.id === 'hitpoints');
@@ -178,7 +178,7 @@ test('the route: code checked, scans first, then the board; a read within a minu
   assert.equal((await handleHiscores(req, e, ['bad'], json, SAT)).status, 400);
   const res = await handleHiscores(req, e, [CODE], json, SAT);
   const body = await res.json();
-  assert.equal(body.skills.length, 17);
+  assert.equal(body.skills.length, 22);
   assert.ok(body.total >= 8);
   assert.equal(await e.HUB_KV.get(SCAN_KEY), new Date(SAT).toISOString());
   await hiscoresForMorning(e, SAT + 30e3);
@@ -272,4 +272,18 @@ test('commits: the beat token, then each commit once', async () => {
   assert.deepEqual(await (await send('beat-secret', { commits })).json(), { ok: true, added: 0, seen: 2 });
   const b = await readBoard(e, SAT);
   assert.equal(b.skills.find((s) => s.id === 'smithing').xp, 50);
+});
+
+test('a to-do pays the skill it trains on top of Woodcutting; an Apply stays Slayer only; an unknown skill pays nothing more', () => {
+  const rows = taskRows({
+    a: { id: 'tsk1', text: 'Call Capital One', done: true, doneAt: SAT, pos: SAT - 864e5, skill: 'thieving' },
+    b: { id: 'tsk2', text: 'Apply: Analyst', done: true, doneAt: SAT, pos: SAT - 864e5, skill: 'slayer' },
+    c: { id: 'tsk3', text: 'Buy milk', done: true, doneAt: SAT, pos: SAT - 864e5, skill: 'baking' },
+    d: { id: 'tsk4', text: 'Book London', done: false, skill: 'sailing' },
+  });
+  assert.deepEqual(rows.map((r) => [r.id, r.skill, r.xp]), [
+    ['wc:tsk1', 'woodcutting', 100], ['ts:tsk1', 'thieving', 300],
+    ['sl:tsk2', 'slayer', 4000],
+    ['wc:tsk3', 'woodcutting', 100],
+  ]);
 });

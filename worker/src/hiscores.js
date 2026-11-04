@@ -24,6 +24,9 @@
  *   crafting      a Desk action approved or copied         450   cr:<desk id>:<n>
  *   construction  a Sunday reset button (Do this week, New date, Delete), once per task per kind
  *                 a week: 600 (src/week.js calls grant)   cn:<task id>:<kind>:<monday>
+ *   <task skill>  a to-do ticked off pays the skill it trains as well (2026-11-04, Paul: "not every
+ *                 task is woodcutting"): its `skill`, one of TASK_SKILLS, read by Tidy or set by
+ *                 Paul, 300 on top of Woodcutting's 100 (not for an Apply, which pays Slayer)  ts:<task id>
  *
  * The first scan back-fills everything the sources still hold. After that the cron scans every
  * run, and a read scans first when the last scan is a minute old, so a tick shows right away.
@@ -37,7 +40,7 @@
 import { local, zoned, addDays, eventSpan, CAL_KEY } from './morning.js';
 import { kitchen } from './kitchen-store.js';
 import { readConfig } from './dinner.js';
-import { safeEqual, bearer, CODE } from './todo.js';
+import { safeEqual, bearer, CODE, TASK_SKILLS } from './todo.js';
 import { GERMAN_KEY } from './german.js';
 import { maskSecrets } from './mask.js';
 import { moodsOf, dinnersByDay, isoWeekDate } from './mirror.js';
@@ -47,25 +50,30 @@ export const SKILLS = [ // the order of the OSRS skills tab, read across
   { id: 'hitpoints', name: 'Hitpoints', from: 'A third of your combat XP' },
   { id: 'mining', name: 'Mining', from: 'Letters Intake read' },
   { id: 'strength', name: 'Strength', from: 'Gym visits' },
-  { id: 'smithing', name: 'Smithing', from: 'Git commits' },
-  { id: 'defence', name: 'Defence', from: 'Letter tasks done' },
-  { id: 'herblore', name: 'Herblore', from: 'New recipes cooked' },
+  { id: 'smithing', name: 'Smithing', from: 'Git commits, app to-dos' },
+  { id: 'defence', name: 'Defence', from: 'Letters, official to-dos' },
+  { id: 'herblore', name: 'Herblore', from: 'New recipes, health to-dos' },
   { id: 'fishing', name: 'Fishing', from: 'Vacancies caught' },
   { id: 'ranged', name: 'Ranged', from: 'Archery evenings' },
-  { id: 'cooking', name: 'Cooking', from: 'Kitchen dinners' },
+  { id: 'thieving', name: 'Thieving', from: 'Money to-dos' },
+  { id: 'cooking', name: 'Cooking', from: 'Kitchen dinners, food to-dos' },
   { id: 'prayer', name: 'Prayer', from: 'Feeling faces' },
-  { id: 'crafting', name: 'Crafting', from: 'Desk actions' },
-  { id: 'magic', name: 'Magic', from: 'German calls' },
+  { id: 'crafting', name: 'Crafting', from: 'Desk, making things' },
+  { id: 'firemaking', name: 'Firemaking', from: 'People to-dos' },
+  { id: 'magic', name: 'Magic', from: 'German calls, learning' },
   { id: 'woodcutting', name: 'Woodcutting', from: 'To-dos ticked' },
-  { id: 'slayer', name: 'Slayer', from: 'Applications' },
-  { id: 'construction', name: 'Construction', from: 'Sunday resets' },
+  { id: 'runecraft', name: 'Runecraft', from: 'Writing to-dos' },
+  { id: 'slayer', name: 'Slayer', from: 'Applications, job hunting' },
+  { id: 'farming', name: 'Farming', from: 'Pets and plants' },
+  { id: 'construction', name: 'Construction', from: 'Sunday resets, home to-dos' },
   { id: 'hunter', name: 'Hunter', from: 'Arsenal ticket drops' },
+  { id: 'sailing', name: 'Sailing', from: 'Travel to-dos' },
 ];
 /* Hitpoints is not in the ledger: as in OSRS it starts at level 10 and grows by a third of the
  * XP earned in the combat skills. */
 export const COMBAT = ['attack', 'strength', 'defence', 'ranged', 'magic'];
 export const XP = {
-  gym: 1000, task: 100, apply: 4000, recipe: 800, pizza: 500, face: 450, archery: 3300, call: 600, callMinute: 50, desk: 450, week: 600,
+  gym: 1000, task: 100, taskSkill: 300, apply: 4000, recipe: 800, pizza: 500, face: 450, archery: 3300, call: 600, callMinute: 50, desk: 450, week: 600,
   oldTask: 1500, letterTask: 1200, letterRead: 900, vacancy: 1000, newRecipe: 1500, ticketDrop: 800, commit: 25,
 };
 export const OLD_DAYS = 14;
@@ -110,6 +118,8 @@ export function taskRows(items) {
     out.push(apply
       ? { id: 'sl:' + i.id, skill: 'slayer', xp: XP.apply, at: iso(i.doneAt), what: line(text.replace(/^apply:\s*/i, '')) }
       : { id: 'wc:' + i.id, skill: 'woodcutting', xp: XP.task, at: iso(i.doneAt), what: line(text) });
+    // The skill the task trains, on top of Woodcutting (an Apply already pays Slayer)
+    if (!apply && TASK_SKILLS.includes(i.skill)) out.push({ id: 'ts:' + i.id, skill: i.skill, xp: XP.taskSkill, at: iso(i.doneAt), what: line(text) });
     // Attack: a task that waited two weeks or more (pos is when it last went to the top of a section)
     if (Number.isFinite(i.pos) && i.doneAt - i.pos >= OLD_DAYS * 864e5) {
       out.push({ id: 'at:' + i.id, skill: 'attack', xp: XP.oldTask, at: iso(i.doneAt), what: line(`${text}, after ${Math.floor((i.doneAt - i.pos) / 864e5)} days`) });
