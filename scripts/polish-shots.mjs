@@ -50,8 +50,8 @@ function world(allDone) {
     if (p === `/api/archive/${CODE}`) return allDone ? { due: [], archived: 2, limit: 5 } : { due: [{ task: 'todayboil001', name: 'Book the boiler service', section: 'today', skips: 5 }], archived: 2, limit: 5 };
     if (p === `/api/waiting/${CODE}`) {
       const w = (id, who, what, since, due) => ({ id, who, what, since, channel: 'email', chaseDays: 7, nextChase: '2026-11-08', forWhom: null, source: 'todo', state: 'open', chases: 0, chaseDue: due, chaseTask: null });
-      const l = [w('waitgemeente01', 'Gemeente', 'Parking permit', '2026-10-21', false), w('waitaccount001', 'the accountant', 'Tax papers', '2026-10-30', false)];
-      return { items: l, open: l.length, due: 0, names: ['Gemeente', 'the accountant'] };
+      const l = [w('waitgemeente01', 'Gemeente', 'Parking permit', '2026-10-21', true), w('waitaccount001', 'the accountant', 'Tax papers', '2026-10-30', false)];
+      return { items: l, open: l.length, due: 1, names: ['Gemeente', 'the accountant'] };
     }
     if (p === `/api/soundtrack/${CODE}`) return { lists: { wired: [], normal: [], drained: [{ id: 'lowtide001', title: 'Low tide', url: 'https://open.spotify.com/playlist/37i9dQZF1DX4sWSpwq3LiO', uri: 'spotify:playlist:37i9dQZF1DX4sWSpwq3LiO' }] }, max: 3 };
     if (p === `/api/spotify/${CODE}`) return { configured: true, connected: true, canMake: true };
@@ -129,9 +129,24 @@ for (const scheme of ['light', 'dark']) {
     await page.screenshot({ path: file('phone-d-edit') });
     await shut(page);
   }
+  await page.click('#energySort');
+  await page.waitForSelector('#sort:not([hidden])');
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: file(`phone-${s}-sort`) });
+  await shut(page);
+  await page.click('#giveOne');
+  await page.waitForSelector('#pick:not([hidden])');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: file(`phone-${s}-pick`) });
+  await shut(page);
   await page.click('#switcher [data-section="soon"]');
   await page.waitForTimeout(600);
   await page.screenshot({ path: file(`phone-${s}-soon`) });
+  await page.click('#waitLine');
+  await page.waitForSelector('#waitList:not([hidden])');
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: file(`phone-${s}-waitlist`) });
+  await shut(page);
   await page.click('#historyBtn');
   await page.waitForTimeout(900);
   await page.screenshot({ path: file(`phone-${s}-done`) });

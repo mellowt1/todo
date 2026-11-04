@@ -40,6 +40,7 @@
   --thumb-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.06);
   --bar-bg: rgba(245, 245, 247, 0.82);  /* the floating switcher, over the list */
   --fab-shadow: 0 6px 18px rgba(63, 125, 92, 0.32), 0 2px 4px rgba(0, 0, 0, 0.08);
+  --card: #FFFFFF;          /* a swipe card, raised on its stage */
   /* Motion: app.js reads these into M. Calm first: nothing bounces, moves ease out. */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-press: 140ms;  /* colour and state changes */
@@ -79,6 +80,7 @@
     --thumb-shadow: none;
     --bar-bg: rgba(28, 28, 30, 0.82);
     --fab-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    --card: #3A3A3C;
   }
 }
 
@@ -346,6 +348,8 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
   animation: sheet-in var(--dur-move) var(--ease); touch-action: none;
   translate: 0 var(--kb, 0px); transition: translate 240ms var(--ease); /* rides above the keyboard */
 }
+/* Inside a sheet the grey fills are the field grey: in dark the surface grey is the sheet itself. */
+.sheet { --surface: var(--field); }
 .sheet.dragging { transition: none; } /* app.js ends the entry at the grab, so it never replays */
 /* The page panned under the keyboard: the offset follows at once. */
 .sheet.kb-snap { transition-property: transform; }
@@ -378,7 +382,7 @@ body.view-done .toast { bottom: var(--bottom); right: var(--gut-r); } /* no add 
 .cap-undo:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
 .edit-sheet { gap: 16px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
 /* The head (2026-11-04): a small TASK label like the section heads, the timer as a soft pill. */
-.edit-sheet .head-task > .meta { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.edit-sheet .head-task > .meta, #sortHead, #waitListHead { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 .head-btns { align-items: center; }
 .timer-btn { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 12px; border-radius: 17px; background: var(--accent-soft); font-size: 15px; }
 .timer-btn::before { content: ""; width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 8px; border-color: transparent transparent transparent currentColor; }
@@ -788,7 +792,7 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .pick-do:active, .pick-two button:active, .pick-again:active { opacity: 0.55; }
 /* ---------- Swipe stacks (Sort, Waiting on) ----------
  * The top card follows the finger; --wash and --p colour it toward where it is going. */
-.stage { position: relative; height: 236px; margin-top: 4px; border-radius: 18px; background: var(--surface); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.stage { position: relative; height: 236px; margin-top: 4px; border-radius: 20px; background: var(--surface); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
 .stage:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .stage .hint { position: absolute; z-index: 20; display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--secondary); opacity: 0.5; pointer-events: none; transition: opacity var(--dur-press) ease, color var(--dur-press) ease, transform var(--dur-press) var(--ease); }
 .stage .hint.left { left: 14px; bottom: 12px; }
@@ -800,10 +804,10 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .stage .hint.right.on { transform: translateX(3px); }
 .stage .hint.up.on { transform: translateY(-3px); }
 .stage .hint .batt, .stack-btns .batt { flex-shrink: 0; }
-.scard { position: absolute; left: 50%; top: 40px; width: min(76%, 300px); height: 128px; translate: -50% 0; padding: 16px 16px 14px; border-radius: 16px; background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.10); display: flex; flex-direction: column; justify-content: space-between; gap: 8px; overflow: hidden; cursor: grab; transition: transform var(--dur-move) var(--ease), opacity var(--dur-move) ease; will-change: transform; }
+.scard { position: absolute; left: 50%; top: 40px; width: min(76%, 300px); height: 128px; translate: -50% 0; padding: 16px 18px 14px; border-radius: 18px; background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.10); display: flex; flex-direction: column; justify-content: space-between; gap: 8px; overflow: hidden; cursor: grab; transition: transform var(--dur-move) var(--ease), opacity var(--dur-move) ease; will-change: transform; }
 .scard::after { content: ""; position: absolute; inset: 0; background: var(--wash, transparent); opacity: var(--p, 0); pointer-events: none; }
 .scard.dragging { transition: none; cursor: grabbing; }
-.sc-name { position: relative; font-size: 17px; font-weight: 600; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.sc-name { position: relative; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .sc-name b { font-weight: 700; }
 .sc-meta { position: relative; font-size: 13px; color: var(--secondary); }
 .sc-meta .wr-due { font-weight: 600; color: var(--amber-ink); }
@@ -817,7 +821,7 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
 .stack-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .stack-btns.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .stack-btns[hidden] { display: none; }
-.stack-btns button { height: 44px; border-radius: 10px; background: var(--surface); color: var(--text); font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity var(--dur-press) ease, transform var(--dur-press) var(--ease); }
+.stack-btns button { height: 46px; border-radius: 12px; background: var(--surface); color: var(--text); font-size: 15px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity var(--dur-press) ease, transform var(--dur-press) var(--ease); }
 .stack-btns button:active { opacity: 0.55; transform: scale(0.97); }
 /* A number that turns over (rollTo); the leaving one is out of the text. */
 .roll { display: inline-grid; overflow: hidden; vertical-align: bottom; font-variant-numeric: tabular-nums; }
@@ -997,3 +1001,6 @@ main.drop-files .list { outline: 2px dashed var(--accent-text); outline-offset: 
   .mu-form.enter, .mu-row.fresh { animation: fade-in var(--dur-move) ease; }
   .mu-disc { transition: background var(--dur-press) ease, color var(--dur-press) ease; transform: none !important; }
 }
+/* Waiting on's Add: a quiet line under the stack, not a second big button. */
+#waitAdd { background: none; color: var(--accent-text); height: 44px; margin-top: 6px; }
+#waitAdd::before { content: "+ "; }
