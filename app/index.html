@@ -199,9 +199,10 @@
   <div class="sheet edit-sheet" role="dialog" aria-label="Edit task">
     <div class="grabber"></div>
     <div class="sheet-head">
-      <label for="editText" class="meta">Task</label>
+      <span class="head-task"><label for="editText" class="meta">Task</label><button id="editSkill" class="skill-pick" type="button" aria-expanded="false" aria-controls="skillGrid"><img alt="" width="18" height="18"></button></span>
       <span class="head-btns"><button id="editStart" class="text-btn">Start timer</button><button id="editClose" class="text-btn">Close</button></span>
     </div>
+    <div id="skillGrid" class="skill-grid" role="radiogroup" aria-label="Skill it trains" hidden></div>
     <textarea id="editText" rows="3" maxlength="500" autocapitalize="sentences"></textarea>
     <!-- Edit in one line (app.js, Edit chips): place, energy, repeat and this week as chips. A tap opens
          only that chip's choices in the same line, a pick folds it back; a sideways swipe steps a chip. -->

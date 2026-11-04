@@ -254,6 +254,7 @@
       ...(it.series ? { series: it.series } : {}),
       ...(it.waiting ? { waiting: it.waiting } : {}), // a chase task's Waiting on item, set by the hub
       ...(it.appt !== undefined ? { appt: it.appt === true ? true : null } : {}), // Tidy read it as an appointment
+      ...(it.skill !== undefined ? { skill: TASK_SKILLS.includes(it.skill) ? it.skill : null } : {}), // the skill it trains
     } });
   }
 
@@ -399,18 +400,20 @@
       const appt = typeof d.appt === 'boolean' ? d.appt : was;
       const text = d.changed && d.text ? d.text : it.text;
       const section = to || it.section;
+      // The skill: Tidy's pick for a task that has none yet; one Paul picked is never replaced.
+      const skill = it.skill ? it.skill : TASK_SKILLS.includes(d.skill) ? d.skill : null;
       // What Tidy gave, for the lessons: its text only when it changed the words (an edit after
       // that corrects Tidy), its place and flag always (a move after that corrects them too).
-      if (!edit || memo[id] || text !== it.text) rememberTidy(id, Object.assign({}, edit ? memo[id] : null, { typed: (edit && memo[id] && memo[id].typed) || typed, text: text !== it.text ? text : null, section, appt }));
-      const changes = Object.assign({}, guess, text !== it.text ? { text } : null, to ? { section: to, pos: now() } : null, appt !== was ? { appt: appt || null } : null);
+      if (!edit || memo[id] || text !== it.text) rememberTidy(id, Object.assign({}, edit ? memo[id] : null, { typed: (edit && memo[id] && memo[id].typed) || typed, text: text !== it.text ? text : null, section, appt, skill }));
+      const changes = Object.assign({}, guess, text !== it.text ? { text } : null, to ? { section: to, pos: now() } : null, appt !== was ? { appt: appt || null } : null, skill !== (it.skill || null) ? { skill } : null);
       if (!Object.keys(changes).length) return;
       upsert(Object.assign({}, it, changes));
       if (text === it.text && !to) return; // a guess or a flag only: nothing to say
       const undo = () => {
         const cur = items[id];
         if (cur) {
-          upsert(Object.assign({}, cur, { text: typed, appt: was || null }, to ? { section: from, pos: it.pos } : null));
-          if (to || appt !== was) teach('undone', placed(text, section, appt), placed(typed, from, was), typed);
+          upsert(Object.assign({}, cur, { text: typed, appt: was || null, skill: it.skill || null }, to ? { section: from, pos: it.pos } : null));
+          if (to || appt !== was) teach('undone', placed(text, section, appt, skill), placed(typed, from, was, it.skill), typed);
           else teach('undone', text, typed);
         }
         rememberTidy(id, null);
@@ -439,20 +442,22 @@
     store.set('todo.tidyMemo', memo);
   }
   // A task as the lessons read it: "Peronik · 2026-11-09 12:45 [soon, appointment]".
-  const placed = (text, section, appt) => text + ' [' + section + (appt ? ', appointment' : '') + ']';
+  const placed = (text, section, appt, skill) => text + ' [' + section + (appt ? ', appointment' : '') + (skill ? ', skill ' + skill : '') + ']';
   function teach(kind, before, after, note) {
     if (!before || !after || before === after) return;
     report('tidy', kind, before, after, note);
   }
-  // Paul moved a task Tidy placed, or an undated appointment out of Today (which takes the flag off).
+  // Paul moved a task Tidy placed, moved an undated appointment out of Today (which takes the flag
+  // off), or picked another skill for it.
   function teachMove(id) {
     const m = memo[id];
     const it = items[id];
     if (!m || !it || it.done) return;
     const appt = it.appt === true;
-    if (m.section === it.section && m.appt === appt) return;
-    report('tidy', 'moved', placed(it.text, m.section, m.appt), placed(it.text, it.section, appt), m.typed);
-    rememberTidy(id, Object.assign({}, m, { text: it.text, section: it.section, appt }));
+    const skill = it.skill || null;
+    if (m.section === it.section && m.appt === appt && (m.skill || null) === skill) return;
+    report('tidy', 'moved', placed(it.text, m.section, m.appt, m.skill), placed(it.text, it.section, appt, skill), m.typed);
+    rememberTidy(id, Object.assign({}, m, { section: it.section, appt, skill }));
   }
   // Also Intake (an edit or a delete of a task read from a letter) and "Keep as a task" (2026-10-19).
   function report(app, kind, before, after, note) {
@@ -768,12 +773,17 @@
    * The hub pays XP into Paul's real-life Hiscores for every task ticked off; the list shows what
    * a task pays and what the day earned. These rules are worker/src/hiscores.js taskRows(),
    * copied: change both together. The list never writes XP, the hub's scan does. */
-  const XP_RULES = { task: 100, apply: 4000, oldTask: 1500, letterTask: 1200 };
+  const XP_RULES = { task: 100, taskSkill: 300, apply: 4000, oldTask: 1500, letterTask: 1200 };
   const OLD_MS = 14 * 86400000;
-  const SKILL = { woodcutting: 'Woodcutting', slayer: 'Slayer', attack: 'Attack', defence: 'Defence' };
+  // The skill a task trains besides Woodcutting (2026-11-04): Tidy picks it, the edit sheet changes
+  // it. The same list as TASK_SKILLS in worker/src/todo.js; change both together.
+  const TASK_SKILLS = ['slayer', 'defence', 'thieving', 'herblore', 'construction', 'smithing', 'crafting', 'cooking', 'farming', 'sailing', 'magic', 'runecraft', 'firemaking'];
+  const SKILL = { woodcutting: 'Woodcutting', slayer: 'Slayer', attack: 'Attack', defence: 'Defence', thieving: 'Thieving', herblore: 'Herblore', construction: 'Construction', smithing: 'Smithing', crafting: 'Crafting', cooking: 'Cooking', farming: 'Farming', sailing: 'Sailing', magic: 'Magic', runecraft: 'Runecraft', firemaking: 'Firemaking' };
   // What a task pays when ticked at `at` (an open task: now), biggest first.
   function pays(it, at) {
-    const out = [/^(apply|sollicit\w*)\b/i.test(it.text) ?{ skill: 'slayer', xp: XP_RULES.apply } : { skill: 'woodcutting', xp: XP_RULES.task }];
+    const apply = /^(apply|sollicit\w*)\b/i.test(it.text);
+    const out = [apply ? { skill: 'slayer', xp: XP_RULES.apply } : { skill: 'woodcutting', xp: XP_RULES.task }];
+    if (!apply && TASK_SKILLS.includes(it.skill)) out.push({ skill: it.skill, xp: XP_RULES.taskSkill });
     if (Number.isFinite(it.pos) && at - it.pos >= OLD_MS) out.push({ skill: 'attack', xp: XP_RULES.oldTask });
     if (INTAKE_MARK.test(it.text)) out.push({ skill: 'defence', xp: XP_RULES.letterTask });
     return out.sort((a, b) => b.xp - a.xp);
@@ -2229,6 +2239,7 @@
     $('editRepeat').classList.add('instant');
     paintRepeat(it);
     $('editWeek').checked = it.week === true;
+    paintSkill(it, false);
     requestAnimationFrame(() => $('editRepeat').classList.remove('instant'));
     const a = document.activeElement;
     openSheet($('edit'), undefined, list.contains(a) ? a : desk.matches ? row : null);
@@ -2238,6 +2249,54 @@
     if (desk.matches) { editText.focus(); editText.setSelectionRange(editText.value.length, editText.value.length); }
     else $('editClose').focus({ preventScroll: true }); // on the phone the keyboard waits for a tap in the text
   }
+  /* The skill a task trains (2026-11-04). The icon next to "Task" shows it; a tap unfolds a grid of
+   * skill icons, Woodcutting first (an ordinary task), and a pick folds it away. A pick that differs
+   * from Tidy's goes to the lessons, so the next task like it gets the right one. */
+  const skillGrid = $('skillGrid');
+  for (const s of ['woodcutting'].concat(TASK_SKILLS)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.dataset.skill = s;
+    b.setAttribute('aria-label', SKILL[s]);
+    b.title = SKILL[s];
+    b.innerHTML = skillImg(s);
+    skillGrid.append(b);
+  }
+  function paintSkill(it, keepOpen) {
+    const s = TASK_SKILLS.includes(it.skill) ? it.skill : 'woodcutting';
+    const img = $('editSkill').querySelector('img');
+    img.src = 'icons/skills/' + s + '.png';
+    $('editSkill').setAttribute('aria-label', 'Trains ' + SKILL[s] + '. Change');
+    for (const b of skillGrid.children) b.setAttribute('aria-checked', String(b.dataset.skill === s));
+    if (!keepOpen) { skillGrid.hidden = true; $('editSkill').setAttribute('aria-expanded', 'false'); }
+  }
+  $('editSkill').addEventListener('click', () => {
+    const open = skillGrid.hidden;
+    skillGrid.hidden = !open;
+    $('editSkill').setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    const kids = Array.from(skillGrid.children);
+    kids.forEach((b, i) => play(b, [{ opacity: 0, transform: 'translateY(' + 4 * M.dist + 'px)' }, { opacity: 1, transform: 'none' }], { duration: M.move, delay: Math.min(i, 10) * 12, fill: 'backwards' }));
+    (skillGrid.querySelector('[aria-checked="true"]') || kids[0]).focus({ preventScroll: true });
+  });
+  skillGrid.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-skill]');
+    const it = items[editId];
+    if (!b || !it) return;
+    const skill = b.dataset.skill === 'woodcutting' ? null : b.dataset.skill;
+    const had = TASK_SKILLS.includes(it.skill) ? it.skill : null;
+    if (skill !== had) {
+      upsert(Object.assign({}, it, { skill }));
+      // A pick against Tidy's (or the one-off pass over old tasks) is a lesson.
+      if (memo[it.id]) teachMove(it.id);
+      else if (had) report('tidy', 'moved', placed(it.text, it.section, false, had), placed(it.text, it.section, false, skill), it.text);
+      say(SKILL[skill || 'woodcutting'] + '.');
+    }
+    paintSkill(items[editId] || it, false);
+    $('editSkill').focus({ preventScroll: true });
+  });
+
   function paintEditSeg(section) {
     for (const seg of [$('editSeg'), $('editLane')]) {
       const bs = Array.from(seg.querySelectorAll('button'));

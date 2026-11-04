@@ -16,6 +16,7 @@
     "apply-check": "node scripts/apply-check.mjs",
     "tidy-check": "node scripts/tidy-check.mjs",
     "place-check": "node scripts/place-check.mjs",
+    "skill-check": "node scripts/skill-check.mjs",
     "ask-check": "node scripts/ask-check.mjs",
     "due-check": "node scripts/due-check.mjs",
     "energy-check": "node scripts/energy-check.mjs",
