@@ -98,6 +98,18 @@ for (const scheme of ['light', 'dark']) {
     await page.waitForSelector('#edit:not([hidden])');
     await page.waitForTimeout(450);
     await page.screenshot({ path: file('phone-l-edit') });
+    await page.click('#chipRow [data-k="repeat"]');
+    await page.waitForTimeout(450);
+    await page.screenshot({ path: file('phone-l-edit-open') });
+    await page.click('#editRepeat [data-every="week"]');
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: file('phone-l-edit-repeat') });
+    await shut(page);
+    // The task with the timer running: Stop timer in the head.
+    await page.click('.row[data-id="todaylamp001"] .text');
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(450);
+    await page.screenshot({ path: file('phone-l-edit-running') });
     await shut(page);
     await page.click('#giveOne');
     await page.waitForSelector('#pick:not([hidden])');
@@ -108,6 +120,13 @@ for (const scheme of ['light', 'dark']) {
     await page.waitForSelector('#capture:not([hidden])');
     await page.waitForTimeout(450);
     await page.screenshot({ path: file('phone-l-capture') });
+    await shut(page);
+  }
+  if (s === 'd') {
+    await page.click('.row[data-id="todaybike001"] .text');
+    await page.waitForSelector('#edit:not([hidden])');
+    await page.waitForTimeout(450);
+    await page.screenshot({ path: file('phone-d-edit') });
     await shut(page);
   }
   await page.click('#switcher [data-section="soon"]');
@@ -124,6 +143,12 @@ for (const scheme of ['light', 'dark']) {
 
   const desk = await open(DESK, scheme);
   await desk.screenshot({ path: file(`desk-${s}-today`) });
+  if (s === 'l') {
+    await desk.click('.row[data-id="todaybike001"] .text');
+    await desk.waitForSelector('#edit:not([hidden])');
+    await desk.waitForTimeout(450);
+    await desk.screenshot({ path: file('desk-l-edit') });
+  }
   await desk.done();
 }
 await browser.close();

@@ -2258,6 +2258,7 @@
     requestAnimationFrame(() => $('editRepeat').classList.remove('instant'));
     const a = document.activeElement;
     openSheet($('edit'), undefined, list.contains(a) ? a : desk.matches ? row : null);
+    fitEdit();
     // The thumb takes its place in this frame; it glides again from the next one.
     void seg.offsetWidth;
     requestAnimationFrame(() => seg.classList.remove('instant'));
@@ -2380,6 +2381,7 @@
     if (editFrom && items[editId] && editFrom.text === items[editId].text) editFrom.text = next.text;
     upsert(next);
     editText.value = next.text.replace(INTAKE_MARK, '');
+    fitEdit();
     paintRepeat(items[editId]);
   }
   function setRepeat(every) {
@@ -2597,7 +2599,13 @@
       }, from.id);
     });
   }
+  // The box is as tall as its text (two lines at least, CSS caps it), so a short task leaves no gap.
+  function fitEdit() {
+    editText.style.height = 'auto';
+    editText.style.height = editText.scrollHeight + 'px';
+  }
   editText.addEventListener('input', () => {
+    fitEdit();
     clearTimeout(editTimer);
     editTimer = setTimeout(saveEditText, 400);
   });
@@ -3779,6 +3787,7 @@
   function paintEditStart(it) {
     const on = !!run && run.task === it.id;
     $('editStart').textContent = on ? 'Stop timer' : 'Start timer';
+    $('editStart').classList.toggle('on', on);
     $('editStart').setAttribute('aria-label', on ? 'Stop the timer, running ' + runMins() + ' minutes' : 'Start a timer on this task');
   }
   $('editStart').addEventListener('click', () => {
