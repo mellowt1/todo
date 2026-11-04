@@ -1,7 +1,7 @@
 /* Day plans dated to-dos (Paul, 2026-10-19: "it will plan stuff in Day if I put times or dates
  * on the to-do").
  *
- *   GET /api/hub/todo/day   Bearer HUB_SECRET_DAY -> { tasks: [{ id, title, date, time }], at }
+ *   GET /api/hub/todo/day   Bearer HUB_SECRET_DAY -> { tasks: [{ id, title, date, time, appt? }], undated, at }
  *
  * Every open task whose text ends in the list's date ending (" · YYYY-MM-DD", or with " HH:MM",
  * which Tidy writes, src/tidy.js) and whose date is no more than 14 days gone. Day (Odysseus on
@@ -9,6 +9,10 @@
  * on the date. It also reaches the iPhone (Paul's choice). One direction: a task ticked or
  * deleted here, or its date taken off, is gone from the next answer and Day removes its row.
  * The title is the name, masked like Morning (src/mask.js), with no date and no [intake] mark.
+ *
+ * Appointments (2026-11-04, after a psychologist visit typed with no date never reached Day): a
+ * task Tidy read as one carries appt: true, and every open appointment with no date yet comes in
+ * `undated` [{ id, title }], newest first, so Day can show it until a date is added.
  * Read only. */
 
 import { safeEqual, bearer } from './todo.js';
@@ -31,16 +35,27 @@ export function dayTasks(items, today) {
     if (!m || m[1] < from || Number.isNaN(Date.parse(m[1]))) continue;
     const title = maskSecrets(text.slice(0, m.index)).trim().slice(0, TITLE_MAX);
     if (!title) continue;
-    out.push({ id: it.id, title, date: m[1], time: m[2] ? m[2] + ':' + m[3] : null });
+    out.push({ id: it.id, title, date: m[1], time: m[2] ? m[2] + ':' + m[3] : null, ...(it.appt === true ? { appt: true } : {}) });
   }
   return out.sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+}
+
+/* Pure: open appointments with no date yet, newest first. */
+export const UNDATED_MAX = 10;
+export function undatedAppointments(items) {
+  return items
+    .filter((it) => it && !it.done && it.appt === true && typeof it.text === 'string' && !it.text.replace(INTAKE_MARK, '').match(DUE_END))
+    .sort((a, b) => (b.pos || 0) - (a.pos || 0))
+    .map((it) => ({ id: it.id, title: maskSecrets(it.text.replace(INTAKE_MARK, '')).trim().slice(0, TITLE_MAX) }))
+    .filter((t) => t.title)
+    .slice(0, UNDATED_MAX);
 }
 
 export async function todoForDay(env, now = Date.now()) {
   const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));
   const d = await (await stub.fetch('https://list/read')).json();
   if (!Array.isArray(d.items)) throw new Error('no items');
-  return { tasks: dayTasks(d.items, local(now).date), at: now };
+  return { tasks: dayTasks(d.items, local(now).date), undated: undatedAppointments(d.items), at: now };
 }
 
 export async function handleTodoDay(request, env, json, now = Date.now()) {

@@ -115,3 +115,15 @@ test('safeEqual', () => {
   assert.equal(safeEqual('', ''), false);
   assert.equal(safeEqual(undefined, 'x'), false);
 });
+
+test('appt: true or off; an upsert without it keeps the stored flag, like link', () => {
+  assert.equal(up('aaaaaaaa', { appt: true }).item.appt, true);
+  assert.equal(up('aaaaaaaa', { appt: false }).item.appt, null);
+  assert.equal(up('aaaaaaaa', { appt: 'yes' }), null);
+  const doc = emptyDoc();
+  applyOps(doc, [up('aaaaaaaa', { text: 'Psychologist visit', appt: true, updatedAt: NOW - 900 })]);
+  applyOps(doc, [up('aaaaaaaa', { text: 'Psychologist visit · 2026-11-12 10:00', updatedAt: NOW - 800 })]);
+  assert.equal(doc.items.aaaaaaaa.appt, true, 'an app that does not know the flag never drops it');
+  applyOps(doc, [up('aaaaaaaa', { appt: null, updatedAt: NOW - 700 })]);
+  assert.equal('appt' in doc.items.aaaaaaaa, false);
+});

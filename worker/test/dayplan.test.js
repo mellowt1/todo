@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
-import { dayTasks, PAST_DAYS } from '../src/dayplan.js';
+import { dayTasks, PAST_DAYS, undatedAppointments } from '../src/dayplan.js';
 import { memNamespace } from './mem.js';
 
 const CODE = 'abcdefgh23456789';
@@ -40,4 +40,17 @@ test('GET /api/hub/todo/day: needs HUB_SECRET_DAY, reads the list', async () => 
   assert.equal(r.status, 200);
   const body = await r.json();
   assert.deepEqual(body.tasks, [{ id: 'aaaaaaaa', title: 'Dentist', date: '2099-10-23', time: '14:00' }]);
+});
+
+test('appointments: dated ones say so, undated ones are listed for Day, newest first', () => {
+  const appt = (id, text, pos, over = {}) => ({ ...item(id, text), appt: true, pos, ...over });
+  const items = [
+    appt('aaaaaaaa', 'Psychologist visit', 5),
+    appt('bbbbbbbb', 'Peronik · 2026-11-09 12:45', 4),
+    appt('cccccccc', 'Haircut Ollie', 9),
+    appt('dddddddd', 'Dentist', 7, { done: true, doneAt: 1 }),
+    item('eeeeeeee', 'Not an appointment'),
+  ];
+  assert.deepEqual(undatedAppointments(items), [{ id: 'cccccccc', title: 'Haircut Ollie' }, { id: 'aaaaaaaa', title: 'Psychologist visit' }]);
+  assert.deepEqual(dayTasks(items, '2026-11-04'), [{ id: 'bbbbbbbb', title: 'Peronik', date: '2026-11-09', time: '12:45', appt: true }]);
 });

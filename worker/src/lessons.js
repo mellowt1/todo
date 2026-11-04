@@ -5,7 +5,8 @@
  *      into D1 feedback. Desk writes it itself (src/desk.js, on each approve, copy, skip, undo);
  *      the apps report the rest (Paul, 2026-10-19: "the lesson loop should be more than just desk"):
  *        POST /api/lessons/:code/feedback  <- { app, kind, before, after?, note? }   (REPORTS below)
- *      To-do: Tidy's Undo, an edit of a tidied task, and "Keep as a task" when Tidy sent a line to
+ *      To-do: Tidy's Undo, an edit of a tidied task, a move of a task Tidy placed (moved, within
+ *      14 days; also what Tidy reads back on every call, recentFor), and "Keep as a task" when Tidy sent a line to
  *      Desk (app tidy); an edit or a delete of a task Intake read from a letter (app intake).
  *      Lift: a pick from Ask Claude added to a routine, or left (app lift).
  *   2. Sundays from 06:00, once (KV lessons:week:<monday>, reserved before the call): when the
@@ -27,10 +28,14 @@ import { maskSecrets, noDashes } from './mask.js';
 
 export const APPS = ['desk', 'tidy', 'intake', 'lift'];
 // What each app may report itself (Desk logs its own). after is required where it says what Paul wanted.
-export const REPORTS = { tidy: ['undone', 'edited'], intake: ['edited', 'skipped'], lift: ['approved', 'skipped'] };
-const NEEDS_AFTER = ['undone', 'edited'];
-export const KINDS = ['approved', 'copied', 'edited', 'skipped', 'undone'];
-export const CORRECTIONS = ['edited', 'skipped', 'undone'];
+// tidy moved (2026-11-04): Paul moved a task Tidy had placed, or took its appointment flag off.
+// Tidy rows read "text [section, appointment]" and carry the line as typed in note.
+export const REPORTS = { tidy: ['undone', 'edited', 'moved'], intake: ['edited', 'skipped'], lift: ['approved', 'skipped'] };
+const NEEDS_AFTER = ['undone', 'edited', 'moved'];
+export const KINDS = ['approved', 'copied', 'edited', 'skipped', 'undone', 'moved'];
+export const CORRECTIONS = ['edited', 'skipped', 'undone', 'moved'];
+export const RECENT_SIMILAR = 6;     // Tidy's examples: the corrections most like the line
+const RECENT_POOL = 200;
 export const MIN_CORRECTIONS = 2;
 export const MAX_NEW = 5;
 export const MAX_KEPT = 12;          // per app; the newest kept rules win
@@ -98,11 +103,45 @@ export function lessonsText(rules) {
   return ['Paul\'s own rules, learned from how he corrected you before. Follow them; they win over the examples above:', ...rules.map((r) => '- ' + r)].join('\n');
 }
 
+/* ---------- Every call: Tidy's recent corrections ---------- */
+
+/* "Learn every time" (Paul, 2026-11-04): each Tidy call gets his corrections of earlier answers as
+ * examples, only those that share a word with the line, most shared first, newest on a tie.
+ * Unrelated ones stay out: tried with real Haiku, one correction about Mom's books made Grandpa's
+ * tasks stay put too. One D1 read. */
+const SMALL = new Set(['the', 'and', 'for', 'with', 'from', 'about', 'his', 'her', 'met', 'van', 'een', 'het', 'voor', 'naar', 'aan', 'del', 'los', 'las', 'que', 'con', 'para']);
+const words = (s) => new Set((String(s || '').toLowerCase().match(/\p{L}{3,}/gu) || []).filter((w) => !SMALL.has(w)));
+export function pickRecent(rows, line) {
+  const want = words(line);
+  return (rows || []).map((r, i) => {
+    let n = 0;
+    for (const w of words((r.note || '') + ' ' + (r.before || ''))) if (want.has(w)) n++;
+    return { r, i, n };
+  }).filter((x) => x.n > 0).sort((a, b) => b.n - a.n || a.i - b.i).slice(0, RECENT_SIMILAR).map((x) => x.r);
+}
+
+export async function recentFor(env, line) {
+  if (!env.HUB_DB) return [];
+  try {
+    const { results } = await env.HUB_DB.prepare("SELECT kind, before, after, note FROM feedback WHERE app = 'tidy' AND kind IN ('edited', 'undone', 'moved') ORDER BY at DESC LIMIT ?").bind(RECENT_POOL).all();
+    return pickRecent(results, line);
+  } catch (e) {
+    return [];
+  }
+}
+
+/* Pure: the examples as a block for the user message, or '' when there are none. */
+export function examplesText(rows) {
+  const lines = (rows || []).filter((r) => r && r.before && r.after).map((r) => '- ' + (r.note ? 'he typed "' + r.note + '": ' : '') + 'you gave "' + r.before + '", he made it "' + r.after + '"');
+  if (!lines.length) return '';
+  return ['Paul corrected these answers of yours to lines like this one ([...] is where the task went). For a line about the same thing his choice wins over the rules and examples above: the same place, appointment flag and wording.', ...lines].join('\n');
+}
+
 /* ---------- 2. Sunday: Claude proposes ---------- */
 
 const SYSTEM = [
   'You help small Claude features in Paul\'s own apps get better at what he wants.',
-  'tidy: each to-do Paul types comes back cleaned up (typos, short, a date ending " · YYYY-MM-DD"), and Tidy also decides whether the line is a task, a question for Claude or a message to write. He can undo it, edit it after, or press Keep as a task when it sent a line to Desk by mistake (before "ask: ..." or "write: ...", after "task").',
+  'tidy: each to-do Paul types comes back cleaned up (typos, short, a date ending " · YYYY-MM-DD"), and Tidy also decides whether the line is a task, a question for Claude or a message to write. He can undo it, edit it after, or press Keep as a task when it sent a line to Desk by mistake (before "ask: ..." or "write: ...", after "task"). Tidy also places each task (today, soon, someday, or a lane: build, fun, others) and says whether it is an appointment; [...] after a tidy row shows that, and moved means he moved it or took the appointment off. note is the line as he typed it.',
   'desk: a question or a message request typed in that same box. Claude answers, drafts messages and may suggest tasks; he adds, edits, copies or skips each.',
   'intake: Claude reads letters, bills and PDFs and writes dated tasks. He may edit such a task (before is Claude\'s, after his) or delete it unused (skipped).',
   'lift: in his gym app he asks Claude which exercises to add. Each pick is added to a routine (approved) or left (skipped); note is his question.',

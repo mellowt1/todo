@@ -78,8 +78,9 @@
  *   GET  /api/apply/pc/queue        POST /api/apply/pc/:taskId/draft   POST /api/apply/pc/:taskId/ready
  *
  * Tidy (src/tidy.js; the to-do's code): a task as typed comes back clean, its day or date as the
- * " · YYYY-MM-DD" ending. Writes nothing; the app writes it and offers Undo.
- *   POST /api/tidy/:code   <- { text }  -> { text, changed }
+ * " · YYYY-MM-DD" ending, with where it belongs and whether it is an appointment (2026-11-04).
+ * Writes nothing; the app writes it and offers Undo.
+ *   POST /api/tidy/:code   <- { text }  -> { text, changed, kind, energy, place, appt }
  *
  * Talk points (src/talk.js; the to-do's code): Feeling sends the entries since the last session when
  * Paul taps "Write with Claude"; short sections to read at the psychologist come back. Stores no text.

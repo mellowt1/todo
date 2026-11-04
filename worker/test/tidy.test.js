@@ -2,7 +2,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
-import { _setTidier, toText } from '../src/tidy.js';
+import { _setTidier, toText, toPlace } from '../src/tidy.js';
 
 const CODE = 'abcdefgh23456789';
 const memKV = () => { const m = new Map(); return { m, async get(k) { return m.has(k) ? JSON.parse(m.get(k)) : null; }, async put(k, v) { m.set(k, v); } }; };
@@ -26,7 +26,7 @@ test('the route: tidies, says whether it changed, counts usage; intake tasks pas
   const soon = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10); // a date still to come, whatever day the test runs
   _setTidier(async (_e, text) => { seen = text; return { out: { name: 'Book the bike service', due: soon, energy: 'normal' }, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }; });
   let r = await post(e, `tidy/${CODE}`, { text: '  book bike servise monday ' });
-  assert.deepEqual(await r.json(), { text: 'Book the bike service · ' + soon, changed: true, kind: 'task', energy: 'normal' }, 'the energy is a guess for the app to show');
+  assert.deepEqual(await r.json(), { text: 'Book the bike service · ' + soon, changed: true, kind: 'task', energy: 'normal', place: 'soon', appt: false }, 'the energy is a guess for the app to show');
   assert.equal(seen, 'book bike servise monday');
   assert.ok([...e.HUB_KV.m.keys()].some((k) => k.startsWith('tidy:usage:')));
   r = await post(e, `tidy/${CODE}`, { text: 'Pay the CJIB fine · 2026-10-21 [intake]' });
@@ -58,4 +58,48 @@ test('a question or a message comes back as typed with its kind, for the app to 
   assert.equal((await (await post(e, `tidy/${CODE}`, { text: 'write to the landlord' })).json()).kind, 'write');
   _setTidier(async () => ({ out: { name: 'Odd', due: null, time: null, kind: 'poem' }, usage: null }));
   assert.equal((await (await post(e, `tidy/${CODE}`, { text: 'odd' })).json()).kind, 'task', 'anything unknown is a task');
+});
+
+test('toPlace: a lane wins, a date picks Today or Soon, an undated appointment stays in Today, unsure stays put', () => {
+  const T = '2026-11-04';
+  assert.equal(toPlace({ place: 'build' }, '2026-11-20', T), 'build');
+  assert.equal(toPlace({ place: 'others' }, null, T), 'others');
+  assert.equal(toPlace({ place: 'keep' }, '2026-11-09', T), 'soon', 'a later date goes to Soon');
+  assert.equal(toPlace({ place: 'someday' }, '2026-11-09', T), 'soon');
+  assert.equal(toPlace({ place: 'soon' }, '2026-11-04', T), 'today', 'due today is Today');
+  assert.equal(toPlace({ place: 'keep', appointment: true }, null, T), 'today', 'an appointment with no date stays in sight');
+  assert.equal(toPlace({ place: 'someday', appointment: true }, null, T), 'today');
+  assert.equal(toPlace({ place: 'keep' }, null, T), null);
+  assert.equal(toPlace({ place: 'someday' }, null, T), 'someday');
+  assert.equal(toPlace({ place: 'kitchen' }, null, T), null, 'anything unknown stays put');
+  assert.equal(toPlace(null, null, T), null);
+  assert.equal(toPlace({ place: 'fun', appointment: true }, T, T), 'today', 'archery at 20:00 today is Today, not Fun');
+  assert.equal(toPlace({ place: 'fun', appointment: true }, '2026-11-20', T), 'soon', 'an appointment never goes to Build or Fun');
+  assert.equal(toPlace({ place: 'others', appointment: true }, '2026-11-20', T), 'others', 'but may go to Others');
+  assert.equal(toPlace({ place: 'fun' }, T, T), 'today', 'due today is Today, lane or not');
+});
+
+test('the route: place and appointment come back; a time without a date never makes one up', async () => {
+  const e = env();
+  _setTidier(async () => ({ out: { name: 'Psychologist visit', due: null, time: null, kind: 'task', energy: 'normal', place: 'keep', appointment: true }, usage: null }));
+  assert.deepEqual(await (await post(e, `tidy/${CODE}`, { text: 'psychologist visit' })).json(), { text: 'Psychologist visit', changed: true, kind: 'task', energy: 'normal', place: 'today', appt: true });
+  _setTidier(async () => ({ out: { name: 'Grandpa: Order bed frame', due: null, time: null, kind: 'task', energy: 'normal', place: 'others', appointment: false }, usage: null }));
+  const r = await (await post(e, `tidy/${CODE}`, { text: 'order bed frame for grandpa' })).json();
+  assert.equal(r.text, 'Grandpa: Order bed frame');
+  assert.equal(r.place, 'others');
+  assert.equal(r.appt, false);
+  _setTidier(async () => ({ out: { name: 'Peronik', due: null, time: '12:45', kind: 'task', energy: 'normal', place: 'keep', appointment: true }, usage: null }));
+  const p = await (await post(e, `tidy/${CODE}`, { text: 'peronik 12:45' })).json();
+  assert.equal(p.text, 'Peronik', 'no date in, no date out');
+  _setTidier(async () => ({ out: { name: 'Old style', due: null, time: null, kind: 'task', energy: 'normal' }, usage: null }));
+  const o = await (await post(e, `tidy/${CODE}`, { text: 'old style' })).json();
+  assert.equal(o.place, null);
+  assert.equal(o.appt, false);
+});
+
+test('the route hands Tidy the recent corrections (none without D1)', async () => {
+  let seen;
+  _setTidier(async (_e, _t, _n, examples) => { seen = examples; return { out: { name: 'X', due: null, time: null, kind: 'task' }, usage: null }; });
+  await post(env(), `tidy/${CODE}`, { text: 'x' });
+  assert.deepEqual(seen, []);
 });

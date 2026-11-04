@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import worker from '../src/worker.js';
 import { _setDesker, prepare } from '../src/desk.js';
 import { tidyLine } from '../src/tidy.js';
-import { deskSignal, cleanProposals, cleanReport, lessonsText, weekLessons, keptFor, _setLessonAsker, KEPT_KEY, WEEK_PREFIX } from '../src/lessons.js';
+import { deskSignal, cleanProposals, cleanReport, lessonsText, weekLessons, keptFor, _setLessonAsker, KEPT_KEY, WEEK_PREFIX, recentFor, pickRecent, examplesText } from '../src/lessons.js';
 import { readItem } from '../src/intake.js';
 import { askLift } from '../src/lift-ask.js';
 import { weekBlock } from '../src/week.js';
@@ -163,7 +163,8 @@ test('lessonsText and the real calls: kept rules reach the system prompt of Desk
   assert.equal(bodies.length, 2);
   assert.equal(bodies[0].system.length, 2);
   assert.match(bodies[0].system[1].text, /- Write tasks for Dad in Spanish\./);
-  assert.match(bodies[1].system, /- Leave "tmrw" as typed\.$/);
+  assert.match(bodies[1].system[1].text, /- Leave "tmrw" as typed\.$/);
+  assert.deepEqual(bodies[1].system[0].cache_control, { type: 'ephemeral' }, 'the frozen prompt is cached');
 });
 
 test('feedback from more apps: intake edits and deletes, lift picks; each app only its own kinds', async () => {
@@ -197,4 +198,49 @@ test('kept rules reach Intake and Lift Ask too, in a second system block', async
   assert.equal(bodies.length, 2);
   assert.match(bodies[0].system[1].text, /- Never make a task for a newsletter\./);
   assert.match(bodies[1].system[1].text, /- Prefer cable exercises\./);
+});
+
+test('Tidy learns every time: moves are reported, and the corrections most like the line go into the next call', async () => {
+  const e = env({ ANTHROPIC_API_KEY: 'k-recent' });
+  let r = await post(e, `lessons/${CODE}/feedback`, { app: 'tidy', kind: 'moved', before: 'Derreck credit check [others]', after: 'Derreck credit check [soon]', note: 'derreck credit check' });
+  assert.deepEqual(await r.json(), { ok: true });
+  assert.equal((await post(e, `lessons/${CODE}/feedback`, { app: 'tidy', kind: 'moved', before: 'X [soon]', after: 'X [soon]' })).status, 400, 'a move must change something');
+  assert.equal((await post(e, `lessons/${CODE}/feedback`, { app: 'intake', kind: 'moved', before: 'a', after: 'b' })).status, 400, 'only Tidy reports moves');
+  assert.deepEqual(rows(e).at(-1), { app: 'tidy', kind: 'moved', before: 'Derreck credit check [others]', after: 'Derreck credit check [soon]', note: 'derreck credit check' });
+
+  for (let i = 0; i < 6; i++) addFeedback(e, '2026-10-0' + (i + 1) + 'T10:00:00Z', 'tidy', 'edited', 'Old one ' + i, 'Old one ' + i + '!');
+  addFeedback(e, '2026-10-01T09:00:00Z', 'desk', 'edited', 'credit check desk', 'x');
+  const got = await recentFor(e, 'Kike credit check');
+  assert.equal(got[0].before, 'Derreck credit check [others]', 'the most similar first');
+  assert.equal(got.length, 1, 'only corrections like the line, never Desk rows');
+  assert.deepEqual(await recentFor({}, 'x'), [], 'no D1, no examples');
+
+  const text = examplesText(got.slice(0, 1));
+  assert.match(text, /^Paul corrected these answers/);
+  assert.match(text, /he typed "derreck credit check": you gave "Derreck credit check \[others\]", he made it "Derreck credit check \[soon\]"/);
+  assert.equal(examplesText([]), '');
+
+  // The real call: the examples ride in the user message; the system prompt stays the same.
+  const bodies = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { bodies.push(JSON.parse(init.body)); return new Response('{"type":"error","error":{"type":"invalid_request_error","message":"stop"}}', { status: 400, headers: { 'content-type': 'application/json' } }); };
+  try {
+    await assert.rejects(tidyLine(e, 'kike credit check', SUN, got));
+    await assert.rejects(tidyLine(e, 'kike credit check', SUN));
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.match(bodies[0].messages[0].content, /^Paul corrected these answers[\s\S]*The line: kike credit check$/);
+  assert.match(bodies[1].messages[0].content, /^Today is Sunday 2026-10-18\.\nThe line: kike credit check$/);
+  assert.deepEqual(bodies[0].system, bodies[1].system);
+});
+
+test('pickRecent: at most six, most shared words first, newest on a tie; small words never match', () => {
+  const rs = Array.from({ length: 12 }, (_, i) => ({ before: i < 8 ? 'Grandpa thing ' + i : 'other ' + i + ' for the bank', after: 'y', note: null }));
+  rs.push({ before: 'Grandpa bed frame', after: 'y', note: 'order bed frame for grandpa' });
+  const got = pickRecent(rs, 'order a new bed for grandpa');
+  assert.equal(got.length, 6);
+  assert.deepEqual(got.map((x) => x.before), ['Grandpa bed frame', 'Grandpa thing 0', 'Grandpa thing 1', 'Grandpa thing 2', 'Grandpa thing 3', 'Grandpa thing 4']);
+  assert.equal(pickRecent(rs, 'for the cat').length, 0, '"for" and "the" share nothing');
+  assert.equal(pickRecent([], 'x').length, 0);
 });

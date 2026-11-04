@@ -27,6 +27,8 @@
  *            Both behave like `link` too.
  *   waiting  optional, the id of the Waiting on item a chase task belongs to (src/waiting.js); the
  *            app asks "did they answer?" when it is ticked. Behaves like `link` too.
+ *   appt     optional true: an appointment, as Tidy read the line (2026-11-04). With no date it
+ *            sits on top of Today as "No date yet" and Day lists it (src/dayplan.js). Behaves like `link`.
  *   created  ms, set by the hub when the task first arrives (2026-10-22, for the Archive ledger);
  *            older tasks have none. cleanOp never takes it from an app.
  *   dread    optional 1 to 5: how much Paul dreaded it the last time he rated it (Dread meter,
@@ -43,7 +45,7 @@ export const SECTIONS = ['today', 'soon', 'someday', ...LANES];
 export const ENERGY = ['wired', 'normal', 'drained'];
 export const REPEATS = ['week', '2weeks', 'month', 'bins'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week', 'waiting', 'dread']; // left out of an upsert: the stored value stays
+const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week', 'waiting', 'dread', 'appt']; // left out of an upsert: the stored value stays
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
@@ -140,6 +142,12 @@ export function cleanOp(raw, now = Date.now()) {
   else if (it.waiting !== undefined) {
     if (typeof it.waiting !== 'string' || !ID.test(it.waiting)) return null;
     item.waiting = it.waiting;
+  }
+  // An appointment (Tidy, 2026-11-04): with no date it stays on top of Today and Day lists it.
+  if (it.appt === null || it.appt === false) item.appt = null;
+  else if (it.appt !== undefined) {
+    if (it.appt !== true) return null;
+    item.appt = true;
   }
   if (it.dread === null) item.dread = null;
   else if (it.dread !== undefined) {
