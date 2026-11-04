@@ -55,7 +55,7 @@ test('appointments: dated ones say so, undated ones are listed for Day, newest f
   assert.deepEqual(dayTasks(items, '2026-11-04'), [{ id: 'bbbbbbbb', title: 'Peronik', date: '2026-11-09', time: '12:45', appt: true }]);
 });
 
-test('ackOps: Day confirmed it: open appointments on that date get cal, nothing else', () => {
+test('ackOps: Day confirmed it: open dated tasks on that date get cal, appointment or not', () => {
   const T = 1762000000000; // real times: cleanOp checks them
   const appt = (id, text, over = {}) => ({ ...item(id, text), appt: true, updatedAt: T, pos: T, ...over });
   const items = Object.fromEntries([
@@ -69,13 +69,14 @@ test('ackOps: Day confirmed it: open appointments on that date get cal, nothing 
     { id: 'aaaaaaaa', date: '2026-11-09' },
     { id: 'bbbbbbbb', date: '2026-11-12' }, // already marked
     { id: 'cccccccc', date: '2026-11-19' }, // Day has the old date: not this one
-    { id: 'dddddddd', date: '2026-11-09' }, // not an appointment
+    { id: 'dddddddd', date: '2026-11-09' }, // not an appointment: marked too (Paul, 2026-11-04)
     { id: 'eeeeeeee', date: '2026-11-09' }, // done
     { id: 'zzzzzzzz', date: '2026-11-09' }, // not on the list
     { id: 'BAD', date: 'x' },
   ], T + 1000);
-  assert.equal(ops.length, 1);
-  assert.equal(ops[0].item.id, 'aaaaaaaa');
+  assert.deepEqual(ops.map((o) => o.item.id), ['aaaaaaaa', 'dddddddd']);
+  assert.equal(ops[1].item.cal, '2026-11-09');
+  assert.equal(ops[1].item.appt, undefined, 'not made an appointment');
   assert.equal(ops[0].item.cal, '2026-11-09');
   assert.equal(ops[0].item.text, 'Peronik · 2026-11-09 12:45', 'the text stays');
   assert.equal(ops[0].item.section, 'soon', 'the section stays');

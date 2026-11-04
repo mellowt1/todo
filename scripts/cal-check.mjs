@@ -1,6 +1,6 @@
 // On the calendar (2026-11-04), against a mocked Worker (no wrangler needed): an appointment Day has
-// confirmed (cal = the date in its text, still to come) waits in Soon behind one shut
-// "N on the calendar" line and is not counted; a tap unfolds it; one whose date changed after Day
+// confirmed (cal = the date in its text, more than two days off) waits in Soon behind one shut
+// "N on the calendar" line; since the same evening a plain dated task too, and one two days off shows and is not counted; a tap unfolds it; one whose date changed after Day
 // confirmed it, one Day has not confirmed and one that is not an appointment stay in the list; the
 // repeats line still comes last. Every value is made up.
 //   PORT=8091 npm run serve, then: APP_URL=http://localhost:8091/ npm run cal-check
@@ -28,6 +28,8 @@ function world() {
     t('calhair00001', `Haircut · ${day(8)}`, 'soon', { appt: true, cal: day(8) }),
     t('calmoved0001', `Psychologist · ${day(5)} 10:00`, 'soon', { appt: true, cal: day(4) }), // date changed since Day confirmed
     t('calnew000001', `Physio · ${day(6)} 09:00`, 'soon', { appt: true }), // Day has not confirmed it yet
+    t('calplain0001', `Pay the rent · ${day(6)}`, 'soon', { cal: day(6) }), // not an appointment: folds too
+    t('calnear00001', `Peronik · ${day(2)} 12:45`, 'soon', { appt: true, cal: day(2) }), // two days off: back in the list
     t('soonplain001', `Return the lamp · ${day(2)}`, 'soon'),
     t('soonplain002', 'Call the bank', 'soon'),
     t('repclaim0001', `Club claim · ${day(14)}`, 'soon', { repeat: { every: '2weeks', until: null } }),
@@ -77,14 +79,14 @@ for (const [name, viewport, scheme] of [['cal-phone', { width: 390, height: 844 
   await page.waitForSelector('.row[data-id="todayplain01"]');
   await page.waitForTimeout(600);
 
-  // 4 in the list (moved, new, lamp, bank); the 2 on the calendar and the repeat are not counted.
-  check((await counts(page)).every((c) => c === '4'), name + ': the Soon count leaves the calendar ones out ' + JSON.stringify(await counts(page)));
+  // 5 in the list (lamp, near, moved, new, bank); the 3 on the calendar and the repeat are not counted.
+  check((await counts(page)).every((c) => c === '5'), name + ': the Soon count leaves the calendar ones out ' + JSON.stringify(await counts(page)));
 
   await page.locator('[data-section="soon"]:visible').first().click();
   await page.waitForSelector('.row[data-id="soonplain001"]');
   await page.waitForTimeout(500);
   const shut = await order(page);
-  check(JSON.stringify(shut) === JSON.stringify(['soonplain001', 'calmoved0001', 'calnew000001', 'label:No date', 'soonplain002', 'label:2 on the calendar', 'label:1 repeat']),
+  check(JSON.stringify(shut) === JSON.stringify(['soonplain001', 'calnear00001', 'calmoved0001', 'calnew000001', 'label:No date', 'soonplain002', 'label:3 on the calendar', 'label:1 repeat']),
     name + ': confirmed appointments wait under one shut line before the repeats ' + JSON.stringify(shut));
   check(await page.getAttribute('.cal-fold', 'aria-expanded') === 'false', name + ': the line says it is shut');
   await page.screenshot({ path: file(name + '-shut') });
@@ -92,7 +94,7 @@ for (const [name, viewport, scheme] of [['cal-phone', { width: 390, height: 844 
   await page.click('.cal-fold');
   await page.waitForTimeout(500);
   const open = await order(page);
-  check(JSON.stringify(open) === JSON.stringify(['soonplain001', 'calmoved0001', 'calnew000001', 'label:No date', 'soonplain002', 'label:2 on the calendar', 'caldent00001', 'calhair00001', 'label:1 repeat']),
+  check(JSON.stringify(open) === JSON.stringify(['soonplain001', 'calnear00001', 'calmoved0001', 'calnew000001', 'label:No date', 'soonplain002', 'label:3 on the calendar', 'caldent00001', 'calplain0001', 'calhair00001', 'label:1 repeat']),
     name + ': a tap shows them, by date ' + JSON.stringify(open));
   check(await page.getAttribute('.cal-fold', 'aria-expanded') === 'true', name + ': the line says it is open');
   await page.screenshot({ path: file(name + '-open') });

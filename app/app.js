@@ -274,15 +274,19 @@
   // Today on its day. A This week flag keeps it in the list.
   const folds = (it) => it.section === 'soon' && !!(it.repeat && it.repeat.every) && it.week !== true;
   let repsOpen = false; // the fold, open or shut; shut again on each launch
-  // On the calendar (Paul, 2026-11-04): an appointment Day has confirmed (cal, set by the hub,
-  // worker/src/dayplan.js) waits behind one quiet "2 on the calendar" line until its day, when the
-  // hub brings it into Today. Its date changed in To-do: it shows again until Day confirms the new
-  // one. A This week flag keeps it in the list.
+  // On the calendar (Paul, 2026-11-04): a dated task Day has confirmed (cal, set by the hub,
+  // worker/src/dayplan.js) waits behind one quiet "2 on the calendar" line until CAL_NEAR_DAYS
+  // before its date, when it shows in Soon again; on its day the hub brings it into Today.
+  // Appointments only at first; every dated task since "disappear until the day is nearby".
+  // Its date changed in To-do: it shows again until Day confirms the new one. A This week flag
+  // keeps it in the list.
+  const CAL_NEAR_DAYS = 2;
   function onCal(it) {
-    if (it.section !== 'soon' || it.appt !== true || !it.cal || it.week === true || folds(it)) return false;
+    if (it.section !== 'soon' || !it.cal || it.week === true || folds(it)) return false;
     const d = new Date(now());
-    const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    return it.cal > today && nameParts(it).due === it.cal;
+    d.setDate(d.getDate() + CAL_NEAR_DAYS);
+    const near = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return it.cal > near && nameParts(it).due === it.cal;
   }
   let calOpen = false; // like repsOpen
   const tail = (it) => (folds(it) ? 2 : onCal(it) ? 1 : 0); // Soon's folds, last: calendar, then repeats

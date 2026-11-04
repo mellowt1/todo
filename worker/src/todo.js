@@ -29,9 +29,9 @@
  *            app asks "did they answer?" when it is ticked. Behaves like `link` too.
  *   appt     optional true: an appointment, as Tidy read the line (2026-11-04). With no date it
  *            sits on top of Today as "No date yet" and Day lists it (src/dayplan.js). Behaves like `link`.
- *   cal      optional "YYYY-MM-DD": the date Day confirmed it has this appointment on the calendar
+ *   cal      optional "YYYY-MM-DD": the date Day confirmed it has this dated task on the calendar
  *            (2026-11-04, src/dayplan.js ack). While it matches the date in the text and that day
- *            has not come, the app keeps the task out of Soon behind "N on the calendar". Only the
+ *            is more than two days off, the app keeps the task out of Soon behind "N on the calendar". Only the
  *            hub sets it. Behaves like `link`.
  *   skill    optional, one of TASK_SKILLS: the skill the task trains besides Woodcutting, as Tidy
  *            read it or Paul set it (2026-11-04, src/hiscores.js). Behaves like `link`.
