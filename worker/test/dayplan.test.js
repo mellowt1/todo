@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
-import { dayTasks, PAST_DAYS, undatedAppointments } from '../src/dayplan.js';
+import { dayTasks, PAST_DAYS, undatedAppointments, ackOps } from '../src/dayplan.js';
 import { memNamespace } from './mem.js';
 
 const CODE = 'abcdefgh23456789';
@@ -53,4 +53,53 @@ test('appointments: dated ones say so, undated ones are listed for Day, newest f
   ];
   assert.deepEqual(undatedAppointments(items), [{ id: 'cccccccc', title: 'Haircut Ollie' }, { id: 'aaaaaaaa', title: 'Psychologist visit' }]);
   assert.deepEqual(dayTasks(items, '2026-11-04'), [{ id: 'bbbbbbbb', title: 'Peronik', date: '2026-11-09', time: '12:45', appt: true }]);
+});
+
+test('ackOps: Day confirmed it: open appointments on that date get cal, nothing else', () => {
+  const T = 1762000000000; // real times: cleanOp checks them
+  const appt = (id, text, over = {}) => ({ ...item(id, text), appt: true, updatedAt: T, pos: T, ...over });
+  const items = Object.fromEntries([
+    appt('aaaaaaaa', 'Peronik · 2026-11-09 12:45'),
+    appt('bbbbbbbb', 'Dentist · 2026-11-12', { cal: '2026-11-12' }),
+    appt('cccccccc', 'Barber · 2026-11-20'),
+    { ...item('dddddddd', 'Buy cat food · 2026-11-09'), updatedAt: T, pos: T },
+    appt('eeeeeeee', 'Done one · 2026-11-09', { done: true, doneAt: 1 }),
+  ].map((i) => [i.id, i]));
+  const ops = ackOps(items, [
+    { id: 'aaaaaaaa', date: '2026-11-09' },
+    { id: 'bbbbbbbb', date: '2026-11-12' }, // already marked
+    { id: 'cccccccc', date: '2026-11-19' }, // Day has the old date: not this one
+    { id: 'dddddddd', date: '2026-11-09' }, // not an appointment
+    { id: 'eeeeeeee', date: '2026-11-09' }, // done
+    { id: 'zzzzzzzz', date: '2026-11-09' }, // not on the list
+    { id: 'BAD', date: 'x' },
+  ], T + 1000);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].item.id, 'aaaaaaaa');
+  assert.equal(ops[0].item.cal, '2026-11-09');
+  assert.equal(ops[0].item.text, 'Peronik · 2026-11-09 12:45', 'the text stays');
+  assert.equal(ops[0].item.section, 'soon', 'the section stays');
+  assert.equal(ops[0].item.updatedAt, T + 1000);
+});
+
+test('POST /api/hub/todo/day/ack: needs HUB_SECRET_DAY, marks the task, keeps the mark on a later app edit', async () => {
+  const env = { TODO_LIST: memNamespace(), TODO_CODE: CODE, HUB_SECRET_DAY: SECRET };
+  const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + CODE));
+  const T = Date.now() - 60000;
+  const t = { ...item('aaaaaaaa', 'Dentist · 2099-10-23 14:00'), appt: true, updatedAt: T, pos: T };
+  await stub.fetch('https://list/apply', { method: 'POST', body: JSON.stringify({ ops: [{ op: 'upsert', item: t }] }) });
+  const post = (auth, body) => worker.fetch(new Request('https://hub.example/api/hub/todo/day/ack', { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: 'Bearer ' + auth } : {}) }, body: JSON.stringify(body) }), env);
+  assert.equal((await post(null, { rows: [] })).status, 401);
+  assert.equal((await post(SECRET, {})).status, 400);
+  const r = await post(SECRET, { rows: [{ id: 'aaaaaaaa', date: '2099-10-23' }] });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { marked: 1 });
+  assert.deepEqual(await (await post(SECRET, { rows: [{ id: 'aaaaaaaa', date: '2099-10-23' }] })).json(), { marked: 0 }, 'twice is once');
+  let doc = await (await stub.fetch('https://list/export')).json();
+  assert.equal(doc.items.aaaaaaaa.cal, '2099-10-23');
+  // The app renames it without knowing the field: the mark stays.
+  const edit = { ...t, text: 'Dentist Bas · 2099-10-23 14:00', updatedAt: Date.now() + 5000 };
+  await stub.fetch('https://list/apply', { method: 'POST', body: JSON.stringify({ ops: [{ op: 'upsert', item: edit }] }) });
+  doc = await (await stub.fetch('https://list/export')).json();
+  assert.equal(doc.items.aaaaaaaa.cal, '2099-10-23');
 });

@@ -29,6 +29,10 @@
  *            app asks "did they answer?" when it is ticked. Behaves like `link` too.
  *   appt     optional true: an appointment, as Tidy read the line (2026-11-04). With no date it
  *            sits on top of Today as "No date yet" and Day lists it (src/dayplan.js). Behaves like `link`.
+ *   cal      optional "YYYY-MM-DD": the date Day confirmed it has this appointment on the calendar
+ *            (2026-11-04, src/dayplan.js ack). While it matches the date in the text and that day
+ *            has not come, the app keeps the task out of Soon behind "N on the calendar". Only the
+ *            hub sets it. Behaves like `link`.
  *   skill    optional, one of TASK_SKILLS: the skill the task trains besides Woodcutting, as Tidy
  *            read it or Paul set it (2026-11-04, src/hiscores.js). Behaves like `link`.
  *   created  ms, set by the hub when the task first arrives (2026-10-22, for the Archive ledger);
@@ -50,7 +54,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // The OSRS skill a task trains besides Woodcutting (Paul, 2026-11-04: "not every task is
 // woodcutting"): Tidy picks one, Paul can change it; src/hiscores.js pays it on the tick.
 export const TASK_SKILLS = ['slayer', 'defence', 'thieving', 'herblore', 'construction', 'smithing', 'crafting', 'cooking', 'farming', 'sailing', 'magic', 'runecraft', 'firemaking'];
-const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week', 'waiting', 'dread', 'appt', 'skill']; // left out of an upsert: the stored value stays
+const KEEP = ['link', 'energy', 'energyGuess', 'repeat', 'series', 'week', 'waiting', 'dread', 'appt', 'skill', 'cal']; // left out of an upsert: the stored value stays
 export const ID = /^[a-z0-9]{8,32}$/;
 export const CODE = /^[a-z0-9]{16}$/;
 export const MAX_TEXT = 500;
@@ -153,6 +157,12 @@ export function cleanOp(raw, now = Date.now()) {
   else if (it.appt !== undefined) {
     if (it.appt !== true) return null;
     item.appt = true;
+  }
+  // On the calendar (2026-11-04): the date Day confirmed for an appointment.
+  if (it.cal === null) item.cal = null;
+  else if (it.cal !== undefined) {
+    if (typeof it.cal !== 'string' || !DATE.test(it.cal) || Number.isNaN(Date.parse(it.cal))) return null;
+    item.cal = it.cal;
   }
   if (it.skill === null) item.skill = null;
   else if (it.skill !== undefined) {

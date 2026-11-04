@@ -213,7 +213,7 @@ import { taskSkillsOnce } from './taskskills.js';
 import { dueCron } from './due.js';
 import { repeatCron } from './repeat.js';
 import { handleTidy } from './tidy.js';
-import { handleTodoDay } from './dayplan.js';
+import { handleTodoDay, handleTodoDayAck } from './dayplan.js';
 import { handleTalk } from './talk.js';
 import { handleLessons, handleLesson, weekLessons } from './lessons.js';
 import { handleLift, handleLiftDay, liftForMorning } from './lift.js';
@@ -443,6 +443,7 @@ const MODULES = {
     if (path === 'lift/day') return handleLiftDay(request, env, json);
     if (path === 'digest') return handleDigest(request, env, json);
     if (path === 'todo/day') return handleTodoDay(request, env, json);
+    if (path === 'todo/day/ack') return handleTodoDayAck(request, env, json);
     if (rest[0] === 'energy' && rest[1] === 'day') return handleEnergyDay(request, env, rest.slice(2), json);
     if (path === 'waiting/day') return handleWaitingDay(request, env, json);
     if (rest[0] === 'dread' && rest[1] === 'day') return handleDreadDay(request, env, rest.slice(2), json);
