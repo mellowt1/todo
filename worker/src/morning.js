@@ -29,7 +29,7 @@
  * The kitchen block is read inside the Worker with KITCHEN_CODE; that code never leaves it.
  */
 
-import { CODE, safeEqual, bearer } from './todo.js';
+import { CODE, safeEqual, bearer, TASK_SKILLS } from './todo.js';
 import { kitchen } from './kitchen-store.js';
 import { tonightView } from './kitchen.js';
 import { germanBlock } from './german.js';
@@ -177,7 +177,8 @@ export async function todosBlock(env, now = Date.now()) {
   const items = d.items
     .filter((i) => !i.done && i.section === 'today')
     .sort((a, b) => b.pos - a.pos)
-    .map((i) => ({ text: maskSecrets(i.text) }));
+    // The skill a task trains (Tidy's pick, 2026-11-04) rides along: Morning shows its icon as the bullet.
+    .map((i) => ({ text: maskSecrets(i.text), ...(TASK_SKILLS.includes(i.skill) ? { skill: i.skill } : {}) }));
   // Everything ticked off yesterday (Amsterdam), in any section, newest first. Read only.
   const yesterday = addDays(local(now).date, -1);
   const won = d.items
