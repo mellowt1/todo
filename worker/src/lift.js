@@ -17,6 +17,7 @@
  *   rotation: [name], days: [7 booleans, Monday first],
  *   workouts: [{ id, name, start, end, volume, sets, prs }]         newest first, at most 500
  * }
+ * A gym day also puts a task in the to-do's Today, ticked by that day's workout (src/gym.js).
  * KV: lift:state { summary, at }, lift:backup (the phone's export, at most 4 MB), lift:fed:<id> (30 days).
  * The code is the to-do's (TODO_CODE), as for Morning and Hiscores. */
 
@@ -25,6 +26,7 @@ import { local } from './morning.js';
 import { grant, XP } from './hiscores.js';
 import { cleanEvent, putEvent } from './events.js';
 import { handleLiftAsk } from './lift-ask.js';
+import { gymCron } from './gym.js';
 
 const STATE = 'lift:state';
 const BACKUP = 'lift:backup';
@@ -104,7 +106,9 @@ export async function saveLift(env, body, now = Date.now()) {
     await env.HUB_KV.put(key, '1', { expirationTtl: 30 * 86400 });
     feed++;
   }
-  return { xp, feed };
+  // Today's gym task in the to-do (src/gym.js): made, or ticked by the workout just sent.
+  const gym = await gymCron(env, now).catch((e) => ({ error: String(e && e.message) }));
+  return { xp, feed, gym: gym.gym || [] };
 }
 
 /* The next gym day as of now. The phone's answer holds until that day has passed; after that

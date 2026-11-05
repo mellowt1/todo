@@ -28,6 +28,7 @@
 import { safeEqual, bearer, cleanOp, ID } from './todo.js';
 import { dueDate } from './due.js';
 import { DUE_END } from './tidy.js';
+import { GYM_ID } from './gym.js';
 import { maskSecrets } from './mask.js';
 import { local, addDays } from './morning.js';
 
@@ -41,6 +42,7 @@ export function dayTasks(items, today) {
   const out = [];
   for (const it of items) {
     if (!it || it.done || typeof it.text !== 'string') continue;
+    if (GYM_ID.test(it.id)) continue; // Day draws gym days from Lift itself (src/gym.js)
     const text = it.text.replace(INTAKE_MARK, '');
     const m = text.match(DUE_END);
     if (!m || m[1] < from || Number.isNaN(Date.parse(m[1]))) continue;
