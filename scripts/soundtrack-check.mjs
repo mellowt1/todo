@@ -53,7 +53,7 @@ function world() {
         w.posts.push({ sub: 'make', ...body });
         const e = { ...entry('madenew001', '7aBcDeFgHiJkLmNoPqRsTu', 'Drained · ' + body.words + ' · 4 Nov'), made: true };
         w.lists[body.level] = [e, ...w.lists[body.level]].slice(0, 3);
-        return { title: e.title, songs: 25, fresh: 25, url: e.url, uri: e.uri, lists: w.lists, dropped: null };
+        return { title: e.title, songs: 15, fresh: 15, url: e.url, uri: e.uri, lists: w.lists, dropped: null };
       }
       if (p === `/api/spotify/${CODE}/disconnect`) { w.posts.push({ sub: 'disconnect' }); w.spotify = { configured: true, connected: false, canMake: false }; return { connected: false }; }
       if (p.startsWith(`/api/soundtrack/${CODE}`)) {
@@ -196,7 +196,7 @@ for (const [name, viewport, scheme] of [['soundtrack-phone', { width: 390, heigh
   check(made && made.level === 'drained' && made.words === 'rainy Sunday', name + ': the hub heard make ' + JSON.stringify(made));
   check(JSON.stringify(await rows('Drained')) === '["Drained · rainy Sunday · 4 Nov","Low tide"]', name + ': the new one comes first');
   check(await page.evaluate(() => !!document.querySelector('#soundBody .mu-row.fresh[data-id="madenew001"] .mu-made')), name + ': it slides in, marked as made');
-  check((await page.textContent('#say')) === 'Made Drained · rainy Sunday · 4 Nov: 25 new songs', name + ': it says what was made');
+  check((await page.textContent('#say')) === 'Made Drained · rainy Sunday · 4 Nov: 15 new songs', name + ': it says what was made');
   await page.waitForTimeout(700);
   await page.screenshot({ path: file(name + '-made') });
   await closeMusic();

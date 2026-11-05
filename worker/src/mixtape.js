@@ -3,7 +3,7 @@
  * has no suggestions for small apps any more, so Claude picks. Since 2026-11-05 (Paul: "just 25 new
  * songs that match the vibe, but look at what I have been listening to recently") every song is new
  * to him: his listening (recent plays first, then this month's top, liked songs, the last months'
- * top) only shows Claude his taste. Claude names a few more than 25, each is found with Spotify
+ * top) only shows Claude his taste. Claude names a few more than 15, each is found with Spotify
  * search, and anything he already plays or search cannot find is left out. The playlist is private,
  * named "Drained · rainy Sunday · 4 Nov", and takes the level's first place (Play starts it).
  *
@@ -12,7 +12,7 @@
  *                                   | { error, reconnect? }  409 connect again, 429 one is being made,
  *                                     422 too few songs found, 502 Claude or Spotify
  *
- * Paul's answers, 2026-11-04: level and words both; only on a tap; Opus 5.5. 2026-11-05: all new.
+ * Paul's answers, 2026-11-04: level and words both; only on a tap; Opus 5.5. 2026-11-05: all new; then "do 15 songs".
  * What he listens to goes to Claude and back and is not kept; the words go into the title. KV keeps
  * the token count (mixtape:usage:YYYY-MM). Nothing is logged but counts. */
 
@@ -24,7 +24,7 @@ import { accessToken, canMake, configured, API } from './spotify.js';
 import { addMade } from './soundtrack.js';
 
 export const MIX_MODEL = 'claude-opus-5-5';
-export const SIZE = { songs: 25, ask: 32, perArtist: 2, least: 15, listening: 150, searches: 38 };
+export const SIZE = { songs: 15, ask: 20, perArtist: 2, least: 10, listening: 150, searches: 30 };
 export const WORDS_MAX = 80;
 const BUSY = 'spotify:making';
 const TID = /^[A-Za-z0-9]{22}$/;

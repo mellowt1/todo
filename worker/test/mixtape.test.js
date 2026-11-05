@@ -99,7 +99,7 @@ test('matchTrack and settle: only new songs, each once, two per artist; a wrong 
   assert.deepEqual(out, [
     { artist: 'Artist 1', song: 'A New One' }, { artist: 'Real Band', song: 'Real Song' }, { artist: 'Real Band', song: 'Second' },
   ]);
-  assert.equal(settle(news(40), heard).length, 32); // a few more than 25 are searched, no more
+  assert.equal(settle(news(40), heard).length, 20); // a few more than 15 are searched, no more
 });
 
 test('titleFor and cleanWords: level, words cut at a word, the Dutch date', () => {
@@ -127,14 +127,14 @@ test('putFirst: the new one plays first; a full level lets the last made one go,
 });
 
 test('the prompt: all new, his recent listening read for taste', () => {
-  assert.match(SYSTEM, /Pick 32 songs that are NEW to him/);
+  assert.match(SYSTEM, /Pick 20 songs that are NEW to him/);
   assert.match(SYSTEM, /most recent first/);
   assert.match(SYSTEM, /None of the songs in his listening/);
   assert.match(SYSTEM, /really exist/);
   assert.doesNotMatch(SYSTEM, /number \(n\)/);
 });
 
-test('make: Claude picks 25 new ones, none he plays, a private playlist is made and plays first', async () => {
+test('make: Claude picks 15 new ones, none he plays, a private playlist is made and plays first', async () => {
   const e = env();
   await login(e);
   let asked = null;
@@ -145,8 +145,8 @@ test('make: Claude picks 25 new ones, none he plays, a private playlist is made 
       { artist: a.heard[0].artist, song: a.heard[0].song },  // one he plays: out before search
       { artist: 'Other Act', song: 'Deep Cut' },              // search finds someone else: out
       { artist: 'Artist 3', song: 'Other Name' },            // search lands on one he plays: out
-      { artist: 'Loose Act', song: 'Loose Song' },           // the 25th, found by the looser second search
-      ...news(23),
+      { artist: 'Loose Act', song: 'Loose Song' },           // the 15th, found by the looser second search
+      ...news(13),
     ];
     return { songs, usage: { input: 2000, output: 900, cacheRead: 0, cacheWrite: 400 } };
   });
@@ -158,17 +158,17 @@ test('make: Claude picks 25 new ones, none he plays, a private playlist is made 
   assert.equal(asked.heard.length, 21); // 20 top + the liked one; the podcast left out
   assert.equal(asked.heard[0].song, 'Song 6'); // recent plays come first
   assert.equal(r.body.title, 'Drained · rainy Sunday · 4 Nov');
-  assert.equal(r.body.songs, 25);
-  assert.equal(r.body.fresh, 25);
-  assert.ok(sp.searches <= 38, 'searches stay inside the Worker limit: ' + sp.searches);
+  assert.equal(r.body.songs, 15);
+  assert.equal(r.body.fresh, 15);
+  assert.ok(sp.searches <= 30, 'searches stay inside the Worker limit: ' + sp.searches);
   assert.deepEqual(sp.made.at(-1), { name: 'Drained · rainy Sunday · 4 Nov', public: false, description: 'Made by paul-hub for Drained: rainy Sunday.' });
   const uris = sp.items.at(-1);
-  assert.equal(uris.length, 25);
+  assert.equal(uris.length, 15);
   assert.equal(uris[0], 'spotify:track:' + id('new1'));
   assert.ok(uris.includes('spotify:track:' + id('loose')));
   const his = new Set(asked.heard.map((h) => h.uri));
   assert.ok(uris.every((u) => !his.has(u)), 'nothing he already plays');
-  assert.equal(new Set(uris).size, 25);
+  assert.equal(new Set(uris).size, 15);
   assert.equal(r.body.lists.drained[0].title, 'Drained · rainy Sunday · 4 Nov');
   assert.equal(r.body.lists.drained[0].made, true);
   assert.equal(r.body.uri, 'spotify:playlist:' + id('newlist'));
