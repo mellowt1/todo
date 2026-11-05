@@ -4109,7 +4109,7 @@
       const fresh = (d.lists[m.level] || []).find((p) => p.uri === d.uri);
       soundFx = { fresh: fresh && fresh.id };
       takeLists(d.lists);
-      say('Made ' + d.title + ': ' + d.songs + ' songs' + (d.fresh ? ', ' + d.fresh + ' new to you' : ''));
+      say('Made ' + d.title + ': ' + d.songs + (d.fresh === d.songs ? ' new songs' : ' songs' + (d.fresh ? ', ' + d.fresh + ' new to you' : '')));
       if (!$('sound').hidden) ($('soundBody').querySelector('.mu-row.fresh .mu-play') || $('soundClose')).focus({ preventScroll: true });
     } catch (e) {
       m.busy = false;

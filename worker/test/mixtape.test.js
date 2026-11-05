@@ -34,11 +34,14 @@ async function login(e, scope = SCOPES) {
 
 // His listening: 30 songs over the four reads, some twice.
 const TOP = Array.from({ length: 20 }, (_, i) => track(i + 1, 'Artist ' + (i % 7), 'Song ' + (i + 1)));
-const sp = { calls: [], made: [], items: [], createStatus: 201 };
+const sp = { calls: [], made: [], items: [], createStatus: 201, searches: 0 };
 const SEARCH = {
   'Real Band|Real Song': [{ id: id('new1'), name: 'Real Song - 2021 Remaster', artists: [{ name: 'Réal Band' }] }],
   'Other Act|Deep Cut': [{ id: id('wrong'), name: 'Deep Cut', artists: [{ name: 'Someone Else' }] }],
+  'Artist 3|Other Name': [TOP[3]], // search lands on a song he plays: left out
 };
+// n new songs by n/2 made-up artists (two each), all found by search
+const news = (n, from = 1) => Array.from({ length: n }, (_, i) => ({ artist: 'New Artist ' + Math.floor((from + i) / 2), song: 'Tune ' + (from + i) }));
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url));
   sp.calls.push(init.method || 'GET', u.pathname);
@@ -47,8 +50,11 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname === '/v1/me/tracks') return Response.json({ items: [{ item: track(90, 'Liked One', 'Fav') }, { track: { ...track(91, 'Pod', 'Ep'), type: 'episode' } }] });
   if (u.pathname === '/v1/search') {
     const q = u.searchParams.get('q');
+    sp.searches++;
     const m = q.match(/^track:(.*) artist:(.*)$/);
-    return Response.json({ tracks: { items: m ? SEARCH[m[2] + '|' + m[1]] || [] : [] } });
+    if (!m) return Response.json({ tracks: { items: q === 'Loose Act Loose Song' ? [{ id: id('loose'), name: 'Loose Song', artists: [{ name: 'Loose Act' }] }] : [] } });
+    if (/^New Artist/.test(m[2])) return Response.json({ tracks: { items: [{ id: id('n' + m[1]), name: m[1], artists: [{ name: m[2] }] }] } });
+    return Response.json({ tracks: { items: SEARCH[m[2] + '|' + m[1]] || [] } });
   }
   if (u.pathname === '/v1/me/playlists' && init.method === 'POST') {
     sp.made.push(JSON.parse(init.body));
@@ -75,19 +81,25 @@ test('listening: played most first, each song once, local files and podcasts lef
   assert.equal(heard[0].uri, 'spotify:track:' + id('t1'));
 });
 
-test('matchTrack and settle: by number, by name, the rest searched; a wrong artist is no match', () => {
+test('matchTrack and settle: only new songs, each once, two per artist; a wrong artist is no match', () => {
   assert.equal(matchTrack(SEARCH['Real Band|Real Song'], 'Real Band', 'Real Song'), 'spotify:track:' + id('new1'));
   assert.equal(matchTrack(SEARCH['Other Act|Deep Cut'], 'Other Act', 'Deep Cut'), null);
   assert.equal(matchTrack([{ id: id('f'), name: 'Song (feat. X)', artists: [{ name: 'Main' }] }], 'Main feat. X', 'Song'), 'spotify:track:' + id('f'));
   const heard = listening([{ items: TOP.slice(0, 5) }]);
   const out = settle([
-    { n: 2, artist: 'Artist 1', song: 'Song 2' },
-    { n: 2, artist: 'Artist 1', song: 'Song 2' },        // twice: once
-    { n: 0, artist: 'Artist 3', song: 'Song 4' },        // "new" but he plays it: by name
-    { n: 99, artist: 'Real Band', song: 'Real Song' },   // no such number: searched
-    { n: 0, artist: '', song: 'Nameless' },              // nothing to search
+    { artist: 'Artist 1', song: 'Song 2' },              // he plays it: out
+    { artist: 'artist 3', song: 'Song 4 (Live)' },       // he plays it, written a bit differently: out
+    { artist: 'Artist 1', song: 'A New One' },           // a new song by an artist he plays: in
+    { artist: 'Real Band', song: 'Real Song' },
+    { artist: 'Real Band', song: 'Real Song' },          // twice: once
+    { artist: 'Real Band', song: 'Second' },
+    { artist: 'Real Band feat. Guest', song: 'Third' },  // a third by the same artist: out
+    { artist: '', song: 'Nameless' },                    // nothing to search
   ], heard);
-  assert.deepEqual(out, [{ uri: heard[1].uri }, { uri: heard[3].uri }, { artist: 'Real Band', song: 'Real Song' }]);
+  assert.deepEqual(out, [
+    { artist: 'Artist 1', song: 'A New One' }, { artist: 'Real Band', song: 'Real Song' }, { artist: 'Real Band', song: 'Second' },
+  ]);
+  assert.equal(settle(news(40), heard).length, 32); // a few more than 25 are searched, no more
 });
 
 test('titleFor and cleanWords: level, words cut at a word, the Dutch date', () => {
@@ -114,33 +126,49 @@ test('putFirst: the new one plays first; a full level lets the last made one go,
   assert.equal(r.dropped, null);
 });
 
-test('the prompt: the counts and the rules Paul saw', () => {
-  assert.match(SYSTEM, /25 songs/);
-  assert.match(SYSTEM, /About 17 from his listening/);
-  assert.match(SYSTEM, /About 8 new to him/);
+test('the prompt: all new, his recent listening read for taste', () => {
+  assert.match(SYSTEM, /Pick 32 songs that are NEW to him/);
+  assert.match(SYSTEM, /most recent first/);
+  assert.match(SYSTEM, /None of the songs in his listening/);
   assert.match(SYSTEM, /really exist/);
+  assert.doesNotMatch(SYSTEM, /number \(n\)/);
 });
 
-test('make: Claude picks, the new ones are found, a private playlist is made and plays first', async () => {
+test('make: Claude picks 25 new ones, none he plays, a private playlist is made and plays first', async () => {
   const e = env();
   await login(e);
   let asked = null;
   _setPicker(async (_env, a) => {
     asked = a;
-    const mine = a.heard.slice(0, 12).map((h, i) => ({ n: i + 1, artist: h.artist, song: h.song }));
-    return { songs: [{ n: 0, artist: 'Real Band', song: 'Real Song' }, ...mine, { n: 0, artist: 'Other Act', song: 'Deep Cut' }], usage: { input: 2000, output: 900, cacheRead: 0, cacheWrite: 400 } };
+    const songs = [
+      { artist: 'Real Band', song: 'Real Song' },
+      { artist: a.heard[0].artist, song: a.heard[0].song },  // one he plays: out before search
+      { artist: 'Other Act', song: 'Deep Cut' },              // search finds someone else: out
+      { artist: 'Artist 3', song: 'Other Name' },            // search lands on one he plays: out
+      { artist: 'Loose Act', song: 'Loose Song' },           // the 25th, found by the looser second search
+      ...news(23),
+    ];
+    return { songs, usage: { input: 2000, output: 900, cacheRead: 0, cacheWrite: 400 } };
   });
+  sp.searches = 0;
   const r = await call(e, { level: 'drained', words: ' rainy  Sunday ' });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(asked.level, 'drained');
   assert.equal(asked.words, 'rainy Sunday');
   assert.equal(asked.heard.length, 21); // 20 top + the liked one; the podcast left out
+  assert.equal(asked.heard[0].song, 'Song 6'); // recent plays come first
   assert.equal(r.body.title, 'Drained · rainy Sunday · 4 Nov');
-  assert.equal(r.body.songs, 13);  // 12 of his + the one search found; Deep Cut was by someone else
-  assert.equal(r.body.fresh, 1);
+  assert.equal(r.body.songs, 25);
+  assert.equal(r.body.fresh, 25);
+  assert.ok(sp.searches <= 38, 'searches stay inside the Worker limit: ' + sp.searches);
   assert.deepEqual(sp.made.at(-1), { name: 'Drained · rainy Sunday · 4 Nov', public: false, description: 'Made by paul-hub for Drained: rainy Sunday.' });
-  assert.equal(sp.items.at(-1)[0], 'spotify:track:' + id('new1'));
-  assert.equal(sp.items.at(-1).length, 13);
+  const uris = sp.items.at(-1);
+  assert.equal(uris.length, 25);
+  assert.equal(uris[0], 'spotify:track:' + id('new1'));
+  assert.ok(uris.includes('spotify:track:' + id('loose')));
+  const his = new Set(asked.heard.map((h) => h.uri));
+  assert.ok(uris.every((u) => !his.has(u)), 'nothing he already plays');
+  assert.equal(new Set(uris).size, 25);
   assert.equal(r.body.lists.drained[0].title, 'Drained · rainy Sunday · 4 Nov');
   assert.equal(r.body.lists.drained[0].made, true);
   assert.equal(r.body.uri, 'spotify:playlist:' + id('newlist'));
@@ -153,7 +181,8 @@ test('make: Claude picks, the new ones are found, a private playlist is made and
 
 test('make: guards — level, an old login, one at a time, too few found, Claude down, Spotify says no', async () => {
   const e = env();
-  _setPicker(async (_env, a) => ({ songs: a.heard.slice(0, 15).map((h, i) => ({ n: i + 1, artist: h.artist, song: h.song })), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }));
+  const fine = async () => ({ songs: news(20), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } });
+  _setPicker(fine);
   assert.equal((await call(e, { level: 'sleepy' })).status, 400);
   let r = await call(e, { level: 'wired' });
   assert.equal(r.status, 409);
@@ -166,13 +195,14 @@ test('make: guards — level, an old login, one at a time, too few found, Claude
   await e.HUB_KV.put('spotify:making', '1');
   assert.equal((await call(e, { level: 'wired' })).status, 429);
   await e.HUB_KV.delete('spotify:making');
-  _setPicker(async () => ({ songs: [{ n: 1, artist: 'Artist 0', song: 'Song 1' }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }));
+  // only songs he already plays, plus a few new: too few
+  _setPicker(async (_env, a) => ({ songs: [...a.heard.slice(0, 15).map((h) => ({ artist: h.artist, song: h.song })), ...news(3)], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }));
   r = await call(e, { level: 'wired' });
   assert.equal(r.status, 422);
-  assert.match(r.body.error, /Only 1 songs/);
+  assert.match(r.body.error, /Only 3 songs/);
   _setPicker(async () => { throw Object.assign(new Error('overloaded'), { status: 529 }); });
   assert.equal((await call(e, { level: 'wired' })).status, 502);
-  _setPicker(async (_env, a) => ({ songs: a.heard.slice(0, 15).map((h, i) => ({ n: i + 1, artist: h.artist, song: h.song })), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }));
+  _setPicker(fine);
   sp.createStatus = 403;
   r = await call(e, { level: 'wired' });
   assert.equal(r.status, 502);

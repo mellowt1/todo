@@ -1,16 +1,18 @@
 /* Make a new one (Paul, 2026-11-04: "Create Spotify playlists for my mood"): the soundtrack sheet in
  * To-do asks the hub for a new playlist for a level, with a few words of mood if he likes. Spotify
- * has no suggestions for small apps any more, so Claude picks: about 17 songs from what he plays a
- * lot (top tracks, liked songs, recent plays, numbered, so they come back exactly) and about 8 new
- * ones that fit, found with Spotify search; a song search cannot find is left out. The playlist is
- * private, named "Drained · rainy Sunday · 4 Nov", and takes the level's first place (Play starts it).
+ * has no suggestions for small apps any more, so Claude picks. Since 2026-11-05 (Paul: "just 25 new
+ * songs that match the vibe, but look at what I have been listening to recently") every song is new
+ * to him: his listening (recent plays first, then this month's top, liked songs, the last months'
+ * top) only shows Claude his taste. Claude names a few more than 25, each is found with Spotify
+ * search, and anything he already plays or search cannot find is left out. The playlist is private,
+ * named "Drained · rainy Sunday · 4 Nov", and takes the level's first place (Play starts it).
  *
  *   POST /api/spotify/:code/make   <- { level, words? }
- *                                  -> { title, songs, fresh, url, uri, lists, dropped }
+ *                                  -> { title, songs, fresh (= songs, all new), url, uri, lists, dropped }
  *                                   | { error, reconnect? }  409 connect again, 429 one is being made,
  *                                     422 too few songs found, 502 Claude or Spotify
  *
- * Paul's answers, 2026-11-04: level and words both; mix of his and new; only on a tap; Opus 5.5.
+ * Paul's answers, 2026-11-04: level and words both; only on a tap; Opus 5.5. 2026-11-05: all new.
  * What he listens to goes to Claude and back and is not kept; the words go into the title. KV keeps
  * the token count (mixtape:usage:YYYY-MM). Nothing is logged but counts. */
 
@@ -22,7 +24,7 @@ import { accessToken, canMake, configured, API } from './spotify.js';
 import { addMade } from './soundtrack.js';
 
 export const MIX_MODEL = 'claude-opus-5-5';
-export const SIZE = { songs: 25, mine: 17, fresh: 8, least: 10, listening: 150 };
+export const SIZE = { songs: 25, ask: 32, perArtist: 2, least: 15, listening: 150, searches: 38 };
 export const WORDS_MAX = 80;
 const BUSY = 'spotify:making';
 const TID = /^[A-Za-z0-9]{22}$/;
@@ -31,7 +33,6 @@ const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
 
 const Mix = z.object({
   songs: z.array(z.object({
-    n: z.number().int(),
     artist: z.string(),
     song: z.string(),
   })),
@@ -40,11 +41,12 @@ const Mix = z.object({
 /* Frozen per deploy, cached. The level, the words and his listening go in the user message. */
 export const SYSTEM = [
   'You make Spotify playlists for Paul that fit his energy and mood.',
-  'He gives an energy level: Wired (lots of energy, restless), Normal, or Drained (low energy, tired). Sometimes he adds a few words about his mood; let them steer the picks.',
-  `Make a playlist of ${SIZE.songs} songs that fits that energy:`,
-  `- About ${SIZE.mine} from his listening below. Pick them by their number (n) and copy artist and song as given.`,
-  `- About ${SIZE.fresh} new to him that fit his taste and the mood. Give these n = 0. Only songs that really exist, by real artists, with the title as it is on Spotify. None that are in his listening.`,
-  '- At most 2 songs by the same artist.',
+  'He gives an energy level: Wired (lots of energy, restless), Normal, or Drained (low energy, tired). Sometimes he adds a few words about his mood; they are the vibe he wants, so let them lead the picks.',
+  'Below is what he has been listening to, most recent first. Read it to understand his taste right now: the genres, the eras, the sound, the artists. The top of the list counts most.',
+  `Pick ${SIZE.ask} songs that are NEW to him and match the vibe he asks for, in a way that fits his taste:`,
+  '- None of the songs in his listening. Other songs by artists he plays are fine, but mostly choose artists close to his taste that he does not play yet.',
+  '- Only songs that really exist, by real artists, with the artist and title exactly as they are on Spotify.',
+  `- At most ${SIZE.perArtist} songs by the same artist.`,
   '- Order the songs so the energy flows from one to the next.',
   'Answer with the songs only, in playing order.',
 ].join('\n');
@@ -95,22 +97,27 @@ export function matchTrack(items, artist, song) {
   return null;
 }
 
-/* Pure: Claude's picks -> { mine: [uri by number], fresh: [{ artist, song }] } in playing order,
- * each song once; a number that is not on his list, or a "new" one he already plays, is read as
- * what it says by name. */
+const key = (artist, song) => norm(String(artist).split(/,|&| feat\.? | ft\.? /i)[0]) + '|' + norm(song);
+
+/* Pure: Claude's picks -> [{ artist, song }] to search, in playing order: each song once, none he
+ * already plays (by name), at most SIZE.perArtist by one artist, a nameless one left out. */
 export function settle(songs, heard) {
   const order = [];
-  const used = new Set();
-  const byName = new Map(heard.map((h) => [norm(h.artist.split(',')[0]) + '|' + norm(h.song), h.uri]));
+  const known = new Set(heard.map((h) => key(h.artist, h.song)));
+  const per = new Map();
   for (const s of songs || []) {
-    const artist = String(s.artist || '').trim().slice(0, 100);
-    const song = String(s.song || '').trim().slice(0, 150);
-    let uri = Number.isInteger(s.n) && s.n >= 1 && s.n <= heard.length ? heard[s.n - 1].uri : null;
-    if (!uri && artist && song) uri = byName.get(norm(artist.split(',')[0]) + '|' + norm(song)) || null;
-    if (uri) { if (!used.has(uri)) { used.add(uri); order.push({ uri }); } continue; }
-    if (artist && song) order.push({ artist, song });
+    const artist = String((s && s.artist) || '').trim().slice(0, 100);
+    const song = String((s && s.song) || '').trim().slice(0, 150);
+    if (!artist || !song) continue;
+    const k = key(artist, song);
+    if (known.has(k)) continue;
+    known.add(k);
+    const a = k.split('|')[0];
+    if ((per.get(a) || 0) >= SIZE.perArtist) continue;
+    per.set(a, (per.get(a) || 0) + 1);
+    order.push({ artist, song });
   }
-  return order.slice(0, SIZE.songs + 5);
+  return order.slice(0, SIZE.ask);
 }
 
 /* ---------- Spotify ---------- */
@@ -124,33 +131,42 @@ async function sget(token, path) {
   }
 }
 
+/* Most recent first: what he just played, this month's top, liked songs (newest saved first),
+ * then the last six months' top. */
 async function heardBy(token) {
   const pages = await Promise.all([
-    sget(token, '/me/top/tracks?time_range=short_term&limit=50'),
     sget(token, '/me/player/recently-played?limit=50'),
+    sget(token, '/me/top/tracks?time_range=short_term&limit=50'),
     sget(token, '/me/tracks?limit=50'),
     sget(token, '/me/top/tracks?time_range=medium_term&limit=50'),
   ]);
   return listening(pages);
 }
 
-async function find(token, artist, song) {
-  const q1 = await sget(token, '/search?type=track&limit=5&q=' + encodeURIComponent('track:' + song + ' artist:' + artist));
-  const hit = matchTrack(q1 && q1.tracks && q1.tracks.items, artist, song);
-  if (hit) return hit;
-  const q2 = await sget(token, '/search?type=track&limit=5&q=' + encodeURIComponent(artist + ' ' + song));
-  return matchTrack(q2 && q2.tracks && q2.tracks.items, artist, song);
-}
+const search = async (token, q, artist, song) => {
+  const d = await sget(token, '/search?type=track&limit=5&q=' + encodeURIComponent(q));
+  return matchTrack(d && d.tracks && d.tracks.items, artist, song);
+};
 
-/* The new ones, four searches at a time, kept in Claude's order. */
-async function findAll(token, order) {
-  const out = order.slice();
-  const todo = out.map((s, i) => (s.uri ? -1 : i)).filter((i) => i >= 0);
-  for (let k = 0; k < todo.length; k += 4) {
-    await Promise.all(todo.slice(k, k + 4).map(async (i) => { out[i] = { uri: await find(token, out[i].artist, out[i].song), fresh: true }; }));
-  }
+/* Each pick searched, five at a time, in Claude's order; a miss gets a looser second search while
+ * searches are left (SIZE.searches keeps the whole make inside the Worker's 50 calls). Songs he
+ * already plays (by id) and doubles are left out; stops once SIZE.songs are found. */
+async function findAll(token, order, heard) {
+  const known = new Set(heard.map((h) => h.uri));
+  let left = SIZE.searches;
+  const hits = new Array(order.length).fill(null);
+  const count = () => new Set(hits.filter((u) => u && !known.has(u))).size;
+  const pass = async (idx, q) => {
+    for (let k = 0; k < idx.length && left > 0 && count() < SIZE.songs; k += 5) {
+      const batch = idx.slice(k, k + 5).slice(0, left);
+      left -= batch.length;
+      await Promise.all(batch.map(async (i) => { hits[i] = await search(token, q(order[i]), order[i].artist, order[i].song); }));
+    }
+  };
+  await pass(order.map((_, i) => i), (s) => 'track:' + s.song + ' artist:' + s.artist);
+  await pass(hits.map((u, i) => (u ? -1 : i)).filter((i) => i >= 0), (s) => s.artist + ' ' + s.song);
   const seen = new Set();
-  return out.filter((s) => s.uri && !seen.has(s.uri) && seen.add(s.uri)).slice(0, SIZE.songs);
+  return hits.filter((u) => u && !known.has(u) && !seen.has(u) && seen.add(u)).slice(0, SIZE.songs).map((uri) => ({ uri }));
 }
 
 async function create(token, title, level, words, uris) {
@@ -171,12 +187,12 @@ async function create(token, title, level, words, uris) {
 /* ---------- Claude ---------- */
 
 export async function pickSongs(env, { level, words, heard }) {
-  const lines = heard.map((h, i) => (i + 1) + '. ' + h.artist + ' – ' + h.song).join('\n');
+  const lines = heard.map((h) => h.artist + ' – ' + h.song).join('\n');
   const res = await anthropic(env).messages.parse({
     model: MIX_MODEL,
     max_tokens: 4000,
     system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: `Energy: ${LNAME[level]}\n${words ? 'His words: ' + words + '\n' : ''}\nHis listening (n. artist – song):\n${lines}` }],
+    messages: [{ role: 'user', content: `Energy: ${LNAME[level]}\n${words ? 'His words: ' + words + '\n' : ''}\nWhat he has been listening to, most recent first (artist – song):\n${lines}` }],
     output_config: { effort: 'medium', format: zodOutputFormat(Mix) },
   });
   const usage = {
@@ -209,9 +225,9 @@ export async function makeMix(env, level, words, now = Date.now()) {
   }
   if (got.usage) await bumpUsage(env, dayOf(now).slice(0, 7), got.usage, 'mixtape');
   if (!got.songs) return { error: 'Claude did not answer. Try again.', status: 502 };
-  const songs = await findAll(token, settle(got.songs, heard));
-  const fresh = songs.filter((s) => s.fresh).length;
-  console.log('mixtape', level, 'asked', got.songs.length, 'kept', songs.length, 'fresh', fresh);
+  const songs = await findAll(token, settle(got.songs, heard), heard);
+  const fresh = songs.length; // every one is new to him
+  console.log('mixtape', level, 'asked', got.songs.length, 'kept', songs.length);
   if (songs.length < SIZE.least) return { error: 'Only ' + songs.length + ' songs were found on Spotify. Try again.', status: 422 };
   const title = titleFor(level, words, now);
   const made = await create(token, title, level, words, songs.map((s) => s.uri));
