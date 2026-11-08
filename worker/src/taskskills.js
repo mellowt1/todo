@@ -44,7 +44,7 @@ export async function askSkills(env, tasks) {
     messages: [{ role: 'user', content: JSON.stringify(tasks.map((t) => ({ id: t.id, text: t.text.replace(/\s*·\s*\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/, '') }))) }],
     output_config: { effort: 'low', format: zodOutputFormat(Answer) },
   });
-  const usage = { input: res.usage?.input_tokens ?? 0, output: res.usage?.output_tokens ?? 0, cacheRead: 0, cacheWrite: 0 };
+  const usage = { input: res.usage?.input_tokens ?? 0, output: res.usage?.output_tokens ?? 0, cacheRead: res.usage?.cache_read_input_tokens ?? 0, cacheWrite: res.usage?.cache_creation_input_tokens ?? 0, model: res.model };
   return { tasks: res.stop_reason === 'refusal' || !res.parsed_output ? [] : res.parsed_output.tasks, usage };
 }
 
@@ -80,7 +80,7 @@ export async function taskSkillsOnce(env, now = Date.now()) {
     for (let i = 0; i < todo.length; i += BATCH) {
       const got = await asker(env, todo.slice(i, i + BATCH));
       answers.push(...got.tasks);
-      if (got.usage) await bumpUsage(env, dayOf(now).slice(0, 7), got.usage, 'tidy').catch(() => {});
+      if (got.usage) await bumpUsage(env, dayOf(now).slice(0, 7), got.usage, 'taskskills').catch(() => {});
     }
     // Read again just before writing, so a task changed meanwhile keeps its change.
     const fresh = (await (await stub.fetch('https://list/export')).json()).items || {};

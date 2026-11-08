@@ -138,7 +138,7 @@ export async function readItem(env, { files, text, today }) {
     input: res.usage?.input_tokens ?? 0,
     output: res.usage?.output_tokens ?? 0,
     cacheRead: res.usage?.cache_read_input_tokens ?? 0,
-    cacheWrite: res.usage?.cache_creation_input_tokens ?? 0,
+    cacheWrite: res.usage?.cache_creation_input_tokens ?? 0, model: res.model,
   };
   if (res.stop_reason === 'refusal') {
     return { error: 'refused', detail: res.stop_details?.category || null, usage };
@@ -220,8 +220,20 @@ export async function bumpUsage(env, month, u, prefix = 'intake') {
   const cur = (await env.HUB_KV.get(key, 'json')) || { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   cur.calls += 1;
   cur.input += u.input; cur.output += u.output; cur.cacheRead += u.cacheRead; cur.cacheWrite += u.cacheWrite;
+  if (u.model) { // per model since 2026-11-08 (src/spend.js prices them); older counts have none
+    cur.m = cur.m || {};
+    const b = cur.m[u.model] || (cur.m[u.model] = { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    b.calls += 1; b.input += u.input; b.output += u.output; b.cacheRead += u.cacheRead; b.cacheWrite += u.cacheWrite;
+  }
   await env.HUB_KV.put(key, JSON.stringify(cur));
   return cur;
+}
+
+/* Counts one answer under its feature, never failing the caller. */
+export async function trackRes(env, prefix, res, now = Date.now()) {
+  if (!res || !res.usage) return;
+  const u = { input: res.usage.input_tokens ?? 0, output: res.usage.output_tokens ?? 0, cacheRead: res.usage.cache_read_input_tokens ?? 0, cacheWrite: res.usage.cache_creation_input_tokens ?? 0, model: res.model };
+  await bumpUsage(env, dayOf(now).slice(0, 7), u, prefix).catch(() => {});
 }
 
 /* The route. `list` and `json` come from worker.js so this module never reaches

@@ -173,7 +173,7 @@ export async function guessLevels(env, tasks) {
   });
   const usage = {
     input: res.usage?.input_tokens ?? 0, output: res.usage?.output_tokens ?? 0,
-    cacheRead: res.usage?.cache_read_input_tokens ?? 0, cacheWrite: res.usage?.cache_creation_input_tokens ?? 0,
+    cacheRead: res.usage?.cache_read_input_tokens ?? 0, cacheWrite: res.usage?.cache_creation_input_tokens ?? 0, model: res.model,
   };
   return { out: res.stop_reason === 'refusal' ? null : res.parsed_output, usage };
 }

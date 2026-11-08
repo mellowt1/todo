@@ -142,6 +142,10 @@
  * Opus 5.5, in D1 `oracle`, on the Sunday reset and in Morning until answered or put aside.
  *   GET /api/oracle/:code[/list]     POST /api/oracle/:code/(answer | aside)
  *
+ * Spend (src/spend.js; the to-do's code): what Claude cost this month and last, per feature, priced
+ * per model from the usage counters; also data.spend on Morning.
+ *   GET /api/spend/:code
+ *
  * Constellation (src/sky.js; the to-do's code): the apps as stars, the events between them as lines and
  * pulses, from the log the hub already keeps (types, sources, times and reactions only), drawn by Morning.
  *   GET /api/sky/:code
@@ -229,6 +233,7 @@ import { handleMake } from './mixtape.js';
 import { handleRestless, handleRestlessDay } from './restless.js';
 import { handleArchive, archiveCron } from './archive.js';
 import { handleOracle, oracleCron } from './oracle.js';
+import { handleSpend, spendForMorning } from './spend.js';
 import { handleSky, markLife } from './sky.js';
 import { handleNetwork, networkCron } from './network.js';
 import { handleSkills, skillsCron } from './skills.js';
@@ -427,7 +432,7 @@ async function handleAdmin(request, env, rest) {
 const MODULES = {
   todo: handleTodo,
   morning: async (request, env, rest) => {
-    const res = await handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning, waiting: waitingForMorning, mail: mailForMorning }, routes: { week: handleWeek, lesson: handleLesson } });
+    const res = await handleMorning(request, env, rest, json, Date.now(), { blocks: { week: weekForMorning, hiscores: hiscoresForMorning, lift: liftForMorning, waiting: waitingForMorning, mail: mailForMorning, spend: spendForMorning }, routes: { week: handleWeek, lesson: handleLesson } });
     // Morning was opened: a sign of life for its star in the constellation (src/sky.js).
     if (request.method === 'GET' && rest.length === 1 && res.status === 200) await markLife(env, 'morning').catch(() => {});
     return res;
@@ -468,6 +473,7 @@ const MODULES = {
   restless: (request, env, rest) => handleRestless(request, env, rest, json),
   archive: (request, env, rest) => handleArchive(request, env, rest, json),
   oracle: (request, env, rest) => handleOracle(request, env, rest, json),
+  spend: (request, env, rest) => handleSpend(request, env, rest, json),
   sky: (request, env, rest) => handleSky(request, env, rest, json),
   network: (request, env, rest) => handleNetwork(request, env, rest, json),
   skills: (request, env, rest) => handleSkills(request, env, rest, json),

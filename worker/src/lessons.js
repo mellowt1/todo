@@ -22,7 +22,7 @@
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { CODE, safeEqual, ID } from './todo.js';
-import { anthropic, MODEL, randomId } from './intake.js';
+import { anthropic, MODEL, trackRes, randomId } from './intake.js';
 import { local, addDays, zoned } from './morning.js';
 import { maskSecrets, noDashes } from './mask.js';
 
@@ -169,6 +169,7 @@ export async function askClaude(env, facts) {
     fallbacks: 'default',
     betas: ['server-side-fallback-2026-07-01'],
   });
+  await trackRes(env, 'lessons', res);
   if (res.stop_reason === 'refusal' || !res.parsed_output) return null;
   return res.parsed_output;
 }

@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { JOBS, lastBeats } from './health.js';
 import { local, daysBetween, PROJECTS_KEY, REPOS_KEY, cleanRepos } from './morning.js';
 import { listEvents } from './events.js';
-import { anthropic, MODEL } from './intake.js';
+import { anthropic, MODEL, trackRes } from './intake.js';
 
 export const STATUS_KEY = 'hub:status';
 export const SUMMARY_AT_KEY = 'hub:status:summaryAt';
@@ -137,6 +137,7 @@ export async function writeSummary(env, facts) {
       fallbacks: 'default',
       betas: ['server-side-fallback-2026-07-01'],
     });
+    await trackRes(env, 'status', res);
     if (res.stop_reason === 'refusal' || res.stop_reason === 'max_tokens' || !res.parsed_output) return null;
     const text = String(res.parsed_output.summary || '').replace(/\s+/g, ' ').trim().slice(0, MAX_SUMMARY);
     return text || null;

@@ -193,7 +193,7 @@ export function gapsFrom(roles, gapRows, steps) {
 
 const usageOf = (res) => ({
   input: res.usage?.input_tokens ?? 0, output: res.usage?.output_tokens ?? 0,
-  cacheRead: res.usage?.cache_read_input_tokens ?? 0, cacheWrite: res.usage?.cache_creation_input_tokens ?? 0,
+  cacheRead: res.usage?.cache_read_input_tokens ?? 0, cacheWrite: res.usage?.cache_creation_input_tokens ?? 0, model: res.model,
 });
 async function call(env, system, content, schema, effort) {
   const res = await anthropic(env).beta.messages.parse({

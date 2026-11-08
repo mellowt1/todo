@@ -38,7 +38,7 @@ import { readConfig } from './dinner.js';
 import { maskSecrets } from './mask.js';
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { anthropic, MODEL } from './intake.js';
+import { anthropic, MODEL, trackRes } from './intake.js';
 import { noDashes } from './mask.js';
 import { mirrorFor } from './mirror.js';
 import { lessonsFor } from './lessons.js';
@@ -438,6 +438,7 @@ export async function writeParagraph(env, facts) {
     fallbacks: 'default',
     betas: ['server-side-fallback-2026-07-01'],
   });
+  await trackRes(env, 'week', res);
   if (res.stop_reason === 'refusal' || !res.parsed_output) return null;
   return String(res.parsed_output.paragraph || '') || null;
 }

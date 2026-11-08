@@ -34,7 +34,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { local, zoned, addDays, eventSpan, CAL_KEY, ESPN_HOSTS, ESPN_RESULTS, espnMatch } from './morning.js';
 import { kitchen } from './kitchen-store.js';
 import { readConfig } from './dinner.js';
-import { anthropic, MODEL } from './intake.js';
+import { anthropic, MODEL, trackRes } from './intake.js';
 import { noDashes } from './mask.js';
 
 const DAY = 24 * 3600 * 1000;
@@ -410,6 +410,7 @@ export async function askClaude(env, facts) {
     fallbacks: 'default',
     betas: ['server-side-fallback-2026-07-01'],
   });
+  await trackRes(env, 'mirror', res);
   if (res.stop_reason === 'refusal' || !res.parsed_output) return null;
   return res.parsed_output;
 }

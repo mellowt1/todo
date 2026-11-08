@@ -86,7 +86,7 @@ export async function askClaude(env, summary) {
   });
   const usage = {
     input: res.usage?.input_tokens ?? 0, output: res.usage?.output_tokens ?? 0,
-    cacheRead: res.usage?.cache_read_input_tokens ?? 0, cacheWrite: res.usage?.cache_creation_input_tokens ?? 0,
+    cacheRead: res.usage?.cache_read_input_tokens ?? 0, cacheWrite: res.usage?.cache_creation_input_tokens ?? 0, model: res.model,
   };
   if (res.stop_reason === 'refusal' || !res.parsed_output) return { question: null, usage };
   return { question: String(res.parsed_output.question || '').trim() || null, usage };
