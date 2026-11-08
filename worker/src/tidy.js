@@ -25,11 +25,16 @@
  * src/lessons.js recentFor) go into each call as examples, so the next similar line lands right
  * without waiting for the Sunday rules. Still one Haiku call per line.
  *
- *   -> { text, changed, kind, energy, place, appt, skill }   place null: leave it where it is
+ *   -> { text, changed, kind, energy, place, appt, skill, repeat? }   place null: leave it where it is
  *
  * The skill (Paul, 2026-11-04: "not every task is woodcutting, it can be a task plus job
  * application"): the OSRS skill the task trains besides Woodcutting (TASK_SKILLS, src/hiscores.js
- * pays it on the tick), or null for an ordinary task. The same call; SKILL_LINES says which is which. */
+ * pays it on the tick), or null for an ordinary task. The same call; SKILL_LINES says which is which.
+ *
+ * Repeats in words (weekly fix 2026-11-08, after Paul edited "Uren sturen werk" into "Uren sturen
+ * werk every week"): "every week", "elke 2 weken", "cada mes" and the like make it a repeat
+ * (repeatOf, no extra call). The words leave the text, a date is added when there is none (today,
+ * as the edit sheet's Repeat does), and the answer carries repeat "week" | "2weeks" | "month". */
 
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
@@ -151,6 +156,30 @@ export function toText(out, typed, today) {
   return (cleanText(name.slice(0, MAX_TEXT - tail.length) + tail) || typed);
 }
 
+/* Pure: the repeat a line asks for in words, or null. Only "every …" forms (English, Dutch,
+ * Spanish): a bare "weekly report" is a name, not a schedule. Longest first. */
+const REPEAT_WORDS = [
+  ['2weeks', /\b(?:every (?:2|two|other) weeks?|every other week|om de (?:2 |twee )?week|(?:elke|iedere) (?:2|twee) weken|cada (?:2|dos) semanas)\b/i],
+  ['week', /\b(?:every week|each week|(?:elke|iedere) week|cada semana|todas las semanas)\b/i],
+  ['month', /\b(?:every month|each month|(?:elke|iedere) maand|cada mes|todos los meses)\b/i],
+];
+export function repeatOf(line) {
+  for (const [every, re] of REPEAT_WORDS) if (re.test(line || '')) return every;
+  return null;
+}
+
+/* Pure: the tidy text with the repeat words taken out, dated today when it has no date yet. */
+export function withRepeat(text, today) {
+  const due = text.match(DUE_END);
+  let name = due ? text.slice(0, due.index) : text;
+  for (const [, re] of REPEAT_WORDS) name = name.replace(new RegExp(re.source, 'gi'), ' ');
+  name = (cleanText(name) || '').replace(/[\s,;]+$/, '');
+  if (!name) return text; // the words were the whole task: leave it be
+  name = name.charAt(0).toUpperCase() + name.slice(1);
+  const tail = due ? due[0].trim() : '· ' + today;
+  return name.slice(0, MAX_TEXT - tail.length - 1) + ' ' + tail;
+}
+
 /* Pure: Claude's place and appointment -> where the app puts a new task (null: where it is).
  * Due today or before is Today (the hub would move it there anyway, src/due.js). A lane wins over
  * a later date, except Build and Fun for an appointment: a later date is Soon, and the hub brings
@@ -189,10 +218,12 @@ export async function handleTidy(request, env, rest, json, now = Date.now()) {
   if (!got.out) return json({ text: typed, changed: false }, request);
   const kind = KINDS.includes(got.out.kind) ? got.out.kind : 'task';
   if (kind !== 'task') return json({ text: typed, changed: false, kind }, request); // the app hands it to Desk as typed
-  const text = toText(got.out, typed, local(now).date);
+  const repeat = repeatOf(typed);
+  const tidied = toText(got.out, typed, local(now).date);
+  const text = repeat ? withRepeat(tidied, local(now).date) : tidied;
   // A guess only: the app stores it as energyGuess and Paul confirms it (Energy dial, src/energy.js).
   const energy = ['wired', 'normal', 'drained'].includes(got.out.energy) ? got.out.energy : null;
   const due = (text.match(DUE_END) || [])[1] || null;
   const skill = TASK_SKILLS.includes(got.out.skill) ? got.out.skill : null;
-  return json({ text, changed: text !== typed, kind, energy, place: toPlace(got.out, due, local(now).date), appt: got.out.appointment === true, skill }, request);
+  return json({ text, changed: text !== typed, kind, energy, place: toPlace(got.out, due, local(now).date), appt: got.out.appointment === true, skill, ...(repeat ? { repeat } : null) }, request);
 }
