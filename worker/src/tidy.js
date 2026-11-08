@@ -23,7 +23,7 @@
  * An appointment with no date stays in Today, on top, labelled "No date yet", and Day lists it
  * until a date is added (src/dayplan.js). Paul's recent corrections of these answers (D1 feedback,
  * src/lessons.js recentFor) go into each call as examples, so the next similar line lands right
- * without waiting for the Sunday rules. Still one Haiku call per line.
+ * without waiting for the Sunday rules. Still one call per line (Sonnet 5.5 since 2026-11-08).
  *
  *   -> { text, changed, kind, energy, place, appt, skill }   place null: leave it where it is
  *
@@ -37,7 +37,8 @@ import { z } from 'zod';
 import { CODE, safeEqual, MAX_TEXT, cleanText, LANES, TASK_SKILLS } from './todo.js';
 import { anthropic, bumpUsage, dayOf } from './intake.js';
 
-export const TIDY_MODEL = 'claude-haiku-5-5';
+export const TIDY_MODEL = 'claude-haiku-5-5'; // also words a letter's next step (letters.js) and back-fills skills (taskskills.js)
+export const TIDY_LINE_MODEL = 'claude-sonnet-5-5'; // reads each typed line
 import { local, addDays } from './morning.js';
 import { noDashes } from './mask.js';
 import { keptFor, lessonsText, recentFor, examplesText } from './lessons.js';
@@ -110,18 +111,22 @@ export const SYSTEM = [
 
 export async function tidyLine(env, text, now, examples = []) {
   const l = local(now);
-  // Haiku (Paul chose it for cost, 2026-10-17): a one-line tidy needs no more. Haiku has no
-  // server-side refusal fallback; a refusal just leaves the task as typed.
+  // Sonnet 5.5 (Paul, 2026-11-08, after a $5 first month): on 53 real lines it kept the date on
+  // timed lines Haiku dropped, put "Name:" tasks in Others and gave fewer random skills; about
+  // 0.15 ct a line against Haiku's 0.01. A refusal falls back server side; one that still
+  // refuses leaves the task as typed.
   const rules = lessonsText(await keptFor(env, 'tidy')); // Paul's kept rules, src/lessons.js
-  const res = await anthropic(env).messages.parse({
-    model: TIDY_MODEL,
+  const res = await anthropic(env).beta.messages.parse({
+    model: TIDY_LINE_MODEL,
     max_tokens: 2000,
-    // Cached (Haiku 5.5 caches from 512 tokens): lines typed one after another read it at a tenth
-    // of the price, which keeps the longer prompt (places, appointments) near the old cost.
+    // Cached (Sonnet 5.5 caches from 512 tokens): lines typed one after another read it at a
+    // tenth of the price.
     system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }, ...(rules ? [{ type: 'text', text: rules }] : [])],
     // His recent corrections go with the line, not in the frozen system prompt: a few hundred tokens.
     messages: [{ role: 'user', content: (examples.length ? examplesText(examples) + '\n\n' : '') + `Today is ${WEEKDAY[l.weekday]} ${l.date}.\nThe line: ${text}` }],
     output_config: { effort: 'low', format: zodOutputFormat(Tidy) },
+    fallbacks: 'default',
+    betas: ['server-side-fallback-2026-07-01'],
   });
   const usage = {
     input: res.usage?.input_tokens ?? 0,
