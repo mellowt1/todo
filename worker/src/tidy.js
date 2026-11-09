@@ -168,13 +168,14 @@ export function repeatOf(line) {
   return null;
 }
 
-/* Pure: the tidy text with the repeat words taken out, dated today when it has no date yet. */
+/* Pure: the tidy text with the repeat words taken out, dated today when it has no date yet.
+ * Null when the words were the whole task: no task left to repeat, so no repeat. */
 export function withRepeat(text, today) {
   const due = text.match(DUE_END);
   let name = due ? text.slice(0, due.index) : text;
   for (const [, re] of REPEAT_WORDS) name = name.replace(new RegExp(re.source, 'gi'), ' ');
   name = (cleanText(name) || '').replace(/[\s,;]+$/, '');
-  if (!name) return text; // the words were the whole task: leave it be
+  if (!name) return null;
   name = name.charAt(0).toUpperCase() + name.slice(1);
   const tail = due ? due[0].trim() : '· ' + today;
   return name.slice(0, MAX_TEXT - tail.length - 1) + ' ' + tail;
@@ -218,9 +219,10 @@ export async function handleTidy(request, env, rest, json, now = Date.now()) {
   if (!got.out) return json({ text: typed, changed: false }, request);
   const kind = KINDS.includes(got.out.kind) ? got.out.kind : 'task';
   if (kind !== 'task') return json({ text: typed, changed: false, kind }, request); // the app hands it to Desk as typed
-  const repeat = repeatOf(typed);
   const tidied = toText(got.out, typed, local(now).date);
-  const text = repeat ? withRepeat(tidied, local(now).date) : tidied;
+  const repeated = repeatOf(typed) ? withRepeat(tidied, local(now).date) : null;
+  const repeat = repeated ? repeatOf(typed) : null; // only the words, nothing to repeat: none
+  const text = repeated || tidied;
   // A guess only: the app stores it as energyGuess and Paul confirms it (Energy dial, src/energy.js).
   const energy = ['wired', 'normal', 'drained'].includes(got.out.energy) ? got.out.energy : null;
   const due = (text.match(DUE_END) || [])[1] || null;

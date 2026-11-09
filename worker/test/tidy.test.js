@@ -131,7 +131,15 @@ test('withRepeat: the words leave the text, a kept date and time stay, no date g
   assert.equal(withRepeat('Uren sturen werk every week', '2026-11-08'), 'Uren sturen werk · 2026-11-08');
   assert.equal(withRepeat('Every month pay rent · 2026-12-01 09:00', '2026-11-08'), 'Pay rent · 2026-12-01 09:00');
   assert.equal(withRepeat('Call mum, elke week', '2026-11-08'), 'Call mum · 2026-11-08');
-  assert.equal(withRepeat('every week', '2026-11-08'), 'every week', 'nothing left: as it was');
+  assert.equal(withRepeat('every week', '2026-11-08'), null, 'nothing left: no repeat');
+});
+
+test('the route: a line that is only "every week" gets no repeat', async () => {
+  const e = env();
+  _setTidier(async () => ({ out: { name: 'Every week', due: null, time: null, kind: 'task', energy: 'normal', place: 'keep', appointment: false, skill: 'none' }, usage: null }));
+  const r = await (await post(e, `tidy/${CODE}`, { text: 'every week' })).json();
+  assert.equal('repeat' in r, false);
+  assert.equal(r.text, 'Every week');
 });
 
 test('the route: "every week" comes back as a repeat with a date; no words, no repeat field', async () => {
