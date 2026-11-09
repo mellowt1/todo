@@ -425,17 +425,19 @@
       const section = to || it.section;
       // The skill: Tidy's pick for a task that has none yet; one Paul picked is never replaced.
       const skill = it.skill ? it.skill : TASK_SKILLS.includes(d.skill) ? d.skill : null;
+      // "every week" in the words (2026-11-08): a repeat, unless it already has one.
+      const rep = !it.repeat && ['week', '2weeks', 'month'].includes(d.repeat) ? { repeat: { every: d.repeat, until: null } } : null;
       // What Tidy gave, for the lessons: its text only when it changed the words (an edit after
       // that corrects Tidy), its place and flag always (a move after that corrects them too).
       if (!edit || memo[id] || text !== it.text) rememberTidy(id, Object.assign({}, edit ? memo[id] : null, { typed: (edit && memo[id] && memo[id].typed) || typed, text: text !== it.text ? text : null, section, appt, skill }));
-      const changes = Object.assign({}, guess, text !== it.text ? { text } : null, to ? { section: to, pos: now() } : null, appt !== was ? { appt: appt || null } : null, skill !== (it.skill || null) ? { skill } : null);
+      const changes = Object.assign({}, guess, rep, text !== it.text ? { text } : null, to ? { section: to, pos: now() } : null, appt !== was ? { appt: appt || null } : null, skill !== (it.skill || null) ? { skill } : null);
       if (!Object.keys(changes).length) return;
       upsert(Object.assign({}, it, changes));
       if (text === it.text && !to) return; // a guess or a flag only: nothing to say
       const undo = () => {
         const cur = items[id];
         if (cur) {
-          upsert(Object.assign({}, cur, { text: typed, appt: was || null, skill: it.skill || null }, to ? { section: from, pos: it.pos } : null));
+          upsert(Object.assign({}, cur, { text: typed, appt: was || null, skill: it.skill || null }, rep ? { repeat: null } : null, to ? { section: from, pos: it.pos } : null));
           if (to || appt !== was) teach('undone', placed(text, section, appt, skill), placed(typed, from, was, it.skill), typed);
           else teach('undone', text, typed);
         }

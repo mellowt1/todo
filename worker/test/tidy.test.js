@@ -2,7 +2,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
-import { _setTidier, toText, toPlace } from '../src/tidy.js';
+import { _setTidier, toText, toPlace, repeatOf, withRepeat } from '../src/tidy.js';
 
 const CODE = 'abcdefgh23456789';
 const memKV = () => { const m = new Map(); return { m, async get(k) { return m.has(k) ? JSON.parse(m.get(k)) : null; }, async put(k, v) { m.set(k, v); } }; };
@@ -113,4 +113,42 @@ test('the route: the skill a task trains comes back; none or anything unknown is
   assert.equal((await (await post(e, `tidy/${CODE}`, { text: 'call capital one' })).json()).skill, null);
   ask('woodcutting');
   assert.equal((await (await post(e, `tidy/${CODE}`, { text: 'call capital one' })).json()).skill, null, 'Woodcutting is every task, not a pick');
+});
+
+test('repeatOf: "every …" words in English, Dutch and Spanish; a bare "weekly" is a name', () => {
+  assert.equal(repeatOf('Uren sturen werk every week'), 'week');
+  assert.equal(repeatOf('bel oma elke week'), 'week');
+  assert.equal(repeatOf('regar las plantas cada semana'), 'week');
+  assert.equal(repeatOf('Clean the fridge every 2 weeks'), '2weeks');
+  assert.equal(repeatOf('stofzuigen om de week'), '2weeks');
+  assert.equal(repeatOf('Pay rent every month'), 'month');
+  assert.equal(repeatOf('huur betalen iedere maand'), 'month');
+  assert.equal(repeatOf('Send weekly report'), null);
+  assert.equal(repeatOf('Plan next week'), null);
+});
+
+test('withRepeat: the words leave the text, a kept date and time stay, no date gets today', () => {
+  assert.equal(withRepeat('Uren sturen werk every week', '2026-11-08'), 'Uren sturen werk · 2026-11-08');
+  assert.equal(withRepeat('Every month pay rent · 2026-12-01 09:00', '2026-11-08'), 'Pay rent · 2026-12-01 09:00');
+  assert.equal(withRepeat('Call mum, elke week', '2026-11-08'), 'Call mum · 2026-11-08');
+  assert.equal(withRepeat('every week', '2026-11-08'), null, 'nothing left: no repeat');
+});
+
+test('the route: a line that is only "every week" gets no repeat', async () => {
+  const e = env();
+  _setTidier(async () => ({ out: { name: 'Every week', due: null, time: null, kind: 'task', energy: 'normal', place: 'keep', appointment: false, skill: 'none' }, usage: null }));
+  const r = await (await post(e, `tidy/${CODE}`, { text: 'every week' })).json();
+  assert.equal('repeat' in r, false);
+  assert.equal(r.text, 'Every week');
+});
+
+test('the route: "every week" comes back as a repeat with a date; no words, no repeat field', async () => {
+  const e = env();
+  _setTidier(async () => ({ out: { name: 'Uren sturen werk every week', due: null, time: null, kind: 'task', energy: 'drained', place: 'keep', appointment: false, skill: 'none' }, usage: null }));
+  const r = await (await post(e, `tidy/${CODE}`, { text: 'Uren sturen werk every week' })).json();
+  assert.equal(r.repeat, 'week');
+  assert.match(r.text, /^Uren sturen werk · \d{4}-\d{2}-\d{2}$/);
+  assert.equal(r.changed, true);
+  _setTidier(async () => ({ out: { name: 'Send weekly report', due: null, time: null, kind: 'task', energy: 'normal', place: 'keep', appointment: false }, usage: null }));
+  assert.equal('repeat' in (await (await post(e, `tidy/${CODE}`, { text: 'send weekly report' })).json()), false);
 });
