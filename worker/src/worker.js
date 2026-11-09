@@ -85,6 +85,8 @@
  * Talk points (src/talk.js; the to-do's code): Feeling sends the entries since the last session when
  * Paul taps "Write with Claude"; short sections to read at the psychologist come back. Stores no text.
  *   POST /api/talk/:code   <- { range, entries: [{ day, time, mood, text, bring }] }  -> { sections }
+ *   GET  /api/talk/:code/next  -> { next: { title, kind, date, time } | null, past }  the next psychologist
+ *        or psychiatrist visit in the list (names from the SESSION_NAMES secret), for Feeling's Today card
  *
  * Dates (src/due.js): every cron run moves open tasks whose date (" · YYYY-MM-DD" in the text) has
  * come from Soon or Someday into Today, once per date.

@@ -14,6 +14,9 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { CODE, safeEqual } from './todo.js';
 import { anthropic, bumpUsage, dayOf } from './intake.js';
+import { DUE_END } from './tidy.js';
+import { maskSecrets } from './mask.js';
+import { local, addDays } from './morning.js';
 
 export const TALK_MODEL = 'claude-opus-5-5';
 const MAX_BODY = 160000;
@@ -99,9 +102,87 @@ export function cleanSections(out) {
   return secs;
 }
 
+/* Next session (Paul, 2026-11-09: Feeling "will be able to see when my next appointment is with my
+ * psychologist" and has the flagged things ready for it).
+ *
+ *   GET /api/talk/:code/next  -> { next: { title, kind, date, time } | null, past: ['YYYY-MM-DD'], at }
+ *
+ * A session is a dated to-do (" · YYYY-MM-DD[ HH:MM]", src/tidy.js) whose name holds a name from the
+ * SESSION_NAMES secret ("Name=kind,Name=kind"; the names stay out of this public repo) or a word
+ * like psychologist, psycholoog, psychiater or therapist. `next` is the first open one that has not
+ * ended (start + SESSION_OPEN_MIN); `past` holds the days of the ones that have, so Feeling marks
+ * them as sessions by itself. Nothing from Feeling is sent or kept. */
+export const SESSION_OPEN_MIN = 90;
+export const SESSION_PAST_DAYS = 120;
+const SESSION_WORDS = [
+  [/\bpsycholo/i, 'psychologist'],
+  [/\bpsychiat/i, 'psychiatrist'],
+  [/\btherap/i, 'therapist'],
+  [/\bggz\b/i, 'session'],
+];
+const SESSION_KINDS = new Set(['psychologist', 'psychiatrist', 'therapist', 'session']);
+const SESSION_INTAKE = /\s*\[intake\]$/;
+
+/* Pure: "Name=psychologist, Other=psychiatrist" -> [[RegExp, kind]]. Unknown kinds become 'session'. */
+export function sessionNames(raw) {
+  const out = [];
+  for (const part of String(raw || '').split(',')) {
+    const [name, kind] = part.split('=').map((s) => (s || '').trim());
+    if (!/^[\p{L}][\p{L}' -]{1,40}$/u.test(name || '')) continue;
+    const k = (kind || '').toLowerCase();
+    out.push([new RegExp('(^|[^\\p{L}])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^\\p{L}])', 'iu'), SESSION_KINDS.has(k) ? k : 'session']);
+  }
+  return out;
+}
+
+/* Pure: a task's name -> its kind of session, or null. Names from the secret win over the words. */
+export function sessionKind(title, names = []) {
+  for (const [re, kind] of [...names, ...SESSION_WORDS]) if (re.test(title)) return kind;
+  return null;
+}
+
+/* Pure: the list's items + now in Amsterdam ({ date, minutes }) -> { next, past }. */
+export function sessionsFrom(items, names, now) {
+  const from = addDays(now.date, -SESSION_PAST_DAYS);
+  const ended = (date, time) => {
+    if (date !== now.date) return date < now.date;
+    if (!time) return false; // a whole-day one stays on until the day is over
+    const [h, m] = time.split(':').map(Number);
+    return now.minutes >= h * 60 + m + SESSION_OPEN_MIN;
+  };
+  let next = null;
+  const past = new Set();
+  for (const it of items || []) {
+    if (!it || typeof it.text !== 'string') continue;
+    const text = it.text.replace(SESSION_INTAKE, '');
+    const m = text.match(DUE_END);
+    if (!m || Number.isNaN(Date.parse(m[1]))) continue;
+    const title = maskSecrets(text.slice(0, m.index)).trim().slice(0, 60);
+    const kind = title && sessionKind(title, names);
+    if (!kind) continue;
+    const date = m[1], time = m[2] ? m[2] + ':' + m[3] : null;
+    if (ended(date, time)) { if (date >= from) past.add(date); continue; }
+    if (it.done) continue;
+    if (!next || date + (time || '24') < next.date + (next.time || '24')) next = { title, kind, date, time };
+  }
+  return { next, past: [...past].sort() };
+}
+
+async function nextSession(env, now) {
+  const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName('todo:' + env.TODO_CODE));
+  const d = await (await stub.fetch('https://list/read')).json();
+  if (!Array.isArray(d.items)) throw new Error('no items');
+  return { ...sessionsFrom(d.items, sessionNames(env.SESSION_NAMES), local(now)), at: now };
+}
+
 export async function handleTalk(request, env, rest, json, now = Date.now()) {
-  if (rest.length !== 1 || !CODE.test(rest[0])) return json({ error: 'not found' }, request, 404);
+  if (rest.length < 1 || rest.length > 2 || !CODE.test(rest[0])) return json({ error: 'not found' }, request, 404);
   if (!env.TODO_CODE || !safeEqual(rest[0], env.TODO_CODE)) return json({ error: 'unknown code' }, request, 404);
+  if (rest.length === 2) {
+    if (rest[1] !== 'next') return json({ error: 'not found' }, request, 404);
+    if (request.method !== 'GET') return json({ error: 'method' }, request, 405);
+    try { return json(await nextSession(env, now), request); } catch (e) { return json({ error: 'list unavailable' }, request, 502); }
+  }
   if (request.method !== 'POST') return json({ error: 'method' }, request, 405);
   if (!env.ANTHROPIC_API_KEY) return json({ error: 'not configured' }, request, 503);
   const raw = await request.text();
