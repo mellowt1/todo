@@ -57,6 +57,14 @@ test("today's workout ticks the task at the workout's end; none is made after it
   assert.deepEqual(gymOps(empty(), lift({ workouts: [w] }), NOW), []);
 });
 
+test('an extra (home abs) on a gym day ticks nothing and still lets the task be made', () => {
+  const start = NOW - 2 * H;
+  const w = { id: 'w2', name: 'Home abs', start, end: start + H / 4, extra: true };
+  const doc = { items: { gym20261105: { id: 'gym20261105', text: gymText('Back', TODAY), section: 'today', done: false, doneAt: null, updatedAt: NOW - 3 * H, pos: NOW - 3 * H } }, tombs: {} };
+  assert.deepEqual(gymOps(doc, lift({ workouts: [w] }), NOW), []);
+  assert.equal(gymOps(empty(), lift({ workouts: [w] }), NOW)[0].item.id, 'gym20261105');
+});
+
 test('a missed gym day: its open task goes; a done one stays', () => {
   const old = (done) => ({ id: 'gym20261102', text: gymText('Chest', '2026-11-02'), section: 'today', done, doneAt: done ? NOW - 72 * H : null, updatedAt: NOW - 72 * H, pos: NOW - 72 * H });
   const ops = gymOps({ items: { gym20261102: old(false) }, tombs: {} }, lift({ days: Array(7).fill(false) }), NOW);

@@ -4,11 +4,15 @@
  * exercises would be good").
  *
  *   POST /api/lift/:code/ask   <- { question, library: [name], recent: [{ name, muscle, sets }], routines: [{ name, items: [name] }] }
- *                              -> { answer, picks: [{ name, why }] }
+ *                                 more: [name] }
+ *                              -> { answer, picks: [{ name, why }], routine?: { name, items: [{ name, muscle, equip, sets, lo, hi | seconds }] } }
  *
- * library = the exercises in his own list (built-ins and his own); recent = what he did in the last
- * four weeks with the work-set count; routines = his rotation. Nothing is stored here except the
- * token count (KV lift-ask:usage:YYYY-MM). */
+ * library = the exercises in his own list (built-ins and his own); more = free-exercise-db names that
+ * need no gym (bodyweight, core), so a home question can still name real exercises; recent = what he
+ * did in the last four weeks with the work-set count; routines = his rotation. When he asks for a
+ * routine ("ab routine at home"), the answer also carries one, which Lift saves as an extra: it never
+ * joins the rotation (Paul, 2026-11-13). Nothing is stored here except the token count
+ * (KV lift-ask:usage:YYYY-MM). */
 
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
@@ -17,7 +21,10 @@ import { anthropic, bumpUsage, dayOf } from './intake.js';
 import { keptFor, lessonsText } from './lessons.js';
 
 export const ASK_MODEL = 'claude-opus-5-5';
-const MAX_BODY = 60000;
+const MAX_BODY = 80000;
+// Lift's own lists (app/exercises.js MUSCLES, EQUIPMENT): an exercise Lift does not have yet is made with these.
+export const MUSCLES = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Core', 'Cardio', 'Other'];
+export const EQUIPMENT = ['Barbell', 'Dumbbell', 'Machine', 'Cable', 'Bodyweight', 'Kettlebell', 'Other'];
 
 const Ask = z.object({
   answer: z.string().max(700).describe('two to four short sentences, plain words'),
@@ -25,15 +32,29 @@ const Ask = z.object({
     name: z.string().max(80).describe('the exercise name, exactly as in the library when it is there'),
     why: z.string().max(160).describe('one short line: why this one, sets x reps to start with'),
   })).max(6),
+  routine: z.object({
+    name: z.string().max(40).describe('short, like "Home abs"'),
+    items: z.array(z.object({
+      name: z.string().max(80).describe('exactly as in his library or the more list when it is there'),
+      muscle: z.enum(MUSCLES),
+      equip: z.enum(EQUIPMENT),
+      sets: z.number().int(),
+      lo: z.number().int().nullable().describe('fewest reps; null for a hold'),
+      hi: z.number().int().nullable().describe('most reps; same as lo for a fixed number; null for a hold'),
+      seconds: z.number().int().nullable().describe('hold or work time in seconds, like a plank; null for reps'),
+    })).max(10),
+  }).nullable().describe('only when he asks for a routine, a workout or a session; otherwise null'),
 });
 
 /* Frozen per deploy, cached. The question and Paul's data go in the user message. */
 export const SYSTEM = [
-  'You help Paul pick gym exercises in his workout app, Lift. He trains in a regular gym with barbells, dumbbells, cables and machines.',
-  'Answer his question in two to four short sentences, in plain words, in the language he asked in. Then give two to six exercises as picks, best first.',
-  'For each pick, use the exercise name exactly as written in his library when a fitting one is there. Only when none fits, use the common gym name for it (for example "Nordic Hamstring Curl").',
-  'Each pick gets one short line: why it fits, and a starting point such as "3 x 8-12".',
-  'Use what he did in the last four weeks and his routines: prefer exercises that fill a gap, and do not suggest one he already does a lot unless he asks about it.',
+  'You help Paul pick exercises in his workout app, Lift. He usually trains in a gym with barbells, dumbbells, cables and machines.',
+  'Where he trains is his call: when he says home, travel, a hotel, no equipment or only some kit, keep to what he says he has and never assume gym equipment.',
+  'Answer his question in two to four short sentences, in plain words, in the language he asked in.',
+  'When he asks for a routine, a workout or a session, fill routine: a short name, four to eight exercises in the order to do them, sets, and a rep range (lo and hi) or seconds for holds. Leave picks empty then.',
+  'Otherwise routine is null and you give two to six exercises as picks, best first. Each pick gets one short line: why it fits, and a starting point such as "3 x 8-12".',
+  'Use the exercise name exactly as written in his library, or in the more list, when a fitting one is there. Only when none fits, use the common name for it (for example "Hollow Body Hold"), with its muscle and equipment.',
+  'Use what he did in the last four weeks and his routines: when he asks what to add, prefer exercises that fill a gap, and do not suggest one he already does a lot unless he asks about it.',
   'If he mentions pain or an injury, keep to gentle, well-known options and say in one sentence that a physio should look at pain that stays. No diagnosis.',
   'No hype, no emoji.',
 ].join('\n');
@@ -48,10 +69,40 @@ export function cleanAsk(b) {
   const recent = (Array.isArray(b.recent) ? b.recent : []).slice(0, 80).map((r) => ({
     name: str(r && r.name, 80), muscle: str(r && r.muscle, 20), sets: Math.max(0, Math.min(999, Math.round(Number(r && r.sets) || 0))),
   })).filter((r) => r.name);
+  const lib = new Set(library.map((n) => n.toLowerCase()));
+  const more = (Array.isArray(b.more) ? b.more : []).map((n) => str(n, 80))
+    .filter((n) => n && !lib.has(n.toLowerCase()) && lib.add(n.toLowerCase())).slice(0, 300);
   const routines = (Array.isArray(b.routines) ? b.routines : []).slice(0, 12).map((r) => ({
     name: str(r && r.name, 60), items: (Array.isArray(r && r.items) ? r.items : []).slice(0, 20).map((n) => str(n, 80)).filter(Boolean),
   })).filter((r) => r.name);
-  return { question, library, recent, routines };
+  return { question, library, more, recent, routines };
+}
+
+const int = (v, lo, hi) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : null);
+
+/* Pure: Claude's routine -> one Lift can save, or null. Each item has reps (lo..hi) or seconds. */
+export function cleanRoutine(r) {
+  if (!r || typeof r !== 'object') return null;
+  const seen = new Set();
+  const items = [];
+  for (const it of Array.isArray(r.items) ? r.items : []) {
+    const name = str(it && it.name, 80);
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    const seconds = int(it.seconds, 5, 600);
+    let lo = int(it.lo, 1, 100);
+    let hi = int(it.hi, 1, 100);
+    if (lo == null) lo = hi;
+    if (hi == null || hi < lo) hi = lo;
+    items.push({
+      name,
+      muscle: MUSCLES.includes(it.muscle) ? it.muscle : 'Other',
+      equip: EQUIPMENT.includes(it.equip) ? it.equip : 'Other',
+      sets: int(it.sets, 1, 8) || 3,
+      ...(lo == null && seconds ? { seconds } : { lo: lo ?? 10, hi: hi ?? 10 }),
+    });
+  }
+  return items.length ? { name: str(r.name, 40) || 'Routine', items: items.slice(0, 10) } : null;
 }
 
 /* Pure: Claude's answer -> what the phone shows. Empty picks go, names are not repeated. */
@@ -65,11 +116,12 @@ export function cleanAnswer(out) {
     seen.add(name.toLowerCase());
     picks.push({ name, why: str(p && p.why, 160) });
   }
-  return { answer, picks: picks.slice(0, 6) };
+  const routine = cleanRoutine(out && out.routine);
+  return { answer, picks: picks.slice(0, 6), ...(routine ? { routine } : {}) };
 }
 
 export async function askLift(env, input) {
-  const { question, library, recent, routines } = input;
+  const { question, library, more = [], recent, routines } = input;
   const rules = lessonsText(await keptFor(env, 'lift')); // Paul's kept rules, src/lessons.js
   const system = [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }];
   if (rules) system.push({ type: 'text', text: rules });
@@ -80,6 +132,7 @@ export async function askLift(env, input) {
     messages: [{
       role: 'user',
       content: `His library: ${library.join('; ')}\n`
+        + (more.length ? `More (no gym needed): ${more.join('; ')}\n` : '')
         + `Last four weeks (work sets): ${recent.length ? recent.map((r) => `${r.name} (${r.muscle}) ${r.sets}`).join('; ') : 'nothing logged'}\n`
         + `Routines, in rotation order: ${routines.length ? routines.map((r) => `${r.name}: ${r.items.join(', ')}`).join(' | ') : 'none yet'}\n\n`
         + `His question: ${question}`,
@@ -118,6 +171,6 @@ export async function handleLiftAsk(request, env, json, now = Date.now()) {
   }
   if (got.usage) await bumpUsage(env, dayOf(now).slice(0, 7), got.usage, 'lift-ask').catch(() => {});
   const out = cleanAnswer(got.out);
-  if (!out.answer && !out.picks.length) return json({ error: 'no answer' }, request, 502);
+  if (!out.answer && !out.picks.length && !out.routine) return json({ error: 'no answer' }, request, 502);
   return json(out, request);
 }

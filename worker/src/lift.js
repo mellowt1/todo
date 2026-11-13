@@ -58,6 +58,8 @@ export function cleanSummary(s) {
     volume: Math.round(num(w && w.volume)),
     sets: Math.round(num(w && w.sets)),
     prs: Math.round(num(w && w.prs)),
+    // An extra (a routine outside the rotation, like home abs) is not a gym visit: it ticks no gym day.
+    ...(w && w.extra === true ? { extra: true } : {}),
   })).filter((w) => w.id && w.start > Date.parse('2000-01-01')).sort((a, b) => b.start - a.start);
   return {
     next,
@@ -120,7 +122,7 @@ export function planDay(s, now = Date.now()) {
   const today = local(now).date;
   if (s.nextDay && s.nextDay >= today) return s.nextDay;
   if (!s.days.some(Boolean)) return null;
-  const doneToday = s.workouts.some((w) => local(w.start).date === today);
+  const doneToday = s.workouts.some((w) => !w.extra && local(w.start).date === today);
   for (let i = doneToday ? 1 : 0; i < 8; i++) {
     const d = addDays(today, i);
     if (s.days[(new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7]) return d;

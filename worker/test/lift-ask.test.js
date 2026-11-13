@@ -2,7 +2,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
-import { _setAsker, cleanAsk, cleanAnswer } from '../src/lift-ask.js';
+import { _setAsker, cleanAsk, cleanAnswer, cleanRoutine } from '../src/lift-ask.js';
 
 const CODE = 'abcdefgh23456789';
 const memKV = () => { const m = new Map(); return { m, async get(k, t) { return m.has(k) ? (t === 'json' ? JSON.parse(m.get(k)) : m.get(k)) : null; }, async put(k, v) { m.set(k, v); } }; };
@@ -18,10 +18,12 @@ test('cleanAsk: question required, lists trimmed and capped', () => {
     library: ['Lying Leg Curl (Machine)', 'Lying Leg Curl (Machine)', '', 5],
     recent: [{ name: 'Bench Press (Barbell)', muscle: 'Chest', sets: 12.4 }, { name: '' }],
     routines: [{ name: 'Back', items: ['Pull-up', ''] }, { items: [] }],
+    more: ['Dead Bug', 'dead bug', 'Lying Leg Curl (Machine)', ''],
   });
   assert.deepEqual(out, {
     question: 'good hamstring moves?',
     library: ['Lying Leg Curl (Machine)'],
+    more: ['Dead Bug'],
     recent: [{ name: 'Bench Press (Barbell)', muscle: 'Chest', sets: 12 }],
     routines: [{ name: 'Back', items: ['Pull-up'] }],
   });
@@ -30,6 +32,30 @@ test('cleanAsk: question required, lists trimmed and capped', () => {
 test('cleanAnswer: empty and repeated picks go', () => {
   const out = cleanAnswer({ answer: ' Hit them twice a week. ', picks: [{ name: 'Romanian Deadlift (Barbell)', why: '3 x 8' }, { name: 'romanian deadlift (barbell)', why: 'again' }, { name: ' ', why: 'x' }] });
   assert.deepEqual(out, { answer: 'Hit them twice a week.', picks: [{ name: 'Romanian Deadlift (Barbell)', why: '3 x 8' }] });
+});
+
+test('cleanRoutine: reps or seconds, known muscles, no repeats; nothing usable is null', () => {
+  assert.deepEqual(cleanRoutine({ name: ' Home abs ', items: [
+    { name: 'Dead Bug', muscle: 'Core', equip: 'Bodyweight', sets: 3, lo: 10, hi: 12, seconds: null },
+    { name: 'Plank', muscle: 'Core', equip: 'Bodyweight', sets: 3, lo: null, hi: null, seconds: 40 },
+    { name: 'dead bug', muscle: 'Core', equip: 'Bodyweight', sets: 3, lo: 8, hi: 8, seconds: null },
+    { name: 'Hollow Body Hold', muscle: 'Abs', equip: 'Mat', sets: 20, lo: 15, hi: 9, seconds: null },
+    { name: ' ', muscle: 'Core', equip: 'Bodyweight', sets: 3, lo: 1, hi: 1, seconds: null },
+  ] }), { name: 'Home abs', items: [
+    { name: 'Dead Bug', muscle: 'Core', equip: 'Bodyweight', sets: 3, lo: 10, hi: 12 },
+    { name: 'Plank', muscle: 'Core', equip: 'Bodyweight', sets: 3, seconds: 40 },
+    { name: 'Hollow Body Hold', muscle: 'Other', equip: 'Other', sets: 8, lo: 15, hi: 15 },
+  ] });
+  assert.equal(cleanRoutine(null), null);
+  assert.equal(cleanRoutine({ name: 'x', items: [] }), null);
+});
+
+test('a routine answer comes through with no picks', async () => {
+  const e = env();
+  _setAsker(async () => ({ out: { answer: 'Twenty minutes, no kit.', picks: [], routine: { name: 'Home abs', items: [{ name: 'Plank', muscle: 'Core', equip: 'Bodyweight', sets: 3, lo: null, hi: null, seconds: 45 }] } }, usage: null }));
+  const res = await post(e, `lift/${CODE}/ask`, { question: 'ab routine at home' });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { answer: 'Twenty minutes, no kit.', picks: [], routine: { name: 'Home abs', items: [{ name: 'Plank', muscle: 'Core', equip: 'Bodyweight', sets: 3, seconds: 45 }] } });
 });
 
 test('POST /api/lift/:code/ask answers, counts tokens, refuses bad input', async () => {

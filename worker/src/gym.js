@@ -27,6 +27,7 @@ export function gymOps(doc, s, now) {
   const at = (it) => Math.max(now, (it.updatedAt || 0) + 1);
   const worked = new Map(); // date -> the end of that day's last workout
   for (const w of s.workouts) {
+    if (w.extra) continue; // home abs on a gym day leaves the gym task open
     const d = local(w.start).date;
     worked.set(d, Math.max(worked.get(d) || 0, w.end || w.start));
   }
